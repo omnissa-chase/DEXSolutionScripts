@@ -1,4 +1,5 @@
-**Smart Reboot 1.0.0.0**
+<h1>**Smart Reboot 1.0.0.0**</h1>
+
 This option provides the most flexibility with the least amount of effort, and works with all but Hub Registered mode.  This option provides a simple .zip application package to be pushed through Workspace ONE's applicaiton management capabilities.   Using this option provides administrators with native capabilities to prompt the user and configure deferral rules.
 
 **Instructions**
