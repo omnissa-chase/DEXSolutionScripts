@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Removes TroubleshootWizard from the device.
 
@@ -20,15 +20,17 @@ function Write-Log {
     $ts   = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $line = "[$ts] [$Level] $Message"
     Add-Content -Path $logFile -Value $line -Encoding UTF8
-    $color = @{ INFO='White'; SUCCESS='Green'; WARNING='Yellow'; ERROR='Red' }[$Level]
-    Write-Host $line -ForegroundColor ($color ?? 'White')
+    $colorMap = @{ INFO='White'; SUCCESS='Green'; WARNING='Yellow'; ERROR='Red' }
+    $color = $colorMap[$Level]
+    if (-not $color) { $color = 'White' }
+    Write-Host $line -ForegroundColor $color
 }
 
 Write-Log "====== TroubleshootWizard Uninstaller ======"
 Write-Log "Target: $Path"
 
 if (-not (Test-Path $Path)) {
-    Write-Log "Folder not found — nothing to remove." 'WARNING'
+    Write-Log "Folder not found - nothing to remove." 'WARNING'
     exit 0
 }
 
@@ -40,5 +42,21 @@ try {
     exit 1
 }
 
+# ---------------------------------------------
+#  REMOVE REGISTRY KEY
+# ---------------------------------------------
+$RegKeyPath = 'HKLM:\SOFTWARE\AirWatch\Extensions\TroubleshootWizard'
+try {
+    If (Test-Path $RegKeyPath) {
+        Remove-Item -Path $RegKeyPath -Recurse -Force
+        Write-Log "Registry key removed: $RegKeyPath" 'SUCCESS'
+    } else {
+        Write-Log "Registry key not found - skipping." 'WARNING'
+    }
+} catch {
+    Write-Log "Failed to remove registry key: $_" 'WARNING'
+}
+
 Write-Log "Uninstall complete." 'SUCCESS'
 exit 0
+

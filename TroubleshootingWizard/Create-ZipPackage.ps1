@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Builds a Product Provisioning deployment package for TroubleshootWizard.
 
@@ -8,12 +8,13 @@
     ProductProvisioning/ folder ready to upload to Workspace ONE.
 
     Layout of ProductProvisioning/:
-        Install-TroubleshootWizard.ps1   ← install script (the PP "manifest" script)
-        TroubleshootWizard.zip           ← all 11 payload files
+        Install-TroubleshootWizard.ps1   - install script (the PP manifest script)
+        TroubleshootWizard.zip           - all 11 payload files
 
     WS1 Product Provisioning config:
-        Install Command : powershell.exe -ExecutionPolicy Bypass -File Install-TroubleshootWizard.ps1
-        Files to upload : Install-TroubleshootWizard.ps1 + TroubleshootWizard.zip
+        Install Command  : powershell.exe -ExecutionPolicy Bypass -File Install-TroubleshootWizard.ps1
+        Detection Rule   : Registry value exists
+                           HKLM\SOFTWARE\AirWatch\Extensions\TroubleshootWizard -> Version
 
 .PARAMETER PublishedDir
     Path to the Published/ folder containing all payload files and the installer.
@@ -51,11 +52,11 @@ $payloadFiles = @(
 $installerName = 'Install-TroubleshootWizard.ps1'
 $zipName       = 'TroubleshootWizard.zip'
 
-Write-Host "`n=== TroubleshootWizard — Create Zip Package ===" -ForegroundColor Cyan
+Write-Host "`n=== TroubleshootWizard - Create Zip Package ===" -ForegroundColor Cyan
 Write-Host "Source   : $PublishedDir"
 Write-Host "Output   : $OutputDir"
 
-# ── Validate source ────────────────────────────────────────────────────
+# -- Validate source -------------------------------------------------------
 $missing = @()
 foreach ($f in ($payloadFiles + $installerName)) {
     if (-not (Test-Path (Join-Path $PublishedDir $f))) { $missing += $f }
@@ -66,11 +67,11 @@ if ($missing) {
     exit 1
 }
 
-# ── Prepare output folder ──────────────────────────────────────────────
+# -- Prepare output folder -------------------------------------------------
 if (Test-Path $OutputDir) { Remove-Item $OutputDir -Recurse -Force }
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 
-# ── Build payload zip ──────────────────────────────────────────────────
+# -- Build payload zip -----------------------------------------------------
 $zipPath    = Join-Path $OutputDir $zipName
 $stagingDir = Join-Path $env:TEMP 'TroubleshootWizard_Staging'
 if (Test-Path $stagingDir) { Remove-Item $stagingDir -Recurse -Force }
@@ -87,24 +88,25 @@ Remove-Item $stagingDir -Recurse -Force
 $zipSize = [math]::Round((Get-Item $zipPath).Length / 1KB, 1)
 Write-Host "`n  Created : $zipName  ($zipSize KB)" -ForegroundColor Green
 
-# ── Copy installer ─────────────────────────────────────────────────────
+# -- Copy installer --------------------------------------------------------
 Copy-Item (Join-Path $PublishedDir $installerName) (Join-Path $OutputDir $installerName)
 Write-Host "  Copied  : $installerName" -ForegroundColor Green
 
-# ── Summary ───────────────────────────────────────────────────────────
+# -- Summary ---------------------------------------------------------------
 Write-Host "`n=== Package ready: $OutputDir ===" -ForegroundColor Cyan
 Write-Host @"
 
 Workspace ONE Product Provisioning setup:
   Upload both files:
-    • Install-TroubleshootWizard.ps1
-    • TroubleshootWizard.zip
+    - Install-TroubleshootWizard.ps1
+    - TroubleshootWizard.zip
 
   Install Command:
     powershell.exe -ExecutionPolicy Bypass -File Install-TroubleshootWizard.ps1
 
-  Detection Rule (file exists):
-    C:\ProgramData\AirWatch\Extensions\TroubleshootWizard\Troubleshooter-Modular.ps1
+  Detection Rule (registry value exists):
+    Key:   HKLM\SOFTWARE\AirWatch\Extensions\TroubleshootWizard
+    Value: Version
 "@
 
 exit 0

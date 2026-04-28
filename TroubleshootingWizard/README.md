@@ -43,9 +43,10 @@ All payload files are delivered alongside the installer via SFD. The installer d
    ```
    powershell.exe -ExecutionPolicy Bypass -File Uninstall-TroubleshootWizard.ps1
    ```
-4. Set a detection rule (file exists):
+4. Set a detection rule (registry value exists):
    ```
-   C:\ProgramData\AirWatch\Extensions\TroubleshootWizard\Troubleshooter-Modular.ps1
+   Key:   HKLM\SOFTWARE\AirWatch\Extensions\TroubleshootWizard
+   Value: Version
    ```
 
 **How it works:** The installer finds `Troubleshooter-Modular.ps1` next to itself, recognizes SFD mode, and copies all 11 payload files to the destination.
@@ -109,6 +110,14 @@ You can also force a mode explicitly:
 | `2` | Partial failure (some files failed to copy) |
 
 **Log file:** `%TEMP%\TroubleshootWizard_Install.log`
+
+**Registry values written on install:**
+
+| Key path | Value name | Example data |
+|---|---|---|
+| `HKLM:\SOFTWARE\AirWatch\Extensions\TroubleshootWizard` | `Version` | `1.0.0` |
+| `HKLM:\SOFTWARE\AirWatch\Extensions\TroubleshootWizard` | `InstallPath` | `C:\ProgramData\AirWatch\Extensions\TroubleshootWizard` |
+| `HKLM:\SOFTWARE\AirWatch\Extensions\TroubleshootWizard` | `InstallDate` | `2026-04-28` |
 
 ---
 

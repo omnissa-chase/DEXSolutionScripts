@@ -19,7 +19,7 @@
     Auto-detection order:
          1. If TroubleshootWizard.zip is found next to the script → ZIP mode
          2. If Troubleshooter-Modular.ps1 is found next to the script  → SFD mode
-         3. Error — cannot determine mode
+         3. Error - cannot determine mode
 
 .PARAMETER Mode
     Force a specific mode: 'SFD' or 'ZIP'. Defaults to auto-detect.
@@ -53,11 +53,14 @@ param(
     [string] $ZipName     = 'TroubleshootWizard.zip'
 )
 
+$AppVersion  = '1.0.0'
+$RegKeyPath  = 'HKLM:\SOFTWARE\AirWatch\Extensions\TroubleshootWizard'
+
 $ErrorActionPreference = 'Stop'
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  LOGGING
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 $logFile = Join-Path $env:TEMP 'TroubleshootWizard_Install.log'
 
 function Write-Log {
@@ -65,8 +68,10 @@ function Write-Log {
     $ts   = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $line = "[$ts] [$Level] $Message"
     Add-Content -Path $logFile -Value $line -Encoding UTF8
-    $color = @{ INFO='White'; SUCCESS='Green'; WARNING='Yellow'; ERROR='Red' }[$Level]
-    Write-Host $line -ForegroundColor ($color ?? 'White')
+    $colorMap = @{ INFO='White'; SUCCESS='Green'; WARNING='Yellow'; ERROR='Red' }
+    $color = $colorMap[$Level]
+    if (-not $color) { $color = 'White' }
+    Write-Host $line -ForegroundColor $color
 }
 
 Write-Log "====== TroubleshootWizard Installer ======"
@@ -75,9 +80,9 @@ Write-Log "Destination : $Destination"
 Write-Log "Mode param  : $Mode"
 Write-Log "Log file    : $logFile"
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  AUTO-DETECT MODE
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 $zipPath     = Join-Path $PSScriptRoot $ZipName
 $probeScript = Join-Path $PSScriptRoot 'Troubleshooter-Modular.ps1'
 
@@ -94,9 +99,9 @@ if ($Mode -eq 'Auto') {
     }
 }
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  REQUIRED PAYLOAD FILES
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 $requiredFiles = @(
     'Troubleshooter-Modular.ps1',
     'UI-Modern.xaml',
@@ -111,13 +116,13 @@ $requiredFiles = @(
     'WindowsUpdateDiagSteps.json'
 )
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  PREPARE SOURCE FOLDER
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 $sourceDir = $PSScriptRoot
 
 if ($Mode -eq 'ZIP') {
-    Write-Log "ZIP mode — extracting $ZipName..."
+    Write-Log "ZIP mode - extracting $ZipName..."
 
     if (-not (Test-Path $zipPath)) {
         Write-Log "ZIP file not found: $zipPath" 'ERROR'
@@ -147,9 +152,9 @@ if ($Mode -eq 'ZIP') {
     }
 }
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  VALIDATE SOURCE FILES
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 Write-Log "Validating payload files in: $sourceDir"
 $missing = @()
 foreach ($file in $requiredFiles) {
@@ -167,9 +172,9 @@ if ($missing.Count -gt 0) {
     exit 1
 }
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  CREATE DESTINATION & COPY FILES
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 Write-Log "Creating destination folder: $Destination"
 try {
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
@@ -189,23 +194,38 @@ foreach ($file in $requiredFiles) {
         Write-Log "  Copied: $file" 'SUCCESS'
         $copied++
     } catch {
-        Write-Log "  FAILED: $file — $_" 'ERROR'
+        Write-Log "  FAILED: $file - $_" 'ERROR'
         $errored++
     }
 }
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
+#  WRITE REGISTRY VERSION KEY
+# ---------------------------------------------
+try {
+    If (-not (Test-Path $RegKeyPath)) {
+        New-Item $RegKeyPath -Force | Out-Null
+    }
+    Set-ItemProperty -Path $RegKeyPath -Name 'Version'     -Value $AppVersion   -Force
+    Set-ItemProperty -Path $RegKeyPath -Name 'InstallPath' -Value $Destination  -Force
+    Set-ItemProperty -Path $RegKeyPath -Name 'InstallDate' -Value (Get-Date -Format 'yyyy-MM-dd') -Force
+    Write-Log "Registry key written: $RegKeyPath" 'SUCCESS'
+} catch {
+    Write-Log "Failed to write registry key: $_" 'WARNING'
+}
+
+# ---------------------------------------------
 #  CLEANUP TEMP EXTRACT (ZIP MODE ONLY)
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 if ($Mode -eq 'ZIP' -and (Test-Path (Join-Path $env:TEMP 'TroubleshootWizard_Extract'))) {
     Remove-Item (Join-Path $env:TEMP 'TroubleshootWizard_Extract') -Recurse -Force -ErrorAction SilentlyContinue
     Write-Log "Cleaned up temp extract folder."
 }
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 #  RESULT
-# ─────────────────────────────────────────────
-Write-Log "====== Install complete — $copied copied, $errored failed ======"
+# ---------------------------------------------
+Write-Log "====== Install complete - $copied copied, $errored failed ======"
 
 if ($errored -gt 0) {
     Write-Log "Installation completed with errors. Review log: $logFile" 'WARNING'
@@ -214,3 +234,4 @@ if ($errored -gt 0) {
 
 Write-Log "TroubleshootWizard installed successfully to: $Destination" 'SUCCESS'
 exit 0
+
