@@ -65,3 +65,5 @@ foreach ($Profile in $Profiles) {
 }
 
 echo "[$(Get-Date)] Profile cleanup complete."
+
+Exit 0
