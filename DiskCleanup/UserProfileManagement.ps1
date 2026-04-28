@@ -73,3 +73,5 @@ If (!(Test-Path -Path $REGISTRY_RESULTS_PATH)) {
 
 # Output the final status message
 echo $LastStatus
+
+Exit 0
