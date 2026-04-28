@@ -1,0 +1,125 @@
+{
+  "SchemaVersion": "1.0",
+  "Steps": [
+    {
+      "Name": "VPN Client Installed",
+      "Description": "Checks that a supported enterprise VPN client is installed on this device.",
+      "Enabled": true,
+      "Order": 1,
+      "UserFeedback": "Looking for an installed VPN client...",
+      "DetectionScript": "\n        $clients = @(\n            'Cisco AnyConnect Secure Mobility Client',\n            'Cisco Secure Client',\n            'GlobalProtect',\n            'Palo Alto Networks GlobalProtect',\n            'Pulse Secure',\n            'Ivanti Secure Access',\n            'Zscaler',\n            'Microsoft VPN'\n        )\n        $installed = Get-WmiObject -Class Win32_Product -ErrorAction SilentlyContinue |\n            Where-Object { $name = $_.Name; $clients | Where-Object { $name -like \"*$_*\" } }\n        if (-not $installed) {\n            $installed = Get-ItemProperty 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',\n                                         'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' -ErrorAction SilentlyContinue |\n                Where-Object { $dn = $_.DisplayName; $clients | Where-Object { $dn -like \"*$_*\" } }\n        }\n        if ($installed) {\n            $name = if ($installed -is [array]) { $installed[0].DisplayName } else { $installed.DisplayName }\n            return @{ Status = 'Passed'; Message = \"VPN client found: $name\" }\n        }\n        return @{ Status = 'Failed'; Message = 'No supported VPN client detected' }\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:appsfeatures'",
+      "ResolutionText": {
+        "Failed": "1. Contact IT to request VPN client installation via the software deployment portal\n2. For AnyConnect/Secure Client: download from the corporate self-service portal\n3. For GlobalProtect: obtain the installer from IT or the company intranet\n4. Ensure you are not blocking installation via a third-party security tool"
+      },
+      "TestResultText": {
+        "Passed": "A supported enterprise VPN client is installed.",
+        "Failed": "No VPN client was detected. You will not be able to connect to corporate resources remotely.",
+        "Warning": "VPN client presence is uncertain. Check Apps & Features manually."
+      }
+    },
+    {
+      "Name": "VPN Service Running",
+      "Description": "Confirms the underlying VPN service (e.g., AnyConnect, GlobalProtect) is started.",
+      "Enabled": true,
+      "Order": 2,
+      "UserFeedback": "Checking VPN service state...",
+      "DetectionScript": "\n        $vpnServices = @('vpnagent','csc_vpnagent','pangps','PanGPA','ZSATunnel','IVpnSvc','PulseSecure')\n        foreach ($svcName in $vpnServices) {\n            $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue\n            if ($svc) {\n                if ($svc.Status -eq 'Running') { return @{ Status = 'Passed'; Message = \"$($svc.DisplayName) is running\" } }\n                return @{ Status = 'Failed'; Message = \"$($svc.DisplayName) is $($svc.Status)\" }\n            }\n        }\n        return @{ Status = 'Warning'; Message = 'No known VPN service found' }\n      ",
+      "ResolutionScript": "$vpnServices = @('vpnagent','csc_vpnagent','pangps','PanGPA','ZSATunnel','IVpnSvc','PulseSecure'); foreach ($s in $vpnServices) { $svc = Get-Service $s -EA SilentlyContinue; if ($svc -and $svc.Status -ne 'Running') { Start-Service $s -EA SilentlyContinue } }",
+      "ResolutionText": {
+        "Failed": "1. Press Win+R, type 'services.msc'\n2. Locate your VPN client service (e.g., Cisco AnyConnect, GlobalProtect)\n3. Right-click and select Start\n4. If it won't start, try reinstalling the VPN client\n5. Reboot and try again — some VPN services require a clean system state",
+        "Warning": "VPN service could not be identified. Ensure your VPN client is installed and configured correctly."
+      },
+      "TestResultText": {
+        "Passed": "VPN client service is running and ready.",
+        "Failed": "VPN service is stopped. The VPN client cannot establish a tunnel.",
+        "Warning": "No recognized VPN service was found. Verify the VPN client is installed."
+      }
+    },
+    {
+      "Name": "Active VPN Tunnel",
+      "Description": "Checks whether a VPN tunnel is currently established.",
+      "Enabled": true,
+      "Order": 3,
+      "UserFeedback": "Checking for an active VPN tunnel...",
+      "DetectionScript": "\n        $tunnelAdapters = Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = 1' -ErrorAction SilentlyContinue |\n            Where-Object { $_.Description -match 'VPN|AnyConnect|GlobalProtect|Pulse|Zscaler|Tunnel|TAP|TUN' }\n        if ($tunnelAdapters) {\n            $ips = ($tunnelAdapters | Select-Object -ExpandProperty IPAddress | Where-Object { $_ -match '\\.' }) -join ', '\n            return @{ Status = 'Passed'; Message = \"VPN tunnel active ($ips)\" }\n        }\n        $vpnRoutes = Get-NetRoute -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceAlias -match 'VPN|AnyConnect|GlobalProtect|Pulse|Tunnel' }\n        if ($vpnRoutes) { return @{ Status = 'Passed'; Message = 'VPN routes detected' } }\n        return @{ Status = 'Warning'; Message = 'No active VPN tunnel detected' }\n      ",
+      "ResolutionScript": "$apps = @('vpnui','PANGPA','ZSAClient'); foreach ($a in $apps) { $p = Get-Command $a -EA SilentlyContinue; if ($p) { Start-Process $p.Source; break } }",
+      "ResolutionText": {
+        "Warning": "1. Open your VPN client application\n2. Select the corporate VPN gateway/profile\n3. Enter your credentials (and MFA if required)\n4. If connection fails, check the VPN client logs for error codes\n5. Ensure your internet connection is working before connecting to VPN"
+      },
+      "TestResultText": {
+        "Passed": "A VPN tunnel is active. You are connected to the corporate network.",
+        "Failed": "VPN connection check failed unexpectedly.",
+        "Warning": "No active VPN tunnel detected. Corporate resources requiring VPN will not be accessible."
+      }
+    },
+    {
+      "Name": "Split Tunneling Check",
+      "Description": "Detects whether split tunneling is in use, which may allow corporate traffic to bypass VPN.",
+      "Enabled": true,
+      "Order": 4,
+      "UserFeedback": "Analyzing routing table for split tunnel configuration...",
+      "DetectionScript": "\n        $defaultRoutes = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue\n        $vpnDefault = $defaultRoutes | Where-Object { $_.InterfaceAlias -match 'VPN|AnyConnect|GlobalProtect|Pulse|Tunnel' }\n        $nonVpnDefault = $defaultRoutes | Where-Object { $_.InterfaceAlias -notmatch 'VPN|AnyConnect|GlobalProtect|Pulse|Tunnel' }\n        if ($vpnDefault -and -not $nonVpnDefault) {\n            return @{ Status = 'Passed'; Message = 'Full tunnel VPN — all traffic through VPN' }\n        }\n        if ($vpnDefault -and $nonVpnDefault) {\n            return @{ Status = 'Warning'; Message = 'Split tunnel detected — some traffic bypasses VPN' }\n        }\n        return @{ Status = 'Warning'; Message = 'Could not determine tunnel mode' }\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:network-vpn'",
+      "ResolutionText": {
+        "Warning": "Split tunneling may be a policy decision by IT. If you are experiencing issues accessing corporate resources:\n1. Contact IT to verify if split tunneling is intentional\n2. If it is not policy, request a full-tunnel VPN profile\n3. Do not attempt to modify VPN profiles without IT authorization"
+      },
+      "TestResultText": {
+        "Passed": "Full-tunnel VPN is active. All traffic is routed through the corporate VPN.",
+        "Failed": "Unable to determine tunnel routing mode.",
+        "Warning": "Split tunneling is in effect. Only some traffic is routed through VPN."
+      }
+    },
+    {
+      "Name": "DNS Resolves Internal Resources",
+      "Description": "Tests whether internal corporate DNS names can be resolved over the VPN.",
+      "Enabled": true,
+      "Order": 5,
+      "UserFeedback": "Testing internal DNS resolution over VPN...",
+      "DetectionScript": "\n        $internalHosts = @('intranet','sharepoint.corp','portal.internal','ad.local')\n        $domainSuffix = (Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue).Domain\n        if ($domainSuffix -and $domainSuffix -ne 'WORKGROUP') {\n            $internalHosts = @(\"intranet.$domainSuffix\", \"portal.$domainSuffix\")\n        }\n        foreach ($h in $internalHosts) {\n            try {\n                $r = Resolve-DnsName -Name $h -ErrorAction Stop\n                return @{ Status = 'Passed'; Message = \"Resolved: $h -> $($r[0].IPAddress)\" }\n            } catch { }\n        }\n        return @{ Status = 'Warning'; Message = 'Could not resolve any known internal hostnames' }\n      ",
+      "ResolutionScript": "ipconfig /flushdns | Out-Null",
+      "ResolutionText": {
+        "Warning": "1. Verify your VPN is fully connected (not just the service running)\n2. Run 'ipconfig /flushdns' to clear cached DNS\n3. Confirm the VPN assigns a DNS server from the corporate network (ipconfig /all)\n4. If split-DNS is misconfigured, contact IT to correct the VPN DNS suffix list"
+      },
+      "TestResultText": {
+        "Passed": "Internal corporate DNS names are resolving successfully over VPN.",
+        "Failed": "Internal DNS resolution failed. Corporate resources may not be accessible.",
+        "Warning": "Unable to resolve known internal hostnames. VPN DNS may not be configured correctly."
+      }
+    },
+    {
+      "Name": "VPN Authentication (Certificate)",
+      "Description": "Checks that a valid machine or user certificate for VPN authentication exists in the certificate store.",
+      "Enabled": true,
+      "Order": 6,
+      "UserFeedback": "Checking for VPN authentication certificates...",
+      "DetectionScript": "\n        $now = Get-Date\n        $certs = Get-ChildItem -Path 'Cert:\\LocalMachine\\My','Cert:\\CurrentUser\\My' -ErrorAction SilentlyContinue |\n            Where-Object { $_.NotAfter -gt $now -and $_.EnhancedKeyUsageList.FriendlyName -contains 'Client Authentication' }\n        if (-not $certs) {\n            return @{ Status = 'Warning'; Message = 'No valid client auth certificate found' }\n        }\n        $soon = $certs | Where-Object { $_.NotAfter -lt $now.AddDays(30) }\n        if ($soon) {\n            $exp = $soon[0].NotAfter.ToString('yyyy-MM-dd')\n            return @{ Status = 'Warning'; Message = \"Certificate expires soon: $exp\" }\n        }\n        $best = $certs | Sort-Object NotAfter -Descending | Select-Object -First 1\n        return @{ Status = 'Passed'; Message = \"Valid cert found, expires $($best.NotAfter.ToString('yyyy-MM-dd'))\" }\n      ",
+      "ResolutionScript": "Start-Process 'certmgr.msc'",
+      "ResolutionText": {
+        "Warning": "1. Open Certificate Manager (certmgr.msc) and check Personal > Certificates\n2. If no valid certificate exists, request enrollment via: certlm.msc > Personal > All Tasks > Request New Certificate\n3. If certificate-based auth is not required by your VPN profile, this warning can be ignored\n4. For expired certificates, contact IT to trigger auto-enrollment via Group Policy"
+      },
+      "TestResultText": {
+        "Passed": "A valid client authentication certificate is present for VPN use.",
+        "Failed": "Certificate check failed unexpectedly.",
+        "Warning": "No valid or soon-expiring client auth certificate found. Certificate-based VPN may fail."
+      }
+    },
+    {
+      "Name": "Intranet Reachability via VPN",
+      "Description": "Attempts an HTTP check to a known corporate intranet address to confirm end-to-end VPN access.",
+      "Enabled": true,
+      "Order": 7,
+      "UserFeedback": "Testing HTTP connectivity to corporate intranet...",
+      "DetectionScript": "\n        $targets = @('http://intranet','http://portal.internal','http://sharepoint')\n        foreach ($url in $targets) {\n            try {\n                $resp = Invoke-WebRequest -Uri $url -UseDefaultCredentials -TimeoutSec 5 -ErrorAction Stop\n                if ($resp.StatusCode -lt 400) {\n                    return @{ Status = 'Passed'; Message = \"Intranet reachable: $url (HTTP $($resp.StatusCode))\" }\n                }\n            } catch { }\n        }\n        return @{ Status = 'Warning'; Message = 'Could not reach intranet targets' }\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:network-vpn'",
+      "ResolutionText": {
+        "Warning": "1. Confirm VPN is connected and you have a tunnel IP assigned\n2. Verify your intranet URL with IT — the default targets in this test may not match your environment\n3. Check if a proxy is required to reach the intranet even over VPN\n4. Try opening the intranet URL manually in a browser while on VPN"
+      },
+      "TestResultText": {
+        "Passed": "Corporate intranet is accessible over VPN.",
+        "Failed": "Intranet connectivity test failed.",
+        "Warning": "No response from known intranet addresses. VPN may be connected but routing or DNS may be misconfigured."
+      }
+    }
+  ]
+}

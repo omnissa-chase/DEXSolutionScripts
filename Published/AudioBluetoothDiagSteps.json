@@ -1,0 +1,144 @@
+{
+  "SchemaVersion": "1.0",
+  "Steps": [
+    {
+      "Name": "Audio Service Running",
+      "Description": "Checks that the Windows Audio service (AudioSrv) and the Audio Endpoint Builder are both running.",
+      "Enabled": true,
+      "Order": 1,
+      "UserFeedback": "Checking Windows Audio service status...",
+      "DetectionScript": "\n        $audioSvc = Get-Service -Name AudioSrv -ErrorAction SilentlyContinue\n        $epSvc    = Get-Service -Name AudioEndpointBuilder -ErrorAction SilentlyContinue\n        if ((-not $audioSvc) -or (-not $epSvc)) { return @{ Status = 'Failed'; Message = 'Audio services not found' } }\n        if ($audioSvc.Status -ne 'Running') { return @{ Status = 'Failed'; Message = \"AudioSrv is $($audioSvc.Status)\" } }\n        if ($epSvc.Status -ne 'Running')    { return @{ Status = 'Failed'; Message = \"AudioEndpointBuilder is $($epSvc.Status)\" } }\n        return @{ Status = 'Passed'; Message = 'AudioSrv and AudioEndpointBuilder are running' }\n      ",
+      "ResolutionScript": "Start-Service AudioEndpointBuilder -ErrorAction SilentlyContinue; Start-Service AudioSrv -ErrorAction SilentlyContinue",
+      "ResolutionText": {
+        "Failed": "1. Press Win+R, type 'services.msc'\n2. Locate 'Windows Audio Endpoint Builder' — start it first\n3. Then start 'Windows Audio'\n4. Set both to Automatic startup type\n5. If they fail to start, run: sfc /scannow from an elevated command prompt"
+      },
+      "TestResultText": {
+        "Passed": "Windows Audio services are running normally.",
+        "Failed": "Audio services are not running. No sound output or input will function.",
+        "Warning": "Audio service state is unexpected. Sound may be intermittent."
+      }
+    },
+    {
+      "Name": "Default Audio Output Device",
+      "Description": "Verifies that at least one audio output (playback) device is present and not disabled.",
+      "Enabled": true,
+      "Order": 2,
+      "UserFeedback": "Enumerating audio output devices...",
+      "DetectionScript": "\n        Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue\n        try {\n            # Use Get-WmiObject as a PS5-compatible approach\n            $endpoints = Get-WmiObject -Query \"SELECT * FROM Win32_SoundDevice\" -ErrorAction Stop\n            if (-not $endpoints) { return @{ Status = 'Failed'; Message = 'No sound devices found' } }\n            $active = $endpoints | Where-Object { $_.StatusInfo -eq 3 }  # 3 = Enabled\n            if ($active) {\n                $names = ($active | Select-Object -ExpandProperty Name) -join ', '\n                return @{ Status = 'Passed'; Message = \"Active device(s): $names\" }\n            }\n            $names = ($endpoints | Select-Object -ExpandProperty Name) -join ', '\n            return @{ Status = 'Warning'; Message = \"Found but status unknown: $names\" }\n        } catch {\n            return @{ Status = 'Warning'; Message = 'Unable to enumerate sound devices' }\n        }\n      ",
+      "ResolutionScript": "Start-Process 'mmsys.cpl'",
+      "ResolutionText": {
+        "Failed": "1. Right-click the speaker icon in the taskbar > Sound settings\n2. Under Output, check if a device is listed\n3. If no device appears, open Device Manager and look for disabled/errored audio devices under 'Sound, video and game controllers'\n4. Try plugging in headphones or speakers — the device may activate on connection\n5. Check if the audio driver is installed (see Audio Driver step)",
+        "Warning": "1. Right-click the speaker icon > Sound settings\n2. Ensure the correct device is selected as the default output\n3. Click the device properties and ensure it is not disabled"
+      },
+      "TestResultText": {
+        "Passed": "A default audio output device is active.",
+        "Failed": "No audio output devices are detected. Audio playback is not possible.",
+        "Warning": "Audio devices were found but status could not be confirmed. Manually check Sound settings."
+      }
+    },
+    {
+      "Name": "Audio Driver Health",
+      "Description": "Checks Device Manager for audio adapters in an error or unknown state.",
+      "Enabled": true,
+      "Order": 3,
+      "UserFeedback": "Checking audio driver health in Device Manager...",
+      "DetectionScript": "\n        $audioDevices = Get-WmiObject -Class Win32_PnPEntity -ErrorAction SilentlyContinue |\n            Where-Object { $_.Name -match 'audio|sound|speaker|headset|realtek|conexant|IDT|Synaptics.*audio|Intel.*Smart Sound' }\n        if (-not $audioDevices) { return @{ Status = 'Warning'; Message = 'No audio PnP devices found' } }\n        $errored = $audioDevices | Where-Object { $_.ConfigManagerErrorCode -ne 0 }\n        if ($errored) {\n            $names = ($errored | Select-Object -ExpandProperty Name) -join ', '\n            return @{ Status = 'Failed'; Message = \"Driver error on: $names\" }\n        }\n        $names = ($audioDevices | Select-Object -ExpandProperty Name) -join ', '\n        return @{ Status = 'Passed'; Message = \"Healthy: $names\" }\n      ",
+      "ResolutionScript": "Start-Process 'devmgmt.msc'",
+      "ResolutionText": {
+        "Failed": "1. Open Device Manager (devmgmt.msc)\n2. Expand 'Sound, video and game controllers'\n3. Right-click the device with the error > Update driver\n4. Choose 'Search automatically for drivers'\n5. If that fails, download the driver from the manufacturer's website or your IT portal\n6. For enterprise devices, check if a driver deployment is available in your software catalog",
+        "Warning": "No audio devices were found in PnP enumeration. This may indicate a hardware or driver issue."
+      },
+      "TestResultText": {
+        "Passed": "All audio drivers are installed and reporting no errors.",
+        "Failed": "One or more audio drivers have errors. Audio output/input may not work.",
+        "Warning": "No audio devices detected in hardware enumeration."
+      }
+    },
+    {
+      "Name": "Volume & Mute State",
+      "Description": "Checks that the system volume is not muted and is set to an audible level.",
+      "Enabled": true,
+      "Order": 4,
+      "UserFeedback": "Checking system volume and mute state...",
+      "DetectionScript": "\n        try {\n            Add-Type -TypeDefinition @'\nusing System.Runtime.InteropServices;\npublic class AudioUtils {\n    [DllImport(\"winmm.dll\")] public static extern int waveOutGetVolume(IntPtr h, out uint vol);\n}\n'@ -ErrorAction SilentlyContinue\n            $vol = 0\n            $result = [AudioUtils]::waveOutGetVolume([System.IntPtr]::Zero, [ref]$vol)\n            $left  = $vol -band 0xFFFF\n            $pct   = [math]::Round($left / 0xFFFF * 100)\n            if ($pct -eq 0) { return @{ Status = 'Warning'; Message = 'System volume is at 0%' } }\n            return @{ Status = 'Passed'; Message = \"Volume at $pct%\" }\n        } catch {\n            return @{ Status = 'Warning'; Message = 'Unable to query volume level' }\n        }\n      ",
+      "ResolutionScript": "[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); $wsh = New-Object -ComObject WScript.Shell; $wsh.SendKeys([char]0xAD)",
+      "ResolutionText": {
+        "Warning": "1. Click the speaker icon in the taskbar and drag the volume slider up\n2. Ensure the mute button (speaker icon) is not active\n3. Check the application's own volume control (e.g., Teams, browser, media player)\n4. Use the Volume Mixer (right-click speaker icon > Open Volume Mixer) to check per-app volumes"
+      },
+      "TestResultText": {
+        "Passed": "System volume is at an audible level.",
+        "Failed": "Volume check failed.",
+        "Warning": "System volume is at 0% or muted. You will not hear any audio."
+      }
+    },
+    {
+      "Name": "Bluetooth Service",
+      "Description": "Confirms the Bluetooth Support Service is running and Bluetooth is enabled.",
+      "Enabled": true,
+      "Order": 5,
+      "UserFeedback": "Checking Bluetooth service and adapter status...",
+      "DetectionScript": "\n        $svc = Get-Service -Name bthserv -ErrorAction SilentlyContinue\n        if (-not $svc) { return @{ Status = 'Warning'; Message = 'Bluetooth service (bthserv) not found — adapter may not be present' } }\n        if ($svc.Status -ne 'Running') { return @{ Status = 'Failed'; Message = \"Bluetooth service is $($svc.Status)\" } }\n        $adapter = Get-WmiObject -Class Win32_PnPEntity -ErrorAction SilentlyContinue |\n            Where-Object { $_.Name -match 'Bluetooth' -and $_.ConfigManagerErrorCode -eq 0 }\n        if ($adapter) { return @{ Status = 'Passed'; Message = 'Bluetooth service running, adapter detected' } }\n        return @{ Status = 'Warning'; Message = 'Bluetooth service running but no adapter confirmed' }\n      ",
+      "ResolutionScript": "Start-Service bthserv -ErrorAction SilentlyContinue",
+      "ResolutionText": {
+        "Failed": "1. Press Win+R, type 'services.msc'\n2. Locate 'Bluetooth Support Service', right-click > Start\n3. Set Startup type to Automatic\n4. Check that Airplane Mode is off in the notification center (Win+A)\n5. Toggle Bluetooth off and on in Settings > Bluetooth & devices",
+        "Warning": "If Bluetooth is not present on this hardware, this warning is expected. If you expect Bluetooth, check Device Manager for a Bluetooth adapter under 'Bluetooth' or 'Network adapters'."
+      },
+      "TestResultText": {
+        "Passed": "Bluetooth service is running and a Bluetooth adapter is detected.",
+        "Failed": "Bluetooth Support Service is not running. Bluetooth devices cannot be used.",
+        "Warning": "Bluetooth service was not found or the adapter could not be confirmed."
+      }
+    },
+    {
+      "Name": "Bluetooth Device Pairing",
+      "Description": "Reports on paired Bluetooth devices, particularly audio devices (headsets, speakers).",
+      "Enabled": true,
+      "Order": 6,
+      "UserFeedback": "Scanning for paired Bluetooth audio devices...",
+      "DetectionScript": "\n        try {\n            $radioKey = 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\BTHPORT\\Parameters\\Devices'\n            if (-not (Test-Path $radioKey)) { return @{ Status = 'Warning'; Message = 'No Bluetooth devices in registry' } }\n            $devices = Get-ChildItem $radioKey -ErrorAction SilentlyContinue\n            if (-not $devices) { return @{ Status = 'Warning'; Message = 'No paired Bluetooth devices found' } }\n            $count = $devices.Count\n            return @{ Status = 'Passed'; Message = \"$count paired Bluetooth device(s) found\" }\n        } catch {\n            return @{ Status = 'Warning'; Message = 'Unable to enumerate Bluetooth devices' }\n        }\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:bluetooth'",
+      "ResolutionText": {
+        "Warning": "1. Go to Settings > Bluetooth & devices\n2. Ensure your Bluetooth device is in pairing mode (usually hold the pairing button)\n3. Click 'Add device' > Bluetooth and select your device\n4. For Bluetooth headsets: after pairing, set them as default audio device in Sound settings\n5. If a previously paired device won't connect, remove and re-pair it"
+      },
+      "TestResultText": {
+        "Passed": "Paired Bluetooth devices are registered on this system.",
+        "Failed": "Bluetooth device enumeration failed.",
+        "Warning": "No paired Bluetooth devices detected. Pair your audio device if needed."
+      }
+    },
+    {
+      "Name": "Bluetooth Audio Profile",
+      "Description": "Checks whether a paired Bluetooth device appears as an audio endpoint, confirming the HFP/A2DP profile is active.",
+      "Enabled": true,
+      "Order": 7,
+      "UserFeedback": "Checking for Bluetooth audio endpoints...",
+      "DetectionScript": "\n        $btAudio = Get-WmiObject -Class Win32_SoundDevice -ErrorAction SilentlyContinue |\n            Where-Object { $_.Name -match 'Bluetooth|BT|Headset|Headphones' }\n        if ($btAudio) {\n            $names = ($btAudio | Select-Object -ExpandProperty Name) -join ', '\n            return @{ Status = 'Passed'; Message = \"BT audio endpoint: $names\" }\n        }\n        $btAudio2 = Get-WmiObject -Class Win32_PnPEntity -ErrorAction SilentlyContinue |\n            Where-Object { $_.Name -match 'Bluetooth.*audio|Hands.Free|A2DP|Headset' }\n        if ($btAudio2) {\n            $names = ($btAudio2 | Select-Object -ExpandProperty Name) -join ', '\n            return @{ Status = 'Passed'; Message = \"BT audio profile active: $names\" }\n        }\n        return @{ Status = 'Warning'; Message = 'No Bluetooth audio endpoint detected' }\n      ",
+      "ResolutionScript": "Start-Process 'mmsys.cpl'",
+      "ResolutionText": {
+        "Warning": "1. Ensure your Bluetooth headset/speaker is connected (not just paired)\n2. Open Sound settings and check if the Bluetooth device appears under Output\n3. If the device shows as 'Not connected', click it and choose Connect\n4. Some Bluetooth headsets require selecting the correct profile:\n   - Hands-Free (HFP) for calls/mic\n   - Stereo (A2DP) for music\n5. Removing and re-pairing the device often resolves profile issues"
+      },
+      "TestResultText": {
+        "Passed": "A Bluetooth audio endpoint is active and available for playback or calls.",
+        "Failed": "Bluetooth audio check failed.",
+        "Warning": "No Bluetooth audio endpoint detected. Your BT device may not be connected or the audio profile may not be active."
+      }
+    },
+    {
+      "Name": "Microphone Access Policy",
+      "Description": "Checks that microphone access is enabled for desktop apps in Windows Privacy settings.",
+      "Enabled": true,
+      "Order": 8,
+      "UserFeedback": "Checking microphone privacy access policy...",
+      "DetectionScript": "\n        $micKey = 'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone'\n        $value = (Get-ItemProperty -Path $micKey -Name Value -ErrorAction SilentlyContinue).Value\n        if ($value -eq 'Deny') { return @{ Status = 'Failed'; Message = 'Microphone access is denied for this user' } }\n        $desktopKey = \"$micKey\\NonPackaged\"\n        $desktopVal = (Get-ItemProperty -Path $desktopKey -Name Value -ErrorAction SilentlyContinue).Value\n        if ($desktopVal -eq 'Deny') { return @{ Status = 'Failed'; Message = 'Microphone access denied for desktop apps' } }\n        return @{ Status = 'Passed'; Message = 'Microphone access is allowed' }\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:privacy-microphone'",
+      "ResolutionText": {
+        "Failed": "1. Go to Settings > Privacy & security > Microphone\n2. Enable 'Microphone access'\n3. Enable 'Let desktop apps access your microphone'\n4. Scroll down to verify the specific app (e.g., Teams, Zoom) is allowed\n5. If access is blocked by policy, contact IT to review your privacy configuration GPO"
+      },
+      "TestResultText": {
+        "Passed": "Microphone access is enabled for this user and desktop applications.",
+        "Failed": "Microphone access is blocked by privacy settings. Calls and recordings will not work.",
+        "Warning": "Microphone access policy state is unclear. Test manually in Settings > Privacy & security."
+      }
+    }
+  ]
+}

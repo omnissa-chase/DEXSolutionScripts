@@ -1,0 +1,127 @@
+{
+  "SchemaVersion": "1.0",
+  "Steps": [
+    {
+      "Name": "Print Spooler Service",
+      "Description": "Verifies the Print Spooler service is running. This service is required for all printing.",
+      "Enabled": true,
+      "Order": 1,
+      "UserFeedback": "Checking Print Spooler service status...",
+      "DetectionScript": "\n        $svc = Get-Service -Name Spooler -ErrorAction SilentlyContinue\n        if (-not $svc) { return @{ Status = 'Failed'; Message = 'Spooler service not found' } }\n        if ($svc.Status -eq 'Running') { return @{ Status = 'Passed'; Message = 'Spooler is running' } }\n        return @{ Status = 'Failed'; Message = \"Spooler is $($svc.Status)\" }\n      ",
+      "ResolutionScript": "Set-Service -Name Spooler -StartupType Automatic; Start-Service -Name Spooler",
+      "ResolutionText": {
+        "Failed": "1. Press Win+R, type 'services.msc', find 'Print Spooler'\n2. Right-click > Properties, set Startup type to Automatic\n3. Click Start, then OK\n4. If it fails to start, clear the spooler queue: Stop Spooler, delete files in C:\\Windows\\System32\\spool\\PRINTERS\\, then Start Spooler"
+      },
+      "TestResultText": {
+        "Passed": "Print Spooler service is running normally.",
+        "Failed": "Print Spooler is not running. No print jobs can be processed until it is restarted.",
+        "Warning": "Print Spooler state is unexpected. Printing may be unreliable."
+      }
+    },
+    {
+      "Name": "Printers Installed",
+      "Description": "Checks that at least one printer is installed and not in an error state.",
+      "Enabled": true,
+      "Order": 2,
+      "UserFeedback": "Enumerating installed printers...",
+      "DetectionScript": "\n        $printers = Get-WmiObject -Class Win32_Printer -ErrorAction SilentlyContinue\n        if (-not $printers) { return @{ Status = 'Failed'; Message = 'No printers installed' } }\n        $errored = $printers | Where-Object { $_.PrinterStatus -gt 3 }\n        $names = ($printers | Select-Object -ExpandProperty Name) -join ', '\n        if ($errored) {\n            $errNames = ($errored | Select-Object -ExpandProperty Name) -join ', '\n            return @{ Status = 'Warning'; Message = \"$($printers.Count) printer(s) installed, errors on: $errNames\" }\n        }\n        return @{ Status = 'Passed'; Message = \"$($printers.Count) printer(s) installed: $names\" }\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:printers'",
+      "ResolutionText": {
+        "Failed": "1. Go to Settings > Bluetooth & devices > Printers & scanners\n2. Click 'Add device' and follow the wizard\n3. For network printers, ensure you are connected to the corporate network or VPN\n4. Contact IT if you require a managed printer to be pushed to your device",
+        "Warning": "1. Open Settings > Bluetooth & devices > Printers & scanners\n2. Click the printer in error and select 'Open print queue'\n3. Cancel all stuck jobs, then try printing again\n4. If the issue persists, remove and re-add the printer"
+      },
+      "TestResultText": {
+        "Passed": "All installed printers are in a healthy state.",
+        "Failed": "No printers are installed on this device.",
+        "Warning": "One or more printers are reporting an error state."
+      }
+    },
+    {
+      "Name": "Default Printer Set",
+      "Description": "Confirms a default printer is assigned.",
+      "Enabled": true,
+      "Order": 3,
+      "UserFeedback": "Checking for a default printer assignment...",
+      "DetectionScript": "\n        $default = Get-WmiObject -Class Win32_Printer -ErrorAction SilentlyContinue | Where-Object { $_.Default -eq $true }\n        if ($default) { return @{ Status = 'Passed'; Message = \"Default printer: $($default.Name)\" } }\n        return @{ Status = 'Warning'; Message = 'No default printer set' }\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:printers'",
+      "ResolutionText": {
+        "Warning": "1. Go to Settings > Bluetooth & devices > Printers & scanners\n2. Click the printer you use most often\n3. Select 'Set as default'\n4. Alternatively, disable 'Let Windows manage my default printer' and set it manually"
+      },
+      "TestResultText": {
+        "Passed": "A default printer is configured.",
+        "Failed": "Unable to query printer configuration.",
+        "Warning": "No default printer is set. Applications may prompt you to choose a printer every time."
+      }
+    },
+    {
+      "Name": "Print Spooler Queue",
+      "Description": "Checks for stuck jobs in the print queue that may be blocking all printing.",
+      "Enabled": true,
+      "Order": 4,
+      "UserFeedback": "Scanning print queue for stuck jobs...",
+      "DetectionScript": "\n        $jobs = Get-WmiObject -Class Win32_PrintJob -ErrorAction SilentlyContinue\n        if (-not $jobs) { return @{ Status = 'Passed'; Message = 'Print queue is clear' } }\n        $stuck = $jobs | Where-Object { $_.StatusMask -band 0x1000 }\n        if ($stuck) { return @{ Status = 'Failed'; Message = \"$($stuck.Count) stuck job(s) detected\" } }\n        return @{ Status = 'Warning'; Message = \"$($jobs.Count) job(s) pending in queue\" }\n      ",
+      "ResolutionScript": "Stop-Service Spooler -Force; Remove-Item \"$env:SystemRoot\\System32\\spool\\PRINTERS\\*\" -Force -ErrorAction SilentlyContinue; Start-Service Spooler",
+      "ResolutionText": {
+        "Failed": "1. Open an elevated Command Prompt\n2. Run: net stop spooler\n3. Run: del /Q /F /S \"%systemroot%\\System32\\spool\\PRINTERS\\*.*\"\n4. Run: net start spooler\n5. Try printing again",
+        "Warning": "1. Open Settings > Bluetooth & devices > Printers & scanners\n2. Click the active printer and select 'Open print queue'\n3. Right-click each job and select Cancel"
+      },
+      "TestResultText": {
+        "Passed": "Print queue is clear with no stuck jobs.",
+        "Failed": "One or more print jobs are stuck and blocking the queue.",
+        "Warning": "Print jobs are queued but not confirmed stuck. Printing may be slow."
+      }
+    },
+    {
+      "Name": "Printer Driver Health",
+      "Description": "Checks for any printer drivers flagged as corrupted or missing.",
+      "Enabled": true,
+      "Order": 5,
+      "UserFeedback": "Inspecting printer driver health...",
+      "DetectionScript": "\n        try {\n            $drivers = Get-PrinterDriver -ErrorAction Stop\n            if (-not $drivers) { return @{ Status = 'Warning'; Message = 'No printer drivers found' } }\n            $names = ($drivers | Select-Object -ExpandProperty Name) -join ', '\n            return @{ Status = 'Passed'; Message = \"$($drivers.Count) driver(s) loaded: $names\" }\n        } catch {\n            return @{ Status = 'Warning'; Message = 'Unable to enumerate printer drivers' }\n        }\n      ",
+      "ResolutionScript": "Start-Process 'printmanagement.msc'",
+      "ResolutionText": {
+        "Warning": "1. Open Print Management (printmanagement.msc) as Administrator\n2. Expand Drivers and look for any with a warning icon\n3. Right-click the bad driver and choose 'Delete'\n4. Re-add the printer or push the driver via IT management tools\n5. For enterprise managed printers, re-run the printer deployment GPO or contact IT"
+      },
+      "TestResultText": {
+        "Passed": "All printer drivers are installed and appear healthy.",
+        "Failed": "Printer driver issues detected that may prevent printing.",
+        "Warning": "Driver enumeration returned unexpected results. Manually review drivers in Print Management."
+      }
+    },
+    {
+      "Name": "Network Printer Connectivity",
+      "Description": "Attempts to verify connectivity to any mapped network printers.",
+      "Enabled": true,
+      "Order": 6,
+      "UserFeedback": "Checking reachability of network printer hosts...",
+      "DetectionScript": "\n        $netPrinters = Get-WmiObject -Class Win32_Printer -ErrorAction SilentlyContinue |\n            Where-Object { $_.PortName -match '^(\\d{1,3}\\.){3}\\d{1,3}|^\\\\\\\\' }\n        if (-not $netPrinters) { return @{ Status = 'Warning'; Message = 'No network printers found (USB only)' } }\n        $failed = @()\n        foreach ($p in $netPrinters) {\n            $host_ = if ($p.PortName -match '^(\\d{1,3}\\.){3}\\d{1,3}') { $p.PortName } else { ($p.PortName -replace '^\\\\\\\\([^\\\\]+)\\\\.*','$1') }\n            if ($host_ -and -not (Test-Connection -ComputerName $host_ -Count 1 -Quiet -ErrorAction SilentlyContinue)) {\n                $failed += $p.Name\n            }\n        }\n        if ($failed) { return @{ Status = 'Failed'; Message = \"Unreachable: $($failed -join ', ')\" } }\n        return @{ Status = 'Passed'; Message = \"$($netPrinters.Count) network printer(s) reachable\" }\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:network'",
+      "ResolutionText": {
+        "Failed": "1. Verify you are connected to the corporate network or VPN\n2. Try pinging the printer IP from Command Prompt: ping <printer-ip>\n3. If on VPN, some direct IP printers may not be accessible — use a print server path instead\n4. Contact IT to verify the printer IP has not changed or been reassigned",
+        "Warning": "Only USB or locally attached printers detected. Network printing requires corporate network connectivity."
+      },
+      "TestResultText": {
+        "Passed": "All detected network printers are reachable on the network.",
+        "Failed": "One or more network printers cannot be reached. Check network or VPN connectivity.",
+        "Warning": "No network printers detected. Only local or USB printers are present."
+      }
+    },
+    {
+      "Name": "Windows Print & Scan Feature",
+      "Description": "Checks that the optional Windows Print and Document Services feature is enabled.",
+      "Enabled": true,
+      "Order": 7,
+      "UserFeedback": "Verifying Windows print feature state...",
+      "DetectionScript": "\n        $feat = Get-WindowsOptionalFeature -Online -FeatureName 'Printing-Foundation-Features' -ErrorAction SilentlyContinue\n        if (-not $feat) { return @{ Status = 'Warning'; Message = 'Unable to check feature state' } }\n        if ($feat.State -eq 'Enabled') { return @{ Status = 'Passed'; Message = 'Print feature enabled' } }\n        return @{ Status = 'Failed'; Message = \"Print feature state: $($feat.State)\" }\n      ",
+      "ResolutionScript": "Start-Process powershell.exe -ArgumentList '-Command Enable-WindowsOptionalFeature -Online -FeatureName Printing-Foundation-Features -NoRestart' -Verb RunAs",
+      "ResolutionText": {
+        "Failed": "1. Open an elevated PowerShell window\n2. Run: Enable-WindowsOptionalFeature -Online -FeatureName 'Printing-Foundation-Features' -NoRestart\n3. Restart the computer if prompted\n4. Contact IT if you lack permissions to enable Windows features"
+      },
+      "TestResultText": {
+        "Passed": "Windows Printing Foundation Features are enabled.",
+        "Failed": "Core printing features are disabled. This will prevent printing from working.",
+        "Warning": "Unable to confirm printing feature state. If printing is broken, contact IT."
+      }
+    }
+  ]
+}

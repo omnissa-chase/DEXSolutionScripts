@@ -1,0 +1,143 @@
+{
+  "SchemaVersion": "1.0",
+  "Steps": [
+    {
+      "Name": "Windows Update Service",
+      "Description": "Confirms the Windows Update service (wuauserv) is running and set to an appropriate startup type.",
+      "Enabled": true,
+      "Order": 1,
+      "UserFeedback": "Checking Windows Update service status...",
+      "DetectionScript": "\n        $svc = Get-Service -Name wuauserv -ErrorAction SilentlyContinue\n        if (-not $svc) { return @{ Status = 'Failed'; Message = 'Windows Update service not found' } }\n        if ($svc.StartType -eq 'Disabled') { return @{ Status = 'Failed'; Message = 'Windows Update service is Disabled' } }\n        if ($svc.Status -eq 'Running' -or $svc.StartType -eq 'Manual') {\n            return @{ Status = 'Passed'; Message = \"wuauserv: $($svc.Status) / $($svc.StartType)\" }\n        }\n        return @{ Status = 'Warning'; Message = \"wuauserv: $($svc.Status) / $($svc.StartType)\" }\n      ",
+      "ResolutionScript": "Set-Service wuauserv -StartupType Manual -ErrorAction SilentlyContinue; Start-Service wuauserv -ErrorAction SilentlyContinue",
+      "ResolutionText": {
+        "Failed": "1. Press Win+R, type 'services.msc'\n2. Locate 'Windows Update', right-click > Properties\n3. Set Startup type to 'Manual' (or 'Automatic' if not managed by policy)\n4. Click Start, then OK\n5. If policy is enforcing Disabled, contact IT to check your Windows Update policy",
+        "Warning": "The service may be in a transitional state. Try running Windows Update manually from Settings > Windows Update."
+      },
+      "TestResultText": {
+        "Passed": "Windows Update service is in a healthy, startable state.",
+        "Failed": "Windows Update service is disabled or missing. Updates cannot run.",
+        "Warning": "Windows Update service is not in the expected state. Updates may not run automatically."
+      }
+    },
+    {
+      "Name": "BITS Service",
+      "Description": "Checks the Background Intelligent Transfer Service (BITS), which Windows Update uses to download update packages.",
+      "Enabled": true,
+      "Order": 2,
+      "UserFeedback": "Checking BITS service status...",
+      "DetectionScript": "\n        $svc = Get-Service -Name BITS -ErrorAction SilentlyContinue\n        if (-not $svc) { return @{ Status = 'Failed'; Message = 'BITS service not found' } }\n        if ($svc.StartType -eq 'Disabled') { return @{ Status = 'Failed'; Message = 'BITS is Disabled' } }\n        return @{ Status = 'Passed'; Message = \"BITS: $($svc.Status) / $($svc.StartType)\" }\n      ",
+      "ResolutionScript": "Set-Service BITS -StartupType Manual -ErrorAction SilentlyContinue; Start-Service BITS -ErrorAction SilentlyContinue",
+      "ResolutionText": {
+        "Failed": "1. Open an elevated command prompt\n2. Run: sc config BITS start= demand\n3. Run: net start BITS\n4. If it fails with error 1290, run: regsvr32 qmgr.dll, then retry"
+      },
+      "TestResultText": {
+        "Passed": "BITS service is available for update downloads.",
+        "Failed": "BITS is disabled or missing. Windows Update downloads will fail.",
+        "Warning": "BITS is in an unexpected state. Download-based operations may be unreliable."
+      }
+    },
+    {
+      "Name": "Pending Reboot Check",
+      "Description": "Detects whether a previous update has left the system in a pending reboot state, which can block new updates.",
+      "Enabled": true,
+      "Order": 3,
+      "UserFeedback": "Checking for pending reboot flags...",
+      "DetectionScript": "\n        $pendingPaths = @(\n            'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired',\n            'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending',\n            'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager'\n        )\n        $pending = $false\n        if (Test-Path $pendingPaths[0]) { $pending = $true }\n        if (Test-Path $pendingPaths[1]) { $pending = $true }\n        $cbsKey = Get-ItemProperty -Path $pendingPaths[2] -Name PendingFileRenameOperations -ErrorAction SilentlyContinue\n        if ($cbsKey) { $pending = $true }\n        if ($pending) { return @{ Status = 'Warning'; Message = 'System has a pending reboot' } }\n        return @{ Status = 'Passed'; Message = 'No pending reboot detected' }\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:windowsupdate'",
+      "ResolutionText": {
+        "Warning": "1. Save all your work and restart your computer\n2. Allow Windows to apply pending updates during shutdown/startup\n3. Do not force-power-off during an update cycle\n4. After restart, run Windows Update again to check for additional updates"
+      },
+      "TestResultText": {
+        "Passed": "No pending reboot is detected. Updates can proceed.",
+        "Failed": "Pending reboot check failed unexpectedly.",
+        "Warning": "A reboot is required before further updates can be installed."
+      }
+    },
+    {
+      "Name": "Windows Update Policy (WSUS/SCCM)",
+      "Description": "Checks whether Windows Update is redirected to a corporate WSUS or SCCM server.",
+      "Enabled": true,
+      "Order": 4,
+      "UserFeedback": "Reading Windows Update policy registry settings...",
+      "DetectionScript": "\n        $wuPolicyPath = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate'\n        $auPolicyPath = \"$wuPolicyPath\\AU\"\n        $wsusServer = (Get-ItemProperty -Path $wuPolicyPath -Name WUServer -ErrorAction SilentlyContinue).WUServer\n        $useWUSS = (Get-ItemProperty -Path $auPolicyPath -Name UseWUServer -ErrorAction SilentlyContinue).UseWUServer\n        if ($wsusServer -and $useWUSS -eq 1) {\n            return @{ Status = 'Passed'; Message = \"Managed by: $wsusServer\" }\n        }\n        if ($wsusServer -and $useWUSS -ne 1) {\n            return @{ Status = 'Warning'; Message = 'WSUS server set but UseWUServer is disabled' }\n        }\n        return @{ Status = 'Warning'; Message = 'No WSUS/SCCM policy found — using Windows Update directly' }\n      ",
+      "ResolutionScript": "Start-Process 'gpedit.msc'",
+      "ResolutionText": {
+        "Warning": "If this device should be managed by a corporate WSUS or SCCM server:\n1. Confirm you are domain-joined and have received Group Policy\n2. Run 'gpupdate /force' in an elevated command prompt\n3. Run 'wuauclt /detectnow' to force a policy refresh\n4. Contact IT if the WSUS server URL is missing or incorrect"
+      },
+      "TestResultText": {
+        "Passed": "Windows Update is managed via a corporate WSUS or SCCM server.",
+        "Failed": "Unable to read Windows Update policy.",
+        "Warning": "Device is not pointed at a managed update server. Updates will come directly from Microsoft."
+      }
+    },
+    {
+      "Name": "Last Update Date",
+      "Description": "Reports when Windows last successfully installed an update.",
+      "Enabled": true,
+      "Order": 5,
+      "UserFeedback": "Checking last successful Windows Update install date...",
+      "DetectionScript": "\n        try {\n            $session = New-Object -ComObject 'Microsoft.Update.Session' -ErrorAction Stop\n            $searcher = $session.CreateUpdateSearcher()\n            $count = $searcher.GetTotalHistoryCount()\n            if ($count -eq 0) { return @{ Status = 'Warning'; Message = 'No update history found' } }\n            $history = $searcher.QueryHistory(0, [Math]::Min($count, 50))\n            $lastSuccess = $history | Where-Object { $_.ResultCode -eq 2 } | Select-Object -First 1\n            if (-not $lastSuccess) { return @{ Status = 'Warning'; Message = 'No successful updates in recent history' } }\n            $days = [int]((Get-Date) - $lastSuccess.Date).TotalDays\n            $dateStr = $lastSuccess.Date.ToString('yyyy-MM-dd')\n            if ($days -gt 60) { return @{ Status = 'Warning'; Message = \"Last update $days days ago ($dateStr)\" } }\n            return @{ Status = 'Passed'; Message = \"Last update: $dateStr ($days days ago)\" }\n        } catch {\n            return @{ Status = 'Warning'; Message = 'Unable to query update history' }\n        }\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:windowsupdate'",
+      "ResolutionText": {
+        "Warning": "1. Open Settings > Windows Update and click 'Check for updates'\n2. Install all available updates and restart if prompted\n3. If updates fail, check the error code and search the Microsoft Update Catalog\n4. Run the Windows Update Troubleshooter: Settings > System > Troubleshoot > Other troubleshooters"
+      },
+      "TestResultText": {
+        "Passed": "Windows Update has been applied recently. The system appears current.",
+        "Failed": "Unable to check update history.",
+        "Warning": "Updates have not been installed for an extended period or no history was found. Run Windows Update now."
+      }
+    },
+    {
+      "Name": "Windows Update DataStore",
+      "Description": "Checks the SoftwareDistribution DataStore for corruption markers that prevent update detection.",
+      "Enabled": true,
+      "Order": 6,
+      "UserFeedback": "Inspecting Windows Update DataStore integrity...",
+      "DetectionScript": "\n        $datastore = \"$env:SystemRoot\\SoftwareDistribution\\DataStore\"\n        $db = Join-Path $datastore 'DataStore.edb'\n        if (-not (Test-Path $datastore)) { return @{ Status = 'Warning'; Message = 'DataStore folder missing' } }\n        if (-not (Test-Path $db)) { return @{ Status = 'Warning'; Message = 'DataStore.edb missing — may rebuild on next update cycle' } }\n        $size = [math]::Round((Get-Item $db).Length / 1MB, 1)\n        if ($size -gt 500) { return @{ Status = 'Warning'; Message = \"DataStore.edb is very large ($($size)MB) — may be bloated\" } }\n        return @{ Status = 'Passed'; Message = \"DataStore.edb present ($($size)MB)\" }\n      ",
+      "ResolutionScript": "Stop-Service wuauserv -Force -EA SilentlyContinue; Stop-Service BITS -Force -EA SilentlyContinue; Remove-Item \"$env:SystemRoot\\SoftwareDistribution\\DataStore\\*\" -Recurse -Force -EA SilentlyContinue; Start-Service BITS -EA SilentlyContinue; Start-Service wuauserv -EA SilentlyContinue",
+      "ResolutionText": {
+        "Warning": "To reset the Windows Update DataStore:\n1. Open an elevated Command Prompt\n2. Run: net stop wuauserv && net stop BITS\n3. Run: rd /s /q %SystemRoot%\\SoftwareDistribution\\DataStore\n4. Run: net start BITS && net start wuauserv\n5. Run Windows Update — it will rebuild the store automatically"
+      },
+      "TestResultText": {
+        "Passed": "Windows Update DataStore appears healthy.",
+        "Failed": "DataStore check failed.",
+        "Warning": "DataStore may be missing or oversized. This can cause update detection failures."
+      }
+    },
+    {
+      "Name": "Cryptographic Services",
+      "Description": "Verifies the Cryptographic Services (CryptSvc) is running, which is required for update signing verification.",
+      "Enabled": true,
+      "Order": 7,
+      "UserFeedback": "Checking Cryptographic Services...",
+      "DetectionScript": "\n        $svc = Get-Service -Name CryptSvc -ErrorAction SilentlyContinue\n        if (-not $svc) { return @{ Status = 'Failed'; Message = 'CryptSvc not found' } }\n        if ($svc.Status -eq 'Running') { return @{ Status = 'Passed'; Message = 'CryptSvc is running' } }\n        return @{ Status = 'Failed'; Message = \"CryptSvc is $($svc.Status)\" }\n      ",
+      "ResolutionScript": "Start-Service CryptSvc -ErrorAction SilentlyContinue",
+      "ResolutionText": {
+        "Failed": "1. Press Win+R, type 'services.msc'\n2. Locate 'Cryptographic Services'\n3. Right-click > Start\n4. If it fails, check the Application Event Log for errors under source 'Microsoft-Windows-CAPI2'\n5. As a last resort, run: sfc /scannow from an elevated command prompt"
+      },
+      "TestResultText": {
+        "Passed": "Cryptographic Services is running. Update signature verification will work.",
+        "Failed": "Cryptographic Services is not running. Windows Update will fail to verify and install updates.",
+        "Warning": "Cryptographic Services state is unexpected."
+      }
+    },
+    {
+      "Name": "Disk Space for Updates",
+      "Description": "Checks that the system drive has sufficient free space to download and install updates.",
+      "Enabled": true,
+      "Order": 8,
+      "UserFeedback": "Checking available disk space on system drive...",
+      "DetectionScript": "\n        $drive = Get-PSDrive -Name C -ErrorAction SilentlyContinue\n        if (-not $drive) { return @{ Status = 'Warning'; Message = 'Unable to check C: drive' } }\n        $freeGB = [math]::Round($drive.Free / 1GB, 1)\n        if ($freeGB -lt 5) { return @{ Status = 'Failed'; Message = \"Only $($freeGB)GB free on C: — updates need at least 5GB\" } }\n        if ($freeGB -lt 10) { return @{ Status = 'Warning'; Message = \"$($freeGB)GB free — low, may affect large updates\" } }\n        return @{ Status = 'Passed'; Message = \"$($freeGB)GB free on C:\" }\n      ",
+      "ResolutionScript": "Start-Process 'cleanmgr.exe' -ArgumentList '/d C:' -ErrorAction SilentlyContinue",
+      "ResolutionText": {
+        "Failed": "1. Open Disk Cleanup: search for 'Disk Cleanup' in Start\n2. Click 'Clean up system files' and check all items including Windows Update Cleanup\n3. Move personal files to OneDrive or an external drive\n4. Uninstall unused applications via Settings > Apps\n5. Contact IT if disk quota or drive size is the root cause",
+        "Warning": "Consider running Disk Cleanup to free up space before installing large updates."
+      },
+      "TestResultText": {
+        "Passed": "Sufficient disk space is available for Windows updates.",
+        "Failed": "Critically low disk space. Windows Update cannot download or stage update packages.",
+        "Warning": "Disk space is low. Large updates (e.g., feature updates) may fail to install."
+      }
+    }
+  ]
+}

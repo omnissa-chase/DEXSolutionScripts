@@ -1,0 +1,177 @@
+{
+  "$schema": "NetworkDiagSteps.schema.json",
+  "SchemaVersion": "1.0",
+  "Steps": [
+    {
+      "Name": "DNS Resolution",
+      "Description": "Verifies that DNS servers are configured and can resolve external hostnames.",
+      "Enabled": true,
+      "Order": 1,
+      "UserFeedback": "Checking DNS server configuration and resolution...",
+      "DetectionScript": "\r\n        $dns = (Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = 1' -ErrorAction SilentlyContinue |\r\n                Select-Object -ExpandProperty DNSServerSearchOrder | Select-Object -Unique) -join ', '\r\n        if (-not $dns) { return @{ Status = 'Failed'; Message = 'No DNS servers found' } }\r\n        try {\r\n            $null = Resolve-DnsName -Name 'google.com' -ErrorAction Stop\r\n            return @{ Status = 'Passed'; Message = \"DNS working ($dns)\" }\r\n        } catch { return @{ Status = 'Failed'; Message = 'DNS resolution failed' } }\r\n      ",
+      "ResolutionScript": "ipconfig /flushdns | Out-Null; ipconfig /renew | Out-Null",
+      "ResolutionText": {
+        "Failed": "1. Open Network Adapter Settings and set DNS to 8.8.8.8 (Primary) and 8.8.4.4 (Secondary)\n2. Run 'ipconfig /flushdns' from an elevated command prompt\n3. Run 'ipconfig /renew' to refresh your network lease"
+      },
+      "TestResultText": {
+        "Passed": "DNS servers are responding and resolving external hostnames correctly.",
+        "Failed": "DNS servers are not configured or unable to resolve hostnames. Internet access may be broken.",
+        "Warning": "DNS may be partially functional. Some name resolutions could fail intermittently."
+      }
+    },
+    {
+      "Name": "Default Gateway",
+      "Description": "Confirms the default gateway is configured and reachable via ICMP ping.",
+      "Enabled": true,
+      "Order": 2,
+      "UserFeedback": "Pinging your default gateway to confirm network path...",
+      "DetectionScript": "\r\n        $gw = Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = 1' -ErrorAction SilentlyContinue |\r\n              Select-Object -ExpandProperty DefaultIPGateway | Select-Object -First 1\r\n        if (-not $gw) { return @{ Status = 'Failed'; Message = 'No gateway configured' } }\r\n        if (Test-Connection -ComputerName $gw -Count 1 -Quiet -ErrorAction SilentlyContinue) {\r\n            return @{ Status = 'Passed'; Message = \"Gateway reachable ($gw)\" }\r\n        }\r\n        return @{ Status = 'Failed'; Message = \"Gateway unreachable ($gw)\" }\r\n      ",
+      "ResolutionScript": "ipconfig /release | Out-Null; ipconfig /renew | Out-Null",
+      "ResolutionText": {
+        "Failed": "1. Run 'ipconfig /release' then 'ipconfig /renew' to request a new DHCP lease\n2. Restart your router or managed switch\n3. Verify the network cable is connected or WiFi is turned on"
+      },
+      "TestResultText": {
+        "Passed": "Default gateway is reachable. Layer-3 routing to the local network is healthy.",
+        "Failed": "Default gateway cannot be reached. You may be disconnected from the local network.",
+        "Warning": "Gateway response was inconsistent. Network performance may be degraded."
+      }
+    },
+    {
+      "Name": "Proxy Configuration",
+      "Description": "Checks whether a WinHTTP proxy is configured, which may be required in corporate environments.",
+      "Enabled": true,
+      "Order": 3,
+      "UserFeedback": "Inspecting WinHTTP proxy settings...",
+      "DetectionScript": "\r\n        $proxy = netsh winhttp show proxy 2>$null\r\n        if ($proxy -match 'No proxy') { return @{ Status = 'Warning'; Message = 'No proxy configured (may be required)' } }\r\n        return @{ Status = 'Passed'; Message = 'Proxy configured' }\r\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:network-proxy'",
+      "ResolutionText": {
+        "Warning": "1. If a corporate proxy is required, configure it via Settings > Network and Internet > Proxy\n2. Or run (as Admin): netsh winhttp set proxy proxy-server='proxyserver:port'\n3. Contact IT support for the correct proxy address and port"
+      },
+      "TestResultText": {
+        "Passed": "A proxy server is configured. Corporate traffic should route correctly.",
+        "Failed": "Proxy configuration query failed unexpectedly.",
+        "Warning": "No proxy is configured. This may be expected on home networks, but required in corporate environments."
+      }
+    },
+    {
+      "Name": "Network Adapters",
+      "Description": "Checks for at least one active physical network adapter.",
+      "Enabled": true,
+      "Order": 4,
+      "UserFeedback": "Enumerating active physical network adapters...",
+      "DetectionScript": "\r\n        $adapters = Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' }\r\n        if ($adapters.Count -eq 0) { return @{ Status = 'Failed'; Message = 'No active adapters' } }\r\n        return @{ Status = 'Passed'; Message = \"$($adapters.Count) active adapter(s)\" }\r\n      ",
+      "ResolutionScript": "Start-Process 'devmgmt.msc'",
+      "ResolutionText": {
+        "Failed": "1. Open Device Manager (devmgmt.msc) and check for disabled or error-flagged adapters\n2. Right-click the adapter and choose Enable or Update Driver\n3. Verify the network cable is connected or the WiFi radio is enabled"
+      },
+      "TestResultText": {
+        "Passed": "One or more physical network adapters are active and ready.",
+        "Failed": "No active physical adapters found. The device may be disconnected or drivers may need attention.",
+        "Warning": "Adapter state is indeterminate. Review Device Manager for details."
+      }
+    },
+    {
+      "Name": "Firewall Status",
+      "Description": "Verifies that at least one Windows Firewall profile is enabled.",
+      "Enabled": true,
+      "Order": 5,
+      "UserFeedback": "Reviewing Windows Firewall profile status...",
+      "DetectionScript": "\r\n        $fw = Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction SilentlyContinue | Where-Object { $_.Enabled }\r\n        if ($fw.Count -eq 0) { return @{ Status = 'Warning'; Message = 'Firewall disabled' } }\r\n        return @{ Status = 'Passed'; Message = 'Firewall active' }\r\n      ",
+      "ResolutionScript": "Set-NetFirewallProfile -All -Enabled True",
+      "ResolutionText": {
+        "Warning": "1. Open Windows Security > Firewall and Network Protection and enable for each profile\n2. Or run (as Admin): Set-NetFirewallProfile -All -Enabled True\n3. Contact IT if Group Policy is preventing the change"
+      },
+      "TestResultText": {
+        "Passed": "Windows Firewall is active on at least one network profile.",
+        "Failed": "Firewall query failed. Review Windows Security for details.",
+        "Warning": "Windows Firewall appears to be disabled. This is a security risk; re-enable it if possible."
+      }
+    },
+    {
+      "Name": "Internet Connectivity",
+      "Description": "Pings Google's public DNS (8.8.8.8) to confirm external internet access.",
+      "Enabled": true,
+      "Order": 6,
+      "UserFeedback": "Testing external internet connectivity via ping...",
+      "DetectionScript": "\r\n        if (Test-Connection -ComputerName 8.8.8.8 -Count 1 -Quiet -ErrorAction SilentlyContinue) {\r\n            return @{ Status = 'Passed'; Message = 'Internet accessible' }\r\n        }\r\n        return @{ Status = 'Failed'; Message = 'No internet connectivity' }\r\n      ",
+      "ResolutionScript": "ipconfig /flushdns | Out-Null",
+      "ResolutionText": {
+        "Failed": "1. Confirm the network cable is plugged in or WiFi is connected\n2. Restart your modem and router (unplug for 30 seconds, then reconnect)\n3. Run 'ipconfig /flushdns' then 'ipconfig /renew'\n4. Contact your ISP if the issue persists after the above steps"
+      },
+      "TestResultText": {
+        "Passed": "External internet access is confirmed. Traffic can reach the public internet.",
+        "Failed": "Cannot reach the public internet. Local network may be up but WAN connectivity is broken.",
+        "Warning": "Internet access is intermittent. Packets may be dropping or routing is unstable."
+      }
+    },
+    {
+      "Name": "WiFi Signal Strength",
+      "Description": "Reports wireless signal quality as a percentage and rates it Excellent / Good / Fair / Weak.",
+      "Enabled": true,
+      "Order": 7,
+      "UserFeedback": "Measuring wireless signal strength via netsh...",
+      "DetectionScript": "\r\n        try {\r\n            $wifiInterface = Get-NetAdapter -Physical -ErrorAction SilentlyContinue |\r\n                             Where-Object { $_.MediaType -eq 'Wireless802.11' }\r\n            if (-not $wifiInterface) { return @{ Status = 'Warning'; Message = 'No wireless adapter found' } }\r\n            $wifiStatus = netsh wlan show interfaces 2>$null | Select-String 'Signal' | Out-String\r\n            if ($wifiStatus -match \"Signal\\s+:\\s+(\\d+)%\") {\r\n                $signal  = [int]$Matches[1]\r\n                $quality = if ($signal -ge 80) { 'Excellent' } elseif ($signal -ge 60) { 'Good' } elseif ($signal -ge 40) { 'Fair' } else { 'Weak' }\r\n                return @{ Status = 'Passed'; Message = \"WiFi signal: $signal% ($quality)\" }\r\n            }\r\n            return @{ Status = 'Warning'; Message = 'WiFi adapter present, signal unknown' }\r\n        } catch { return @{ Status = 'Warning'; Message = 'Unable to determine WiFi status' } }\r\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:network-wifi'",
+      "ResolutionText": {
+        "Warning": "1. Move closer to the wireless access point\n2. Reduce physical obstructions (walls, furniture) between the device and AP\n3. Switch to the 5 GHz band if available\n4. Check for interference from other nearby wireless devices or appliances"
+      },
+      "TestResultText": {
+        "Passed": "WiFi signal strength is being measured and reported successfully.",
+        "Failed": "WiFi signal check failed. The adapter may not be responding.",
+        "Warning": "WiFi signal is weak or undetermined. Consider moving closer to the access point."
+      }
+    },
+    {
+      "Name": "VPN Status",
+      "Description": "Checks whether any VPN connections are configured and if any are currently active.",
+      "Enabled": true,
+      "Order": 8,
+      "UserFeedback": "Checking VPN connection state...",
+      "DetectionScript": "\r\n        try {\r\n            $vpnConnections = Get-VpnS2SInterface -ErrorAction SilentlyContinue | Where-Object { $_.ConnectionState -eq 'Connected' }\r\n            $rasConnections = Get-VpnS2SInterface -ErrorAction SilentlyContinue\r\n            if ($vpnConnections) {\r\n                $vpnNames = ($vpnConnections | Select-Object -ExpandProperty Name) -join ', '\r\n                return @{ Status = 'Passed'; Message = \"VPN connected: $vpnNames\" }\r\n            } elseif ($rasConnections) {\r\n                return @{ Status = 'Warning'; Message = 'VPN configured but not connected' }\r\n            }\r\n            return @{ Status = 'Warning'; Message = 'No VPN configured' }\r\n        } catch { return @{ Status = 'Warning'; Message = 'Unable to determine VPN status' } }\r\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:network-vpn'",
+      "ResolutionText": {
+        "Warning": "1. Open your VPN client and connect to the appropriate server\n2. Verify your VPN credentials have not expired\n3. Contact IT support for VPN server details or a credential reset"
+      },
+      "TestResultText": {
+        "Passed": "A VPN connection is active.",
+        "Failed": "VPN status query encountered an unexpected error.",
+        "Warning": "No active VPN connection detected. If VPN access is required for your work, connect before continuing."
+      }
+    },
+    {
+      "Name": "Internet Speed Test",
+      "Description": "Downloads a small reference image and measures response time as a proxy for connection speed.",
+      "Enabled": true,
+      "Order": 9,
+      "UserFeedback": "Running a lightweight speed/latency test...",
+      "DetectionScript": "\r\n        try {\r\n            $testUrl   = 'https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png'\r\n            $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()\r\n            $null      = (New-Object System.Net.WebClient).DownloadData($testUrl)\r\n            $stopwatch.Stop()\r\n            $timeMs = $stopwatch.ElapsedMilliseconds\r\n            if ($timeMs -lt 500)      { return @{ Status = 'Passed';  Message = \"Fast connection (~$timeMs ms response)\" } }\r\n            elseif ($timeMs -lt 2000) { return @{ Status = 'Passed';  Message = \"Normal connection (~$timeMs ms response)\" } }\r\n            else                      { return @{ Status = 'Warning'; Message = \"Slow connection (~$timeMs ms response)\" } }\r\n        } catch { return @{ Status = 'Failed'; Message = 'Speed test failed or no internet' } }\r\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:network'",
+      "ResolutionText": {
+        "Failed": "1. Confirm internet connectivity first (ping 8.8.8.8)\n2. Restart your modem and router\n3. Check for bandwidth-heavy background applications or downloads\n4. Contact your ISP if speeds remain consistently low",
+        "Warning": "1. Restart your modem and router to clear congestion\n2. Close background applications that consume bandwidth (streaming, cloud sync)\n3. Try connecting via Ethernet cable instead of WiFi for a more stable connection"
+      },
+      "TestResultText": {
+        "Passed": "Internet response time is within normal range.",
+        "Failed": "Speed test could not complete. No internet access or the test endpoint is unreachable.",
+        "Warning": "Connection is slow. Consider restarting networking equipment or switching to a wired connection."
+      }
+    },
+    {
+      "Name": "VPN Speed (if connected)",
+      "Description": "If a VPN is active, measures download latency through the VPN tunnel.",
+      "Enabled": true,
+      "Order": 10,
+      "UserFeedback": "Testing download latency through the VPN tunnel (if active)...",
+      "DetectionScript": "\r\n        try {\r\n            $vpnConnections = Get-VpnS2SInterface -ErrorAction SilentlyContinue | Where-Object { $_.ConnectionState -eq 'Connected' }\r\n            if (-not $vpnConnections) { return @{ Status = 'Warning'; Message = 'VPN not connected, skipping' } }\r\n            $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()\r\n            $null      = (New-Object System.Net.WebClient).DownloadData('https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png')\r\n            $stopwatch.Stop()\r\n            $timeMs = $stopwatch.ElapsedMilliseconds\r\n            return @{ Status = 'Passed'; Message = \"VPN latency: ~$timeMs ms\" }\r\n        } catch { return @{ Status = 'Warning'; Message = 'VPN speed test unable to run' } }\r\n      ",
+      "ResolutionScript": "Start-Process 'ms-settings:network-vpn'",
+      "ResolutionText": {
+        "Warning": "1. Disconnect and reconnect VPN to obtain a fresher server connection\n2. Switch to a VPN server geographically closer to your location\n3. Contact IT support if high latency persists across multiple servers"
+      },
+      "TestResultText": {
+        "Passed": "VPN tunnel latency is within acceptable range.",
+        "Failed": "VPN speed test failed unexpectedly.",
+        "Warning": "VPN is either not connected (step skipped) or latency is high. Reconnect or switch servers."
+      }
+    }
+  ]
+}
