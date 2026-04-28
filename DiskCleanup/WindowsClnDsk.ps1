@@ -72,3 +72,5 @@ $NewFreeSpace = (Get-Volume -DriveLetter "C" | Select @{Name="SizeGb"; Expressio
 
 # Output the amount of space cleaned
 echo "SpaceCleaned: $($CurrentFreeSpace - $NewFreeSpace) GB"
+
+Exit 0
