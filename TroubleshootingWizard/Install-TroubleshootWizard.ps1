@@ -84,7 +84,7 @@ Write-Log "Log file    : $logFile"
 #  AUTO-DETECT MODE
 # ---------------------------------------------
 $zipPath     = Join-Path $PSScriptRoot $ZipName
-$probeScript = Join-Path $PSScriptRoot 'Troubleshooter-Modular.ps1'
+$probeScript = Join-Path $PSScriptRoot 'Troubleshooter-Modular.ps1'  # PS5 version
 
 if ($Mode -eq 'Auto') {
     if (Test-Path $zipPath) {
@@ -92,7 +92,7 @@ if ($Mode -eq 'Auto') {
         Write-Log "Auto-detected mode: ZIP  (found $ZipName)"
     } elseif (Test-Path $probeScript) {
         $Mode = 'SFD'
-        Write-Log "Auto-detected mode: SFD  (found Troubleshooter-Modular.ps1)"
+        Write-Log "Auto-detected mode: SFD  (found Troubleshooter-Modular.ps1 - PS5 version)"
     } else {
         Write-Log "Cannot determine install mode. Neither '$ZipName' nor 'Troubleshooter-Modular.ps1' found next to this script." 'ERROR'
         exit 1
@@ -104,6 +104,7 @@ if ($Mode -eq 'Auto') {
 # ---------------------------------------------
 $requiredFiles = @(
     'Troubleshooter-Modular.ps1',
+    'Troubleshooter-Modular-Ex.ps1',
     'UI-Modern.xaml',
     'UI-Modern-Light.xaml',
     'Branding.json',

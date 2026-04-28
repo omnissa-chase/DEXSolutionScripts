@@ -8,7 +8,8 @@ Modern WPF-based diagnostic troubleshooter with dark/light themes, branding supp
 
 | File | Purpose |
 |---|---|
-| `Troubleshooter-Modular.ps1` | Main troubleshooter engine (50 KB) |
+| `Troubleshooter-Modular.ps1` | Main troubleshooter engine — PowerShell 5.1 |
+| `Troubleshooter-Modular-Ex.ps1` | Main troubleshooter engine — PowerShell 7+ (extended syntax) |
 | `UI-Modern.xaml` | Dark theme WPF layout |
 | `UI-Modern-Light.xaml` | Light theme WPF layout |
 | `Branding.json` | Customizable logo, accent color, Hub URL |
@@ -127,13 +128,17 @@ After installation, launch from the destination folder:
 
 ```powershell
 # Network diagnostics — dark theme
+# PS5 - Network diagnostics - dark theme
 powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\AirWatch\Extensions\TroubleshootWizard\Troubleshooter-Modular.ps1" -StepsJson ".\NetworkDiagSteps.json" -XamlFile ".\UI-Modern.xaml"
 
-# Network diagnostics — light theme
+# PS5 - Network diagnostics - light theme
 powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\AirWatch\Extensions\TroubleshootWizard\Troubleshooter-Modular.ps1" -StepsJson ".\NetworkDiagSteps.json" -XamlFile ".\UI-Modern-Light.xaml"
 
-# Quiet / headless mode (no UI — for scheduled tasks or SYSTEM context)
+# PS5 - Quiet / headless mode (no UI - for scheduled tasks or SYSTEM context)
 powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\AirWatch\Extensions\TroubleshootWizard\Troubleshooter-Modular.ps1" -StepsJson ".\NetworkDiagSteps.json" -SkipUI
+
+# PS7+ extended version
+pwsh.exe -ExecutionPolicy Bypass -File "C:\ProgramData\AirWatch\Extensions\TroubleshootWizard\Troubleshooter-Modular-Ex.ps1" -StepsJson ".\NetworkDiagSteps.json" -XamlFile ".\UI-Modern.xaml"
 ```
 
 **Available `-StepsJson` values:**

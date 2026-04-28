@@ -1,10 +1,7 @@
 <#
 .SYNOPSIS
-    Troubleshooter-Modular - Generic JSON-Driven Diagnostic Engine (PowerShell 5.1 Compatible)
+    Troubleshooter-Modular - Generic JSON-Driven Diagnostic Engine
 .DESCRIPTION
-    PowerShell 5.1 compatible version of Troubleshooter-Modular.ps1.
-    Removes PS7+ syntax (ternary operator ?: ) and replaces with PS5-safe equivalents.
-
     Loads diagnostic steps from a JSON definition file, executes each step's
     DetectionScript, optionally runs a ResolutionScript on failure, then displays
     a WPF results popup driven entirely by the JSON metadata.
@@ -12,11 +9,11 @@
     The JSON schema supports per-step:
       - Name / Description
       - Enabled flag and Order for sequencing
-      - DetectionScript   - PowerShell code that returns @{ Status; Message }
-      - UserFeedback      - Progress text shown in console while the step runs
-      - ResolutionScript  - Optional PowerShell run automatically on failure
-      - ResolutionText    - Hashtable of status-keyed human-readable fix steps
-      - TestResultText    - Hashtable of status-keyed summary sentences for the UI
+      - DetectionScript   – PowerShell code that returns @{ Status; Message }
+      - UserFeedback      – Progress text shown in console while the step runs
+      - ResolutionScript  – Optional PowerShell run automatically on failure
+      - ResolutionText    – Hashtable of status-keyed human-readable fix steps
+      - TestResultText    – Hashtable of status-keyed summary sentences for the UI
 
 .PARAMETER StepsJson
     Path to the JSON file that defines the diagnostic steps.
@@ -35,9 +32,9 @@
 .PARAMETER AutoRemediate
     If set, each step's ResolutionScript is run automatically when a step fails.
 .EXAMPLE
-    .\Troubleshooter-Modular-PS5.ps1 -StepsJson ".\NetworkDiagSteps.json"
+    .\Troubleshooter-Modular.ps1 -StepsJson ".\NetworkDiagSteps.json"
 .EXAMPLE
-    .\Troubleshooter-Modular-PS5.ps1 -StepsJson "C:\Diag\AppSteps.json" -Title "App Health Check" -AutoRemediate
+    .\Troubleshooter-Modular.ps1 -StepsJson "C:\Diag\AppSteps.json" -Title "App Health Check" -AutoRemediate
 #>
 
 [CmdletBinding()]
@@ -150,14 +147,14 @@ function Get-StatusProperty {
 # 
 function Show-ProgressDialog {
     param(
-        [string] $DialogTitle = 'Running Diagnostics...',
+        [string] $DialogTitle = 'Running Diagnostics…',
         [int]    $StepCount   = 1
     )
 
     $sync = [hashtable]::Synchronized(@{
         Window    = $null
         Close     = $false
-        StepText  = 'Initializing...'
+        StepText  = 'Initializing…'
         Value     = 0
         StepCount = $StepCount
     })
@@ -174,7 +171,7 @@ function Show-ProgressDialog {
         <StackPanel Margin="28,22,28,22" VerticalAlignment="Center">
             <TextBlock Text="$DialogTitle" Foreground="White"
                        FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
-            <TextBlock Name="StepLabel" Text="Starting..."
+            <TextBlock Name="StepLabel" Text="Starting…"
                        Foreground="#9999BB" FontSize="11" Margin="0,0,0,12"
                        TextTrimming="CharacterEllipsis"/>
             <ProgressBar Name="PB" Height="5" Minimum="0" Maximum="$StepCount" Value="0"
@@ -252,18 +249,15 @@ Write-Log ('-' * 60)
 
 $progressHandle = $null
 if (-not $SkipUI) {
-    $progressHandle = Show-ProgressDialog -DialogTitle "Running $Title..." -StepCount $activeSteps.Count
+    $progressHandle = Show-ProgressDialog -DialogTitle "Running $Title…" -StepCount $activeSteps.Count
 }
 
 $stepIndex = 0
 foreach ($stepDef in $activeSteps) {
 
     $stepIndex++
-
-    # PS5-compatible replacement for ternary: $stepDef.UserFeedback ? $stepDef.UserFeedback : $stepDef.Name
-    if ($stepDef.UserFeedback) { $feedbackText = $stepDef.UserFeedback } else { $feedbackText = $stepDef.Name }
     Update-ProgressDialog -Handle $progressHandle `
-        -StepText "($stepIndex / $($activeSteps.Count))  $feedbackText" `
+        -StepText "($stepIndex / $($activeSteps.Count))  $($stepDef.UserFeedback ? $stepDef.UserFeedback : $stepDef.Name)" `
         -Value ($stepIndex - 1)
 
     # --- User feedback progress line ---
@@ -395,7 +389,7 @@ $xaml = @'
     </Window.Resources>
 
     <DockPanel>
-        <!-- Header -->
+        <!-- ── Header ── -->
         <Border DockPanel.Dock="Top" Background="White"
                 BorderBrush="#E0E0E0" BorderThickness="0,0,0,1" Padding="20,14,20,10">
             <DockPanel>
@@ -413,7 +407,7 @@ $xaml = @'
                 <StackPanel DockPanel.Dock="Left">
                     <TextBlock Name="HeaderTitle" Text="Diagnostics Results" FontSize="20"
                                Style="{StaticResource HeaderStyle}" Margin="0,0,0,3"/>
-                    <TextBlock Name="TimestampText" Text="Completed at: ..."
+                    <TextBlock Name="TimestampText" Text="Completed at: …"
                                FontSize="11" Foreground="#666666"/>
                     <TextBlock Name="FixAllStatus" Text="" FontSize="10"
                                Foreground="#555555" Margin="0,3,0,0" TextWrapping="Wrap"/>
@@ -421,13 +415,13 @@ $xaml = @'
             </DockPanel>
         </Border>
 
-        <!-- Auto-close progress bar -->
+        <!-- ── Auto-close progress bar ── -->
         <ProgressBar Name="TimeoutProgress" DockPanel.Dock="Top" Height="3"
                      Foreground="#2196F3" Background="#E0E0E0"/>
         <TextBlock Name="TimeoutText" DockPanel.Dock="Top" FontSize="9"
-                   Foreground="#AAAAAA" Margin="20,2,0,4" Text="Auto-closing..."/>
+                   Foreground="#AAAAAA" Margin="20,2,0,4" Text="Auto-closing…"/>
 
-        <!-- Summary counts -->
+        <!-- ── Summary counts ── -->
         <Border DockPanel.Dock="Top" Background="White"
                 BorderBrush="#E0E0E0" BorderThickness="0,0,0,1"
                 Padding="20,12" Margin="0,0,0,8">
@@ -452,7 +446,7 @@ $xaml = @'
             </Grid>
         </Border>
 
-        <!-- Scrollable step cards -->
+        <!-- ── Scrollable step cards ── -->
         <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto"
                       Background="Transparent">
             <StackPanel Name="ResultsPanel" Margin="20,0,20,10" Background="Transparent"/>
@@ -466,7 +460,7 @@ $xaml = @'
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
 
 try {
-    # Load XAML
+    # ── Load XAML ──
     $reader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
     $window = [Windows.Markup.XamlReader]::Load($reader)
 
@@ -477,13 +471,13 @@ try {
         $isDark = ($winBg.Color.R + $winBg.Color.G + $winBg.Color.B) -lt 384
     }
 
-    # Set dynamic title
+    # ── Set dynamic title ──
     $window.Title = $Title
     $window.FindName('HeaderTitle').Text = $Title
 
-    # Set window icon (embedded Base64 PNG from NativeEnrollment.ico)
+    # ── Set window icon (embedded Base64 PNG from NativeEnrollment.ico) ──
     try {
-        $iconB64 = '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'
+        $iconB64 = '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'
         $iconBytes = [Convert]::FromBase64String($iconB64)
         $ms = New-Object System.IO.MemoryStream(,$iconBytes)
         $bmp = New-Object Windows.Media.Imaging.BitmapImage
@@ -495,7 +489,7 @@ try {
         $window.Icon = $bmp
     } catch { <# icon is cosmetic - silently skip #> }
 
-    # Load Branding.json (optional sidecar next to script)
+    # ── Load Branding.json (optional sidecar next to script) ──
     $branding = @{
         CompanyName      = 'Omnissa'
         LogoFile         = ''
@@ -516,12 +510,12 @@ try {
         } catch { Write-Log "Could not parse Branding.json: $_" 'WARNING' }
     }
 
-    # Apply branding colors
+    # ── Apply branding colors ──
     $window.FindName('HeaderBar').Background         = New-Object Windows.Media.SolidColorBrush($branding.HeaderBackground)
     $window.FindName('FixAllButton').Background      = New-Object Windows.Media.SolidColorBrush($branding.AccentColor)
     $window.FindName('TimeoutProgress').Foreground   = New-Object Windows.Media.SolidColorBrush($branding.AccentColor)
 
-    # Load logo
+    # ── Load logo ──
     $logoCtrl = $window.FindName('LogoImage')
     if ($branding.LogoFile) {
         $resolvedLogo = if ([System.IO.Path]::IsPathRooted($branding.LogoFile)) {
@@ -539,14 +533,14 @@ try {
         }
     }
 
-    # Populate header
+    # ── Populate header ──
     $window.FindName('PassedCount').Text  = $results.Passed
     $window.FindName('FailedCount').Text  = $results.Failed
     $window.FindName('WarningCount').Text = $results.Warnings
-    $humanTime = (Get-Date $results.Timestamp).ToString('dddd, MMMM d yyyy') + ' . ' + (Get-Date $results.Timestamp).ToString('h:mm tt')
+    $humanTime = (Get-Date $results.Timestamp).ToString('dddd, MMMM d yyyy') + ' · ' + (Get-Date $results.Timestamp).ToString('h:mm tt')
     $window.FindName('TimestampText').Text = "Completed at: $humanTime"
 
-    # Conclusion banner
+    # ── Conclusion banner ──
     $conclusionBanner = $window.FindName('ConclusionBanner')
     $conclusionIcon   = $window.FindName('ConclusionIcon')
     $conclusionText   = $window.FindName('ConclusionText')
@@ -561,7 +555,7 @@ try {
         $conclusionBanner.BorderBrush   = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#5C4A1A'}else{'#F0D888'}))
         $conclusionIcon.Text            = [char]0x26A0 + [char]0xFE0F
         $w = $results.Warnings
-        $conclusionText.Text            = "$w warning$(if($w -ne 1){'s'}) found. Review the descriptions below - no action may be needed."
+        $conclusionText.Text            = "$w warning$(if($w -ne 1){'s'}) found. Review the descriptions below — no action may be needed."
         $conclusionText.Foreground      = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#FBBF24'}else{'#8A5C00'}))
     } else {
         $conclusionBanner.Background    = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#1F0D0D'}else{'#FFF0F0'}))
@@ -588,7 +582,7 @@ try {
         $statusColor  = if ($statusColors.ContainsKey($step.Status))  { $statusColors[$step.Status]  } else { '#9E9E9E' }
         $statusSymbol = if ($statusSymbols.ContainsKey($step.Status)) { $statusSymbols[$step.Status] } else { '?' }
 
-        # Card border
+        # ── Card border ──
         $card                  = New-Object Windows.Controls.Border
         $card.Background       = New-Object Windows.Media.SolidColorBrush('#1A1A2E')
         $card.BorderBrush      = New-Object Windows.Media.SolidColorBrush($statusColor)
@@ -598,12 +592,11 @@ try {
         $card.Margin           = New-Object Windows.Thickness(0, 0, 0, 8)
         $cardBgNormal = if($isDark){'#1A1A2E'}else{'#FFFFFF'}
         $cardBgHover  = if($isDark){'#1E1E3A'}else{'#F5F6FC'}
-
-        # Inner grid: 3 cols x 4 rows
+        # ── Inner grid: 3 cols × 4 rows ──
         $grid = New-Object Windows.Controls.Grid
 
-        foreach ($gw in @([Windows.GridLength]::new(44), [Windows.GridLength]::new(1,'Star'), [Windows.GridLength]::new(80))) {
-            $c = New-Object Windows.Controls.ColumnDefinition; $c.Width = $gw
+        foreach ($w in @([Windows.GridLength]::new(44), [Windows.GridLength]::new(1,'Star'), [Windows.GridLength]::new(80))) {
+            $c = New-Object Windows.Controls.ColumnDefinition; $c.Width = $w
             $grid.ColumnDefinitions.Add($c) | Out-Null
         }
         1..4 | ForEach-Object {
@@ -611,7 +604,7 @@ try {
             $grid.RowDefinitions.Add($r) | Out-Null
         }
 
-        # Status indicator (ellipse + symbol)
+        # ── Status indicator (ellipse + symbol) ──
         $indicator                  = New-Object Windows.Controls.Grid
         $indicator.Width            = 26
         $indicator.Height           = 26
@@ -633,7 +626,7 @@ try {
         $indicator.Children.Add($ellipse) | Out-Null
         $indicator.Children.Add($sym)     | Out-Null
 
-        # Row 0: Step name
+        # ── Row 0: Step name ──
         $nameText            = New-Object Windows.Controls.TextBlock
         $nameText.Text       = $step.Name
         $nameText.FontSize   = 13
@@ -642,7 +635,7 @@ try {
         [Windows.Controls.Grid]::SetColumn($nameText, 1)
         [Windows.Controls.Grid]::SetRow($nameText, 0)
 
-        # Row 0 col 2: Status badge
+        # ── Row 0 col 2: Status badge ──
         $badge                     = New-Object Windows.Controls.TextBlock
         $badge.Text                = $step.Status
         $badge.FontSize            = 11
@@ -653,7 +646,7 @@ try {
         [Windows.Controls.Grid]::SetColumn($badge, 2)
         [Windows.Controls.Grid]::SetRow($badge, 0)
 
-        # Row 1: Description
+        # ── Row 1: Description ──
         $descText              = New-Object Windows.Controls.TextBlock
         $descText.Text         = $step.Description
         $descText.FontSize     = 10
@@ -665,7 +658,7 @@ try {
         [Windows.Controls.Grid]::SetColumnSpan($descText, 2)
         [Windows.Controls.Grid]::SetRow($descText, 1)
 
-        # Row 2: Diagnostic message + TestResultText
+        # ── Row 2: Diagnostic message + TestResultText ──
         $msgStack = New-Object Windows.Controls.StackPanel
         $msgStack.Margin = New-Object Windows.Thickness(0, 4, 0, 0)
         [Windows.Controls.Grid]::SetColumn($msgStack, 1)
@@ -690,7 +683,7 @@ try {
             $msgStack.Children.Add($trtText) | Out-Null
         }
 
-        # Row 3: Resolution steps (only for non-Passed with text)
+        # ── Row 3: Resolution steps (only for non-Passed with text) ──
         if ($step.Status -ne 'Passed' -and $step.ResolutionText) {
             $resBorder                 = New-Object Windows.Controls.Border
             $resBorder.Background      = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#1F1808'}else{'#FFFBF0'}))
@@ -721,7 +714,7 @@ try {
             $resStack.Children.Add($resHeader) | Out-Null
             $resStack.Children.Add($resBody)   | Out-Null
 
-            # Fix It button row (only for Failed steps with a ResolutionScript)
+            # ── Fix It button row (only for Failed steps with a ResolutionScript) ──
             if ($step.Status -eq 'Failed' -and $step.ResolutionScript) {
                 $fixRow = New-Object Windows.Controls.DockPanel
                 $fixRow.Margin = New-Object Windows.Thickness(0, 8, 0, 0)
@@ -753,8 +746,8 @@ try {
 
                 $fixBtn.Add_Click({
                     $capturedBtn.IsEnabled  = $false
-                    $capturedBtn.Content    = 'Running...'
-                    $capturedStatus.Text    = 'Running resolution script...'
+                    $capturedBtn.Content    = 'Running…'
+                    $capturedStatus.Text    = 'Running resolution script…'
                     $capturedStatus.Foreground = New-Object Windows.Media.SolidColorBrush('#1565C0')
                     try {
                         $sb = [scriptblock]::Create($capturedScript)
@@ -780,13 +773,13 @@ try {
                 $fixItStatuses[$step.Name] = $fixStatus
             }
 
-            # Warning: Hub + IT contact callout (no Fix It for warnings)
+            # ── Warning: Hub + IT contact callout (no Fix It for warnings) ──
             if ($step.Status -eq 'Warning') {
                 $warnRow        = New-Object Windows.Controls.DockPanel
                 $warnRow.Margin = New-Object Windows.Thickness(0, 10, 0, 0)
 
                 $hubBtn                 = New-Object Windows.Controls.Button
-                $hubBtn.Content         = 'Open Intelligent Hub'
+                $hubBtn.Content         = '🔗  Open Intelligent Hub'
                 $hubBtn.Height          = 26
                 $hubBtn.FontSize        = 11
                 $hubBtn.FontWeight      = 'SemiBold'
@@ -800,7 +793,7 @@ try {
                 [Windows.Controls.DockPanel]::SetDock($hubBtn, 'Left')
 
                 $itNote                   = New-Object Windows.Controls.TextBlock
-                $itNote.Text              = 'Contact IT - Check Intelligent Hub for potential solutions'
+                $itNote.Text              = 'Contact IT · Check Intelligent Hub for potential solutions'
                 $itNote.FontSize          = 10
                 $itNote.Foreground        = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#7777AA'}else{'#5566AA'}))
                 $itNote.VerticalAlignment = 'Center'
@@ -814,7 +807,7 @@ try {
 
             $resBorder.Child = $resStack
 
-            # Auto-remediation banner (shown when -AutoRemediate already ran)
+            # ── Auto-remediation banner (shown when -AutoRemediate already ran) ──
             if ($step.RemediationRan) {
                 $remBanner            = New-Object Windows.Controls.TextBlock
                 $remBanner.Text       = '[Auto-Fixed]  ' + $step.RemediationStatus
@@ -833,7 +826,7 @@ try {
         $grid.Children.Add($descText)  | Out-Null
         $grid.Children.Add($msgStack)  | Out-Null
 
-        # Hover effect
+        # ── Hover effect ──
         $card.Add_MouseEnter({ param($s,$e); $s.Background = New-Object Windows.Media.SolidColorBrush($cardBgHover)  })
         $card.Add_MouseLeave({ param($s,$e); $s.Background = New-Object Windows.Media.SolidColorBrush($cardBgNormal) })
 
@@ -841,13 +834,13 @@ try {
         $panel.Children.Add($card) | Out-Null
     }
 
-    # Wire up window chrome
+    # ── Wire up window chrome ──
     $window.FindName('CloseButton').Add_Click({       $window.Close() })
     $window.FindName('ChromeCloseButton').Add_Click({ $window.Close() })
     $window.FindName('MinimizeButton').Add_Click({    $window.WindowState = 'Minimized' })
     $window.FindName('HeaderBar').Add_MouseLeftButtonDown({ $window.DragMove() })
 
-    # Wire up Fix All button (hidden when there are no failures)
+    # ── Wire up Fix All button (hidden when there are no failures) ──
     $fixAllBtn    = $window.FindName('FixAllButton')
     $fixAllStatus = $window.FindName('FixAllStatus')
     if ($results.Failed -eq 0) { $fixAllBtn.Visibility = 'Collapsed' }
@@ -861,8 +854,8 @@ try {
 
     $fixAllBtn.Add_Click({
         $capturedFixAllBtn.IsEnabled = $false
-        $capturedFixAllBtn.Content   = 'Running...'
-        $capturedFixAllSt.Text       = 'Running resolution scripts - please wait...'
+        $capturedFixAllBtn.Content   = 'Running…'
+        $capturedFixAllSt.Text       = 'Running resolution scripts—please wait…'
         $capturedFixAllSt.Foreground = New-Object Windows.Media.SolidColorBrush('#1565C0')
 
         $ran = 0; $failed = 0
@@ -873,8 +866,8 @@ try {
             # Mirror state onto the individual Fix It button if it exists
             if ($capturedFixBtns.ContainsKey($s.Name)) {
                 $capturedFixBtns[$s.Name].IsEnabled = $false
-                $capturedFixBtns[$s.Name].Content   = 'Running...'
-                $capturedFixStats[$s.Name].Text      = 'Running...'
+                $capturedFixBtns[$s.Name].Content   = 'Running…'
+                $capturedFixStats[$s.Name].Text      = 'Running…'
                 $capturedFixStats[$s.Name].Foreground = New-Object Windows.Media.SolidColorBrush('#1565C0')
             }
 
@@ -912,7 +905,7 @@ try {
         }
     })
 
-    # Countdown timer
+    # ── Countdown timer ──
     $timeoutProgress           = $window.FindName('TimeoutProgress')
     $timeoutText               = $window.FindName('TimeoutText')
     $timeoutProgress.Maximum   = $TimeoutSeconds
@@ -926,7 +919,7 @@ try {
         $script:elapsed++
         $remaining               = $TimeoutSeconds - $script:elapsed
         $timeoutProgress.Value   = $script:elapsed
-        $timeoutText.Text        = "Auto-closing in $remaining seconds..."
+        $timeoutText.Text        = "Auto-closing in $remaining seconds…"
         if ($script:elapsed -ge $TimeoutSeconds) {
             $timer.Stop()
             $window.Close()

@@ -37,6 +37,7 @@ $ErrorActionPreference = 'Stop'
 
 $payloadFiles = @(
     'Troubleshooter-Modular.ps1',
+    'Troubleshooter-Modular-Ex.ps1',
     'UI-Modern.xaml',
     'UI-Modern-Light.xaml',
     'Branding.json',
