@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Troubleshooter-Modular - Generic JSON-Driven Diagnostic Engine (PowerShell 5.1 Compatible)
 .DESCRIPTION
@@ -73,18 +73,6 @@ function Write-Log {
 # 
 #  LOAD & VALIDATE JSON
 # 
-
-
-If([string]::IsNullOrEmpty($StepsJson)){
-    #Load from the event log
-    $Event=Get-WinEvent -ProviderName "TroubleshootingWizard" | Select -First 1
-    if($Event){
-        if($Event.Message -match "[^.]*\.json" -and (Test-Path $EventMessage -ErrorAction SilentlyContinue)){
-            $StepsJson = $EventMessage
-        }
-    }
-}
-
 Write-Log "Loading step definitions from: $StepsJson"
 
 if (-not (Test-Path $StepsJson)) {
@@ -380,7 +368,7 @@ if ($XamlFile) {
         Write-Error "XamlFile not found: $XamlFile"
         exit 1
     }
-    $xaml = Get-Content -Path $XamlFile -Raw -Encoding Unicode
+    $xaml = Get-Content -Path $XamlFile -Raw
     Write-Log "Loaded XAML from: $XamlFile" 'INFO'
 } else {
 
@@ -571,7 +559,7 @@ try {
     } elseif ($results.Failed -eq 0) {
         $conclusionBanner.Background    = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#1F1808'}else{'#FFFBF0'}))
         $conclusionBanner.BorderBrush   = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#5C4A1A'}else{'#F0D888'}))
-        $conclusionIcon.Text            = [char]0x26A0 + [char]0xFE0F
+        $conclusionIcon.Text            = "⚠"
         $w = $results.Warnings
         $conclusionText.Text            = "$w warning$(if($w -ne 1){'s'}) found. Review the descriptions below - no action may be needed."
         $conclusionText.Foreground      = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#FBBF24'}else{'#8A5C00'}))

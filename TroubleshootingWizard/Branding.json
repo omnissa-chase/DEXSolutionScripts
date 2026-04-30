@@ -1,6 +1,6 @@
 {
     "CompanyName":       "Omnissa",
-    "LogoFile":          ".\\Hub.png",
+    "LogoFile":          ".\\Resources\\Hub.png",
     "AccentColor":       "#7C6AF7",
     "HeaderBackground":  "#16162A",
     "HubUrl":            "ws1winhub:",
