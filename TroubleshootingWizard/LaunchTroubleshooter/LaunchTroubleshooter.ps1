@@ -5,7 +5,6 @@ if (-not [System.Diagnostics.EventLog]::SourceExists($Source)) {
     New-EventLog -LogName Application -Source $Source
 }
 
-
 $LaunchScheduledTask = {
 param([string]$StepDiag="NetworkStepsDiag.json")
 $Source = "TroubleshootingWizard"
