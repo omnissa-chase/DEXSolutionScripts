@@ -1,13 +1,21 @@
 ﻿try {
     $status = 'Idle'
 
-    # -----------------------------
-    # Windows Update - Downloading
-    # -----------------------------
+    # Check if Windows Update is installing
+    $wuInstalling = $false
+    try {
+        $installProcesses = Get-Process -Name 'TiWorker','TrustedInstaller' -ErrorAction SilentlyContinue
+        if ($installProcesses) {
+            $wuInstalling = $true
+        }
+    }
+    catch {}
+
+    # Check if Windows Update is downloading
     $wuDownloading = $false
     try {
         $bitsJobs = Get-BitsTransfer -AllUsers -ErrorAction SilentlyContinue | Where-Object {
-            $_.JobState -in @('Connecting', 'Transferring')
+            $_.JobState -in @('Connecting','Transferring')
         }
 
         $wuProcesses = Get-Process -Name 'MoUsoCoreWorker','usoclient','wuauclt' -ErrorAction SilentlyContinue
@@ -18,55 +26,8 @@
     }
     catch {}
 
-    # -----------------------------
-    # Windows Update - Installing
-    # -----------------------------
-    $wuInstalling = $false
-    try {
-        $installProcesses = Get-Process -Name 'TiWorker','TrustedInstaller' -ErrorAction SilentlyContinue
-
-        if ($installProcesses) {
-            $wuInstalling = $true
-        }
-    }
-    catch {}
-
-    # -----------------------------
-    # Defender - Scanning / Updating
-    # -----------------------------
-    $defenderScanning = $false
-    $defenderUpdating = $false
-
-    try {
-        $mp = Get-MpComputerStatus -ErrorAction Stop
-
-        if ($mp.QuickScanRunning -or $mp.FullScanRunning) {
-            $defenderScanning = $true
-        }
-
-        $defenderUpdateProcesses = Get-Process -Name 'MpCmdRun','MpSigStub' -ErrorAction SilentlyContinue
-        if ($defenderUpdateProcesses) {
-            $defenderUpdating = $true
-        }
-    }
-    catch {
-        # Fallback if Get-MpComputerStatus is unavailable
-        try {
-            $defenderUpdateProcesses = Get-Process -Name 'MpCmdRun','MpSigStub' -ErrorAction SilentlyContinue
-            if ($defenderUpdateProcesses) {
-                $defenderUpdating = $true
-            }
-        }
-        catch {}
-    }
-
-    # -----------------------------
     # Final status precedence
-    # -----------------------------
-    if ($defenderScanning) {
-        $status = 'Scanning'
-    }
-    elseif ($wuInstalling -or $defenderUpdating) {
+    if ($wuInstalling) {
         $status = 'Updating'
     }
     elseif ($wuDownloading) {

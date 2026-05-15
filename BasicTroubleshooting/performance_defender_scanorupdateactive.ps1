@@ -1,27 +1,46 @@
 ﻿try {
-    $isBusy = $false
+    $status = 'Idle'
 
-    $mp = Get-MpComputerStatus -ErrorAction Stop
+    $defenderScanning = $false
+    $defenderUpdating = $false
 
-    # Scan indicators
-    $scanRunning = $false
-    if ($mp.QuickScanRunning -or $mp.FullScanRunning) {
-        $scanRunning = $true
+    try {
+        $mp = Get-MpComputerStatus -ErrorAction Stop
+
+        if ($mp.QuickScanRunning -or $mp.FullScanRunning) {
+            $defenderScanning = $true
+        }
+
+        $updateProcesses = Get-Process -Name 'MpCmdRun','MpSigStub' -ErrorAction SilentlyContinue
+        if ($updateProcesses) {
+            $defenderUpdating = $true
+        }
+    }
+    catch {
+        # Fallback if Defender module is unavailable
+        try {
+            $updateProcesses = Get-Process -Name 'MpCmdRun','MpSigStub' -ErrorAction SilentlyContinue
+            if ($updateProcesses) {
+                $defenderUpdating = $true
+            }
+        }
+        catch {}
     }
 
-    # Update indicators
-    $updateProcesses = Get-Process -Name 'MpCmdRun','MpSigStub' -ErrorAction SilentlyContinue
-    $isUpdating = $false
-    if ($updateProcesses) {
-        $isUpdating = $true
+    # Final status precedence
+    if ($defenderScanning) {
+        $status = 'Scanning'
+    }
+    elseif ($defenderUpdating) {
+        $status = 'Updating'
+    }
+    else {
+        $status = 'Idle'
     }
 
-    if ($scanRunning -or $isUpdating) {
-        $isBusy = $true
-    }
-
-    Write-Output $isBusy
+    Write-Host $status
 }
 catch {
-    Write-Output $false
+    Write-Host 'Idle'
 }
+``
