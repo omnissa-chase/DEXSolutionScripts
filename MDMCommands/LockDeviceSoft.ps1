@@ -6,7 +6,7 @@ $LockDevice={
     if(-not $WhatIfPreference){
         tsdiscon.exe console
     }else{
-        Write-Host "Locking machine, using soft lock."
+        Write-Host "WhatIf: Locking machine, using soft lock."
     }
 }
 Try{   
