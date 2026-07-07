@@ -2,7 +2,6 @@
     "CompanyName":       "Omnissa",
     "LogoFile":          ".\\Resources\\Hub.png",
     "AccentColor":       "#7C6AF7",
-    "HeaderBackground":  "#16162A",
     "HubUrl":            "ws1winhub:",
     "SupportText":       "Contact IT Support",
     "SupportUrl":        ""

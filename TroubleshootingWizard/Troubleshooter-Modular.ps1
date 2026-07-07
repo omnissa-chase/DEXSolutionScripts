@@ -42,11 +42,10 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
     [string] $StepsJson,
     [string] $Title          = 'Diagnostics Results',
     [string] $RegistryKey    = '',
-    [string] $XamlFile       = '',
+    [string] $XamlFile       = 'UI-Modern-Light.xaml',
     [switch] $SkipUI,
     [switch] $QuietMode,
     [int]    $TimeoutSeconds = 60,
@@ -68,6 +67,8 @@ function Write-Log {
     $ts     = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $colors = @{ ERROR = 'Red'; WARNING = 'Yellow'; DEBUG = 'Gray'; INFO = 'White' }
     Write-Host "[$ts] [$Level] $Message" -ForegroundColor $colors[$Level]
+    $FileName = (Split-Path $PSCommandPath -Leaf).Replace(".psm1","").Replace(".ps1","")
+    Out-File -FilePath "$PSScriptRoot\$FileName`.log"
 }
 
 # 
@@ -79,9 +80,13 @@ If([string]::IsNullOrEmpty($StepsJson)){
     #Load from the event log
     $Event=Get-WinEvent -ProviderName "TroubleshootingWizard" | Select -First 1
     if($Event){
-        if($Event.Message -match "[^.]*\.json" -and (Test-Path $EventMessage -ErrorAction SilentlyContinue)){
-            $StepsJson = $EventMessage
+        if($Event.Message -match "[^.]*\.json" -and (Test-Path ($Event.Message) -ErrorAction SilentlyContinue)){
+            $StepsJson = $Event.Message
         }
+    }
+    if([string]::IsNullOrEmpty($StepsJson)){
+        Write-Log "Steps JSON file not found: $StepsJson" -Level ERROR
+        exit 1
     }
 }
 
@@ -163,8 +168,16 @@ function Get-StatusProperty {
 function Show-ProgressDialog {
     param(
         [string] $DialogTitle = 'Running Diagnostics...',
-        [int]    $StepCount   = 1
+        [int]    $StepCount   = 1,
+        [bool]   $IsDark      = $true
     )
+
+    $progBg     = if ($IsDark) { '#1E1E2E' } else { '#FFFFFF' }
+    $progBorder = if ($IsDark) { '#3A3A5C' } else { '#D0D5E8' }
+    $progTitle  = if ($IsDark) { 'White'   } else { '#1A1F3C' }
+    $progSub    = if ($IsDark) { '#9999BB' } else { '#7788AA' }
+    $progTrack  = if ($IsDark) { '#2A2A40' } else { '#E8EAF0' }
+    $progFill   = '#7C6AF7'
 
     $sync = [hashtable]::Synchronized(@{
         Window    = $null
@@ -181,16 +194,16 @@ function Show-ProgressDialog {
         WindowStartupLocation="CenterScreen"
         WindowStyle="None" AllowsTransparency="True"
         Background="Transparent" Topmost="True" ResizeMode="NoResize">
-    <Border Background="#1E1E2E" CornerRadius="10"
-            BorderBrush="#3A3A5C" BorderThickness="1">
+    <Border Background="$progBg" CornerRadius="10"
+            BorderBrush="$progBorder" BorderThickness="1">
         <StackPanel Margin="28,22,28,22" VerticalAlignment="Center">
-            <TextBlock Text="$DialogTitle" Foreground="White"
+            <TextBlock Text="$DialogTitle" Foreground="$progTitle"
                        FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
             <TextBlock Name="StepLabel" Text="Starting..."
-                       Foreground="#9999BB" FontSize="11" Margin="0,0,0,12"
+                       Foreground="$progSub" FontSize="11" Margin="0,0,0,12"
                        TextTrimming="CharacterEllipsis"/>
             <ProgressBar Name="PB" Height="5" Minimum="0" Maximum="$StepCount" Value="0"
-                         Background="#2A2A40" Foreground="#7C6AF7"/>
+                         Background="$progTrack" Foreground="$progFill"/>
         </StackPanel>
     </Border>
 </Window>
@@ -262,9 +275,27 @@ function Close-ProgressDialog {
 Write-Log "$RegistryKey - Diagnostics Started"
 Write-Log ('-' * 60)
 
+# Detect theme early so the progress dialog matches the results window
+$earlyIsDark = $true
+$earlyXamlPath = if (-not [string]::IsNullOrEmpty($XamlFile)) { "$PSScriptRoot\$XamlFile" } else { '' }
+if ($earlyXamlPath -and (Test-Path $earlyXamlPath)) {
+    try {
+        $earlyXml = [xml](Get-Content -Path $earlyXamlPath -Raw -Encoding Unicode)
+        $bgAttr   = $earlyXml.DocumentElement.GetAttribute('Background')
+        if ($bgAttr -match '^#([0-9A-Fa-f]{6,8})$') {
+            $hex = $bgAttr -replace '^#', ''
+            if ($hex.Length -eq 8) { $hex = $hex.Substring(2) }
+            $r = [Convert]::ToInt32($hex.Substring(0,2), 16)
+            $g = [Convert]::ToInt32($hex.Substring(2,2), 16)
+            $b = [Convert]::ToInt32($hex.Substring(4,2), 16)
+            $earlyIsDark = ($r + $g + $b) -lt 384
+        }
+    } catch {}
+}
+
 $progressHandle = $null
 if (-not $SkipUI) {
-    $progressHandle = Show-ProgressDialog -DialogTitle "Running $Title..." -StepCount $activeSteps.Count
+    $progressHandle = Show-ProgressDialog -DialogTitle "Running $Title..." -StepCount $activeSteps.Count -IsDark $earlyIsDark
 }
 
 $stepIndex = 0
@@ -374,7 +405,8 @@ $results = $session.Results
 # 
 if ($SkipUI) { exit 0 }
 
-# Load XAML from an external file if provided, otherwise use the embedded default
+# Load XAML from an external file if provided, otherwise exit if not set to silent
+if(-not ([string]::IsNullOrEmpty($XamlFile)) ){ $XamlFile = "$PSScriptRoot\$XamlFile"  }
 if ($XamlFile) {
     if (-not (Test-Path $XamlFile)) {
         Write-Error "XamlFile not found: $XamlFile"
@@ -382,100 +414,20 @@ if ($XamlFile) {
     }
     $xaml = Get-Content -Path $XamlFile -Raw -Encoding Unicode
     Write-Log "Loaded XAML from: $XamlFile" 'INFO'
-} else {
-
-$xaml = @'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Diagnostics Results"
-        Width="720" Height="820"
-        WindowStartupLocation="CenterScreen"
-        Background="#F5F5F5"
-        Topmost="True">
-    <Window.Resources>
-        <Style x:Key="HeaderStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#1976D2"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-        </Style>
-        <Style x:Key="ActionButton" TargetType="Button">
-            <Setter Property="Height" Value="32"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="14,0"/>
-        </Style>
-    </Window.Resources>
-
-    <DockPanel>
-        <!-- Header -->
-        <Border DockPanel.Dock="Top" Background="White"
-                BorderBrush="#E0E0E0" BorderThickness="0,0,0,1" Padding="20,14,20,10">
-            <DockPanel>
-                <!-- Action buttons pinned to the right -->
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
-                            VerticalAlignment="Top" Margin="0,2,0,0">
-                    <Button Name="FixAllButton" Content="Attempt Fix All"
-                            Style="{StaticResource ActionButton}"
-                            Background="#E65100" Margin="0,0,8,0"/>
-                    <Button Name="CloseButton" Content="Close"
-                            Style="{StaticResource ActionButton}"
-                            Background="#2196F3"/>
-                </StackPanel>
-                <!-- Title + timestamp on the left -->
-                <StackPanel DockPanel.Dock="Left">
-                    <TextBlock Name="HeaderTitle" Text="Diagnostics Results" FontSize="20"
-                               Style="{StaticResource HeaderStyle}" Margin="0,0,0,3"/>
-                    <TextBlock Name="TimestampText" Text="Completed at: ..."
-                               FontSize="11" Foreground="#666666"/>
-                    <TextBlock Name="FixAllStatus" Text="" FontSize="10"
-                               Foreground="#555555" Margin="0,3,0,0" TextWrapping="Wrap"/>
-                </StackPanel>
-            </DockPanel>
-        </Border>
-
-        <!-- Auto-close progress bar -->
-        <ProgressBar Name="TimeoutProgress" DockPanel.Dock="Top" Height="3"
-                     Foreground="#2196F3" Background="#E0E0E0"/>
-        <TextBlock Name="TimeoutText" DockPanel.Dock="Top" FontSize="9"
-                   Foreground="#AAAAAA" Margin="20,2,0,4" Text="Auto-closing..."/>
-
-        <!-- Summary counts -->
-        <Border DockPanel.Dock="Top" Background="White"
-                BorderBrush="#E0E0E0" BorderThickness="0,0,0,1"
-                Padding="20,12" Margin="0,0,0,8">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0">
-                    <TextBlock Text="Passed"   Foreground="#999999" FontSize="11"/>
-                    <TextBlock Name="PassedCount"  Text="0" Foreground="#4CAF50" FontSize="24" FontWeight="Bold"/>
-                </StackPanel>
-                <StackPanel Grid.Column="1">
-                    <TextBlock Text="Failed"   Foreground="#999999" FontSize="11"/>
-                    <TextBlock Name="FailedCount"  Text="0" Foreground="#F44336" FontSize="24" FontWeight="Bold"/>
-                </StackPanel>
-                <StackPanel Grid.Column="2">
-                    <TextBlock Text="Warnings" Foreground="#999999" FontSize="11"/>
-                    <TextBlock Name="WarningCount" Text="0" Foreground="#FF9800" FontSize="24" FontWeight="Bold"/>
-                </StackPanel>
-            </Grid>
-        </Border>
-
-        <!-- Scrollable step cards -->
-        <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto"
-                      Background="Transparent">
-            <StackPanel Name="ResultsPanel" Margin="20,0,20,10" Background="Transparent"/>
-        </ScrollViewer>
-    </DockPanel>
-</Window>
-'@
-
-} # end else (embedded XAML)
+} 
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Windows.Forms
+
+#region --- WPF helper functions ---
+function New-Brush  { param([string]$Color) New-Object Windows.Media.SolidColorBrush($Color) }
+function New-Pad    { param([double]$L=0,[double]$T=0,[double]$R=0,[double]$B=0) New-Object Windows.Thickness($L,$T,$R,$B) }
+function New-TextBlock {
+    param([hashtable]$Props)
+    $tb = New-Object Windows.Controls.TextBlock
+    foreach ($kv in $Props.GetEnumerator()) { $tb.($kv.Key) = $kv.Value }
+    $tb
+}
+#endregion
 
 try {
     # Load XAML
@@ -487,6 +439,39 @@ try {
     $isDark   = $true
     if ($winBg -is [Windows.Media.SolidColorBrush]) {
         $isDark = ($winBg.Color.R + $winBg.Color.G + $winBg.Color.B) -lt 384
+    }
+
+    # Theme color palette — resolved once here; every color reference below uses $theme.*
+    $theme = if ($isDark) {
+        @{
+            CardBgNormal     = '#1A1A2E'; CardBgHover      = '#1E1E3A'
+            StepName         = '#E8E8F0'; StepDesc         = '#6666AA'
+            DiagMsg          = '#AAAACC'; TrtText          = '#8888BB'
+            ResBg            = '#1F1808'; ResBorder        = '#FBBF24'
+            ResHeader        = '#FBBF24'; ResBody          = '#E8D9A0'
+            FixStatus        = '#9999BB'; ItNote           = '#7777AA'
+            PassBannerBg     = '#0D2218'; PassBannerBorder = '#1A5C35'; PassText = '#4ADE80'
+            WarnBannerBg     = '#1F1808'; WarnBannerBorder = '#5C4A1A'; WarnText = '#FBBF24'
+            FailBannerBg     = '#1F0D0D'; FailBannerBorder = '#5C1A1A'; FailText = '#F87171'
+            ActionBlueFg     = '#5599FF'
+            HubBtnBg         = '#252550'; HubBtnFg         = '#9090FF'
+            HeaderBg         = '#16162A'
+        }
+    } else {
+        @{
+            CardBgNormal     = '#FFFFFF'; CardBgHover      = '#F5F6FC'
+            StepName         = '#1A1F3C'; StepDesc         = '#7788AA'
+            DiagMsg          = '#445577'; TrtText          = '#6677AA'
+            ResBg            = '#FFFBF0'; ResBorder        = '#E0A020'
+            ResHeader        = '#A06010'; ResBody          = '#5C3A00'
+            FixStatus        = '#556688'; ItNote           = '#5566AA'
+            PassBannerBg     = '#EDF7F1'; PassBannerBorder = '#A8D8B8'; PassText = '#1E6E42'
+            WarnBannerBg     = '#FFFBF0'; WarnBannerBorder = '#F0D888'; WarnText = '#8A5C00'
+            FailBannerBg     = '#FFF0F0'; FailBannerBorder = '#F0A8A8'; FailText = '#B02020'
+            ActionBlueFg     = '#1565C0'
+            HubBtnBg         = '#EEF0FF'; HubBtnFg         = '#3344BB'
+            HeaderBg         = '#FFFFFF'
+        }
     }
 
     # Set dynamic title
@@ -512,7 +497,7 @@ try {
         CompanyName      = 'Omnissa'
         LogoFile         = ''
         AccentColor      = '#7C6AF7'
-        HeaderBackground = '#16162A'
+        HeaderBackground = ''
         HubUrl           = 'ws1winhub:'
         SupportText      = 'Contact IT Support'
         SupportUrl       = ''
@@ -528,8 +513,9 @@ try {
         } catch { Write-Log "Could not parse Branding.json: $_" 'WARNING' }
     }
 
-    # Apply branding colors
-    $window.FindName('HeaderBar').Background         = New-Object Windows.Media.SolidColorBrush($branding.HeaderBackground)
+    # Apply branding colors — fall back to theme header color when Branding.json doesn't supply one
+    $headerBgColor = if ($branding.HeaderBackground) { $branding.HeaderBackground } else { $theme.HeaderBg }
+    $window.FindName('HeaderBar').Background         = New-Object Windows.Media.SolidColorBrush($headerBgColor)
     $window.FindName('FixAllButton').Background      = New-Object Windows.Media.SolidColorBrush($branding.AccentColor)
     $window.FindName('TimeoutProgress').Foreground   = New-Object Windows.Media.SolidColorBrush($branding.AccentColor)
 
@@ -563,27 +549,27 @@ try {
     $conclusionIcon   = $window.FindName('ConclusionIcon')
     $conclusionText   = $window.FindName('ConclusionText')
     if ($results.Failed -eq 0 -and $results.Warnings -eq 0) {
-        $conclusionBanner.Background    = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#0D2218'}else{'#EDF7F1'}))
-        $conclusionBanner.BorderBrush   = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#1A5C35'}else{'#A8D8B8'}))
+        $conclusionBanner.Background    = New-Brush $theme.PassBannerBg
+        $conclusionBanner.BorderBrush   = New-Brush $theme.PassBannerBorder
         $conclusionIcon.Text            = [char]0x2705
         $conclusionText.Text            = 'All checks passed. No action required.'
-        $conclusionText.Foreground      = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#4ADE80'}else{'#1E6E42'}))
+        $conclusionText.Foreground      = New-Brush $theme.PassText
     } elseif ($results.Failed -eq 0) {
-        $conclusionBanner.Background    = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#1F1808'}else{'#FFFBF0'}))
-        $conclusionBanner.BorderBrush   = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#5C4A1A'}else{'#F0D888'}))
+        $conclusionBanner.Background    = New-Brush $theme.WarnBannerBg
+        $conclusionBanner.BorderBrush   = New-Brush $theme.WarnBannerBorder
         $conclusionIcon.Text            = [char]0x26A0 + [char]0xFE0F
         $w = $results.Warnings
         $conclusionText.Text            = "$w warning$(if($w -ne 1){'s'}) found. Review the descriptions below - no action may be needed."
-        $conclusionText.Foreground      = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#FBBF24'}else{'#8A5C00'}))
+        $conclusionText.Foreground      = New-Brush $theme.WarnText
     } else {
-        $conclusionBanner.Background    = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#1F0D0D'}else{'#FFF0F0'}))
-        $conclusionBanner.BorderBrush   = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#5C1A1A'}else{'#F0A8A8'}))
+        $conclusionBanner.Background    = New-Brush $theme.FailBannerBg
+        $conclusionBanner.BorderBrush   = New-Brush $theme.FailBannerBorder
         $conclusionIcon.Text            = [char]0x274C
         $f = $results.Failed; $w = $results.Warnings
         $msg = "$f error$(if($f -ne 1){'s'}) found"
         if ($w -gt 0) { $msg += " and $w warning$(if($w -ne 1){'s'})" }
         $conclusionText.Text            = "$msg. Use Fix It on affected steps or contact IT."
-        $conclusionText.Foreground      = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#F87171'}else{'#B02020'}))
+        $conclusionText.Foreground      = New-Brush $theme.FailText
     }
 
     $panel = $window.FindName('ResultsPanel')
@@ -602,14 +588,14 @@ try {
 
         # Card border
         $card                  = New-Object Windows.Controls.Border
-        $card.Background       = New-Object Windows.Media.SolidColorBrush('#1A1A2E')
-        $card.BorderBrush      = New-Object Windows.Media.SolidColorBrush($statusColor)
-        $card.BorderThickness  = New-Object Windows.Thickness(3, 1, 1, 1)
+        $card.Background       = New-Brush $theme.CardBgNormal
+        $card.BorderBrush      = New-Brush $statusColor
+        $card.BorderThickness  = New-Pad 3 1 1 1
         $card.CornerRadius     = New-Object Windows.CornerRadius(6)
-        $card.Padding          = New-Object Windows.Thickness(15, 12, 15, 12)
-        $card.Margin           = New-Object Windows.Thickness(0, 0, 0, 8)
-        $cardBgNormal = if($isDark){'#1A1A2E'}else{'#FFFFFF'}
-        $cardBgHover  = if($isDark){'#1E1E3A'}else{'#F5F6FC'}
+        $card.Padding          = New-Pad 15 12 15 12
+        $card.Margin           = New-Pad 0 0 0 8
+        $cardBgNormal = $theme.CardBgNormal
+        $cardBgHover  = $theme.CardBgHover
 
         # Inner grid: 3 cols x 4 rows
         $grid = New-Object Windows.Controls.Grid
@@ -628,107 +614,78 @@ try {
         $indicator.Width            = 26
         $indicator.Height           = 26
         $indicator.VerticalAlignment = 'Top'
-        $indicator.Margin           = New-Object Windows.Thickness(0, 2, 10, 0)
+        $indicator.Margin           = New-Pad 0 2 10 0
         [Windows.Controls.Grid]::SetColumn($indicator, 0)
         [Windows.Controls.Grid]::SetRowSpan($indicator, 4)
 
         $ellipse      = New-Object Windows.Shapes.Ellipse
-        $ellipse.Fill = New-Object Windows.Media.SolidColorBrush($statusColor)
+        $ellipse.Fill = New-Brush $statusColor
 
-        $sym                     = New-Object Windows.Controls.TextBlock
-        $sym.Text                = $statusSymbol
-        $sym.Foreground          = New-Object Windows.Media.SolidColorBrush('White')
-        $sym.HorizontalAlignment = 'Center'
-        $sym.VerticalAlignment   = 'Center'
-        $sym.FontWeight          = 'Bold'
-        $sym.FontSize            = 12
+        $sym = New-TextBlock @{
+            Text = $statusSymbol; Foreground = (New-Brush 'White')
+            HorizontalAlignment = 'Center'; VerticalAlignment = 'Center'
+            FontWeight = 'Bold'; FontSize = 12
+        }
         $indicator.Children.Add($ellipse) | Out-Null
         $indicator.Children.Add($sym)     | Out-Null
 
         # Row 0: Step name
-        $nameText            = New-Object Windows.Controls.TextBlock
-        $nameText.Text       = $step.Name
-        $nameText.FontSize   = 13
-        $nameText.FontWeight = 'Bold'
-        $nameText.Foreground = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#E8E8F0'}else{'#1A1F3C'}))
+        $nameText = New-TextBlock @{ Text = $step.Name; FontSize = 13; FontWeight = 'Bold'; Foreground = (New-Brush $theme.StepName) }
         [Windows.Controls.Grid]::SetColumn($nameText, 1)
         [Windows.Controls.Grid]::SetRow($nameText, 0)
 
         # Row 0 col 2: Status badge
-        $badge                     = New-Object Windows.Controls.TextBlock
-        $badge.Text                = $step.Status
-        $badge.FontSize            = 11
-        $badge.FontWeight          = 'Bold'
-        $badge.Foreground          = New-Object Windows.Media.SolidColorBrush($statusColor)
-        $badge.HorizontalAlignment = 'Right'
-        $badge.VerticalAlignment   = 'Top'
+        $badge = New-TextBlock @{
+            Text = $step.Status; FontSize = 11; FontWeight = 'Bold'
+            Foreground = (New-Brush $statusColor); HorizontalAlignment = 'Right'; VerticalAlignment = 'Top'
+        }
         [Windows.Controls.Grid]::SetColumn($badge, 2)
         [Windows.Controls.Grid]::SetRow($badge, 0)
 
         # Row 1: Description
-        $descText              = New-Object Windows.Controls.TextBlock
-        $descText.Text         = $step.Description
-        $descText.FontSize     = 10
-        $descText.Foreground   = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#6666AA'}else{'#7788AA'}))
-        $descText.FontStyle    = 'Italic'
-        $descText.TextWrapping = 'Wrap'
-        $descText.Margin       = New-Object Windows.Thickness(0, 1, 0, 0)
+        $descText = New-TextBlock @{
+            Text = $step.Description; FontSize = 10; FontStyle = 'Italic'; TextWrapping = 'Wrap'
+            Foreground = (New-Brush $theme.StepDesc); Margin = (New-Pad 0 1 0 0)
+        }
         [Windows.Controls.Grid]::SetColumn($descText, 1)
         [Windows.Controls.Grid]::SetColumnSpan($descText, 2)
         [Windows.Controls.Grid]::SetRow($descText, 1)
 
         # Row 2: Diagnostic message + TestResultText
         $msgStack = New-Object Windows.Controls.StackPanel
-        $msgStack.Margin = New-Object Windows.Thickness(0, 4, 0, 0)
+        $msgStack.Margin = New-Pad 0 4 0 0
         [Windows.Controls.Grid]::SetColumn($msgStack, 1)
         [Windows.Controls.Grid]::SetColumnSpan($msgStack, 2)
         [Windows.Controls.Grid]::SetRow($msgStack, 2)
 
-        $diagMsg              = New-Object Windows.Controls.TextBlock
-        $diagMsg.Text         = $step.Message
-        $diagMsg.FontSize     = 11
-        $diagMsg.Foreground   = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#AAAACC'}else{'#445577'}))
-        $diagMsg.TextWrapping = 'Wrap'
+        $diagMsg = New-TextBlock @{ Text = $step.Message; FontSize = 11; TextWrapping = 'Wrap'; Foreground = (New-Brush $theme.DiagMsg) }
         $msgStack.Children.Add($diagMsg) | Out-Null
 
         if ($step.TestResultText) {
-            $trtText              = New-Object Windows.Controls.TextBlock
-            $trtText.Text         = $step.TestResultText
-            $trtText.FontSize     = 11
-            $trtText.Foreground   = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#8888BB'}else{'#6677AA'}))
-            $trtText.FontStyle    = 'Italic'
-            $trtText.TextWrapping = 'Wrap'
-            $trtText.Margin       = New-Object Windows.Thickness(0, 2, 0, 0)
+            $trtText = New-TextBlock @{
+                Text = $step.TestResultText; FontSize = 11; FontStyle = 'Italic'; TextWrapping = 'Wrap'
+                Foreground = (New-Brush $theme.TrtText); Margin = (New-Pad 0 2 0 0)
+            }
             $msgStack.Children.Add($trtText) | Out-Null
         }
 
         # Row 3: Resolution steps (only for non-Passed with text)
         if ($step.Status -ne 'Passed' -and $step.ResolutionText) {
             $resBorder                 = New-Object Windows.Controls.Border
-            $resBorder.Background      = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#1F1808'}else{'#FFFBF0'}))
-            $resBorder.BorderBrush     = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#FBBF24'}else{'#E0A020'}))
-            $resBorder.BorderThickness = New-Object Windows.Thickness(3, 0, 0, 0)
+            $resBorder.Background      = New-Brush $theme.ResBg
+            $resBorder.BorderBrush     = New-Brush $theme.ResBorder
+            $resBorder.BorderThickness = New-Pad 3 0 0 0
             $resBorder.CornerRadius    = New-Object Windows.CornerRadius(0, 4, 4, 0)
-            $resBorder.Padding         = New-Object Windows.Thickness(8, 6, 8, 6)
-            $resBorder.Margin          = New-Object Windows.Thickness(0, 8, 0, 0)
+            $resBorder.Padding         = New-Pad 8 6 8 6
+            $resBorder.Margin          = New-Pad 0 8 0 0
             [Windows.Controls.Grid]::SetColumn($resBorder, 1)
             [Windows.Controls.Grid]::SetColumnSpan($resBorder, 2)
             [Windows.Controls.Grid]::SetRow($resBorder, 3)
 
             $resStack = New-Object Windows.Controls.StackPanel
 
-            $resHeader            = New-Object Windows.Controls.TextBlock
-            $resHeader.Text       = 'Resolution Steps'
-            $resHeader.FontSize   = 10
-            $resHeader.FontWeight = 'Bold'
-            $resHeader.Foreground = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#FBBF24'}else{'#A06010'}))
-            $resHeader.Margin     = New-Object Windows.Thickness(0, 0, 0, 4)
-
-            $resBody              = New-Object Windows.Controls.TextBlock
-            $resBody.Text         = $step.ResolutionText
-            $resBody.FontSize     = 11
-            $resBody.Foreground   = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#E8D9A0'}else{'#5C3A00'}))
-            $resBody.TextWrapping = 'Wrap'
+            $resHeader = New-TextBlock @{ Text = 'Resolution Steps'; FontSize = 10; FontWeight = 'Bold'; Foreground = (New-Brush $theme.ResHeader); Margin = (New-Pad 0 0 0 4) }
+            $resBody   = New-TextBlock @{ Text = $step.ResolutionText; FontSize = 11; TextWrapping = 'Wrap'; Foreground = (New-Brush $theme.ResBody) }
 
             $resStack.Children.Add($resHeader) | Out-Null
             $resStack.Children.Add($resBody)   | Out-Null
@@ -736,7 +693,7 @@ try {
             # Fix It button row (only for Failed steps with a ResolutionScript)
             if ($step.Status -eq 'Failed' -and $step.ResolutionScript) {
                 $fixRow = New-Object Windows.Controls.DockPanel
-                $fixRow.Margin = New-Object Windows.Thickness(0, 8, 0, 0)
+                $fixRow.Margin = New-Pad 0 8 0 0
 
                 $fixBtn                     = New-Object Windows.Controls.Button
                 $fixBtn.Content             = 'Fix It'
@@ -744,42 +701,41 @@ try {
                 $fixBtn.Height              = 26
                 $fixBtn.FontSize            = 11
                 $fixBtn.FontWeight          = 'Bold'
-                $fixBtn.Background          = New-Object Windows.Media.SolidColorBrush('#E65100')
-                $fixBtn.Foreground          = New-Object Windows.Media.SolidColorBrush('White')
-                $fixBtn.BorderThickness     = New-Object Windows.Thickness(0)
+                $fixBtn.Background          = New-Brush '#E65100'
+                $fixBtn.Foreground          = New-Brush 'White'
+                $fixBtn.BorderThickness     = New-Pad 0 0 0 0
                 $fixBtn.Cursor              = 'Hand'
                 [Windows.Controls.DockPanel]::SetDock($fixBtn, 'Left')
 
-                $fixStatus                  = New-Object Windows.Controls.TextBlock
-                $fixStatus.FontSize         = 10
-                $fixStatus.VerticalAlignment = 'Center'
-                $fixStatus.Margin           = New-Object Windows.Thickness(10, 0, 0, 0)
-                $fixStatus.TextWrapping     = 'Wrap'
-                $fixStatus.Foreground       = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#9999BB'}else{'#556688'}))
-                $fixStatus.Text             = 'Click to run the resolution script automatically.'
+                $fixStatus = New-TextBlock @{
+                    FontSize = 10; VerticalAlignment = 'Center'; TextWrapping = 'Wrap'
+                    Margin = (New-Pad 10 0 0 0); Foreground = (New-Brush $theme.FixStatus)
+                    Text = 'Click to run the resolution script automatically.'
+                }
 
                 # Capture script text in a local variable for the closure
                 $capturedScript = $step.ResolutionScript
                 $capturedBtn    = $fixBtn
                 $capturedStatus = $fixStatus
 
+                $capturedTheme = $theme
                 $fixBtn.Add_Click({
-                    $capturedBtn.IsEnabled  = $false
-                    $capturedBtn.Content    = 'Running...'
-                    $capturedStatus.Text    = 'Running resolution script...'
-                    $capturedStatus.Foreground = New-Object Windows.Media.SolidColorBrush('#1565C0')
+                    $capturedBtn.IsEnabled     = $false
+                    $capturedBtn.Content       = 'Running...'
+                    $capturedStatus.Text       = 'Running resolution script...'
+                    $capturedStatus.Foreground = New-Brush $capturedTheme.ActionBlueFg
                     try {
                         $sb = [scriptblock]::Create($capturedScript)
                         & $sb | Out-Null
                         $capturedBtn.Content       = 'Done'
-                        $capturedBtn.Background    = New-Object Windows.Media.SolidColorBrush('#2E7D32')
+                        $capturedBtn.Background    = New-Brush '#2E7D32'
                         $capturedStatus.Text       = 'Resolution script completed successfully.'
-                        $capturedStatus.Foreground = New-Object Windows.Media.SolidColorBrush('#1B5E20')
+                        $capturedStatus.Foreground = New-Brush $capturedTheme.PassText
                     } catch {
                         $capturedBtn.Content       = 'Failed'
-                        $capturedBtn.Background    = New-Object Windows.Media.SolidColorBrush('#B71C1C')
+                        $capturedBtn.Background    = New-Brush '#B71C1C'
                         $capturedStatus.Text       = "Error: $($_.Exception.Message)"
-                        $capturedStatus.Foreground = New-Object Windows.Media.SolidColorBrush('#B71C1C')
+                        $capturedStatus.Foreground = New-Brush $capturedTheme.FailText
                     }
                 })
 
@@ -795,29 +751,27 @@ try {
             # Warning: Hub + IT contact callout (no Fix It for warnings)
             if ($step.Status -eq 'Warning') {
                 $warnRow        = New-Object Windows.Controls.DockPanel
-                $warnRow.Margin = New-Object Windows.Thickness(0, 10, 0, 0)
+                $warnRow.Margin = New-Pad 0 10 0 0
 
                 $hubBtn                 = New-Object Windows.Controls.Button
                 $hubBtn.Content         = 'Open Intelligent Hub'
                 $hubBtn.Height          = 26
                 $hubBtn.FontSize        = 11
                 $hubBtn.FontWeight      = 'SemiBold'
-                $hubBtn.Background      = New-Object Windows.Media.SolidColorBrush('#252550')
-                $hubBtn.Foreground      = New-Object Windows.Media.SolidColorBrush('#9090FF')
-                $hubBtn.BorderThickness = New-Object Windows.Thickness(0)
-                $hubBtn.Padding         = New-Object Windows.Thickness(12, 0, 12, 0)
+                $hubBtn.Background      = New-Brush $theme.HubBtnBg
+                $hubBtn.Foreground      = New-Brush $theme.HubBtnFg
+                $hubBtn.BorderThickness = New-Pad 0 0 0 0
+                $hubBtn.Padding         = New-Pad 12 0 12 0
                 $hubBtn.Cursor          = 'Hand'
                 $capturedHubUrl = $branding.HubUrl
                 $hubBtn.Add_Click({ Start-Process $capturedHubUrl })
                 [Windows.Controls.DockPanel]::SetDock($hubBtn, 'Left')
 
-                $itNote                   = New-Object Windows.Controls.TextBlock
-                $itNote.Text              = 'Contact IT - Check Intelligent Hub for potential solutions'
-                $itNote.FontSize          = 10
-                $itNote.Foreground        = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#7777AA'}else{'#5566AA'}))
-                $itNote.VerticalAlignment = 'Center'
-                $itNote.Margin            = New-Object Windows.Thickness(12, 0, 0, 0)
-                $itNote.TextWrapping      = 'Wrap'
+                $itNote = New-TextBlock @{
+                    Text = 'Contact IT - Check Intelligent Hub for potential solutions'
+                    FontSize = 10; VerticalAlignment = 'Center'; TextWrapping = 'Wrap'
+                    Foreground = (New-Brush $theme.ItNote); Margin = (New-Pad 12 0 0 0)
+                }
 
                 $warnRow.Children.Add($hubBtn) | Out-Null
                 $warnRow.Children.Add($itNote) | Out-Null
@@ -831,7 +785,7 @@ try {
                 $remBanner            = New-Object Windows.Controls.TextBlock
                 $remBanner.Text       = '[Auto-Fixed]  ' + $step.RemediationStatus
                 $remBanner.FontSize   = 10
-                $remBanner.Foreground = New-Object Windows.Media.SolidColorBrush('#1B5E20')
+                $remBanner.Foreground = New-Brush $theme.PassText
                 $remBanner.Margin     = New-Object Windows.Thickness(0, 4, 0, 0)
                 $resStack.Children.Add($remBanner) | Out-Null
             }
@@ -871,11 +825,12 @@ try {
     $capturedFixAllBtn = $fixAllBtn
     $capturedFixAllSt  = $fixAllStatus
 
+    $capturedThemeFA = $theme
     $fixAllBtn.Add_Click({
         $capturedFixAllBtn.IsEnabled = $false
         $capturedFixAllBtn.Content   = 'Running...'
         $capturedFixAllSt.Text       = 'Running resolution scripts - please wait...'
-        $capturedFixAllSt.Foreground = New-Object Windows.Media.SolidColorBrush('#1565C0')
+        $capturedFixAllSt.Foreground = New-Object Windows.Media.SolidColorBrush($capturedThemeFA.ActionBlueFg)
 
         $ran = 0; $failed = 0
 
@@ -887,7 +842,7 @@ try {
                 $capturedFixBtns[$s.Name].IsEnabled = $false
                 $capturedFixBtns[$s.Name].Content   = 'Running...'
                 $capturedFixStats[$s.Name].Text      = 'Running...'
-                $capturedFixStats[$s.Name].Foreground = New-Object Windows.Media.SolidColorBrush('#1565C0')
+                $capturedFixStats[$s.Name].Foreground = New-Object Windows.Media.SolidColorBrush($capturedThemeFA.ActionBlueFg)
             }
 
             try {
@@ -898,7 +853,7 @@ try {
                     $capturedFixBtns[$s.Name].Content    = 'Done'
                     $capturedFixBtns[$s.Name].Background = New-Object Windows.Media.SolidColorBrush('#2E7D32')
                     $capturedFixStats[$s.Name].Text      = 'Completed successfully.'
-                    $capturedFixStats[$s.Name].Foreground = New-Object Windows.Media.SolidColorBrush('#1B5E20')
+                    $capturedFixStats[$s.Name].Foreground = New-Object Windows.Media.SolidColorBrush($capturedThemeFA.PassText)
                 }
             } catch {
                 $failed++
@@ -906,7 +861,7 @@ try {
                     $capturedFixBtns[$s.Name].Content    = 'Failed'
                     $capturedFixBtns[$s.Name].Background = New-Object Windows.Media.SolidColorBrush('#B71C1C')
                     $capturedFixStats[$s.Name].Text      = "Error: $($_.Exception.Message)"
-                    $capturedFixStats[$s.Name].Foreground = New-Object Windows.Media.SolidColorBrush('#B71C1C')
+                    $capturedFixStats[$s.Name].Foreground = New-Object Windows.Media.SolidColorBrush($capturedThemeFA.FailText)
                 }
             }
         }
@@ -915,12 +870,12 @@ try {
             $capturedFixAllBtn.Content    = 'All Done'
             $capturedFixAllBtn.Background = New-Object Windows.Media.SolidColorBrush('#2E7D32')
             $capturedFixAllSt.Text        = "$ran script(s) ran successfully."
-            $capturedFixAllSt.Foreground  = New-Object Windows.Media.SolidColorBrush('#1B5E20')
+            $capturedFixAllSt.Foreground  = New-Object Windows.Media.SolidColorBrush($capturedThemeFA.PassText)
         } else {
             $capturedFixAllBtn.Content    = 'Partial'
             $capturedFixAllBtn.Background = New-Object Windows.Media.SolidColorBrush('#F57F17')
             $capturedFixAllSt.Text        = "$ran succeeded, $failed failed. Review individual cards above."
-            $capturedFixAllSt.Foreground  = New-Object Windows.Media.SolidColorBrush('#E65100')
+            $capturedFixAllSt.Foreground  = New-Object Windows.Media.SolidColorBrush($capturedThemeFA.WarnText)
         }
     })
 
