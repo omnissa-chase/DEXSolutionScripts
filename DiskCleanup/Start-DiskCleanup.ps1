@@ -1,4 +1,29 @@
-﻿# DISKCLN script for clearing space
+﻿<#
+.SYNOPSIS
+    Runs Windows Disk Cleanup targeting specific system cleanup categories.
+
+.DESCRIPTION
+    Automates the Windows built-in Disk Cleanup utility (cleanmgr.exe) by
+    programmatically configuring cleanup options via the registry and executing
+    a cleanup profile. Targets system-level categories such as previous Windows
+    installations, update artifacts, error dumps, and upgrade log files.
+    Upon completion, outputs the amount of disk space reclaimed in GB.
+
+.NOTES
+    Script Name  : DEX_Start-DiskCleanup.ps1
+    Version      : 1.0.0
+    Architecture : Any (x86/x64)
+    Context      : System
+    Author       : Chase Bradley
+    Last Modified: 2026-07-08
+
+    Workspace ONE Script Configuration:
+      - Execution Context : System
+      - Architecture      : Any
+      - Timeout (seconds) : 60
+#>
+
+# DISKCLN script for clearing space
 # Get current free space on C: drive in GB (rounded down to integer)
 $CurrentFreeSpace = (Get-Volume -DriveLetter "C" | Select @{Name="SizeGb"; Expression={[int]($_.SizeRemaining / 1GB)}}).SizeGB
 

@@ -8,7 +8,7 @@
     as a remote MDM command deployed through Omnissa Workspace ONE.
 
 .NOTES
-    Script Name  : SignoffDevice.ps1
+    Script Name  : DEX_Invoke-SignoffCurrentUser.ps1
     Version      : 1.5.1
     Architecture : Any (x86/x64)
     Context      : System
