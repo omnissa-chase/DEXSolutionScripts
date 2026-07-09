@@ -36,6 +36,12 @@
 .EXAMPLE
     .\TroubleshootWizard.ps1 -StepsJson ".\NetworkDiagSteps.json" -SkipUI
     # Runs silently; no WPF even if TroubleshootWizard-UI.ps1 is present
+
+.DISCLAIMER
+    These scripts are provided "AS IS". It is the administrator's sole responsibility
+    to test and validate scripts in a non-production environment before deployment.
+    The author(s) accept no liability for damage, data loss, or unintended consequences.
+    See LICENSE in the repository root for full license terms (MIT).
 #>
 
 [CmdletBinding()]

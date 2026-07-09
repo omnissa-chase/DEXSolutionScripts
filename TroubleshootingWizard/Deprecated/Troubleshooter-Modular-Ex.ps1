@@ -35,6 +35,12 @@
     .\Troubleshooter-Modular.ps1 -StepsJson ".\NetworkDiagSteps.json"
 .EXAMPLE
     .\Troubleshooter-Modular.ps1 -StepsJson "C:\Diag\AppSteps.json" -Title "App Health Check" -AutoRemediate
+
+.DISCLAIMER
+    These scripts are provided "AS IS". It is the administrator's sole responsibility
+    to test and validate scripts in a non-production environment before deployment.
+    The author(s) accept no liability for damage, data loss, or unintended consequences.
+    See LICENSE in the repository root for full license terms (MIT).
 #>
 
 [CmdletBinding()]
@@ -555,7 +561,7 @@ try {
         $conclusionBanner.BorderBrush   = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#5C4A1A'}else{'#F0D888'}))
         $conclusionIcon.Text            = [char]0x26A0 + [char]0xFE0F
         $w = $results.Warnings
-        $conclusionText.Text            = "$w warning$(if($w -ne 1){'s'}) found. Review the descriptions below” no action may be needed."
+        $conclusionText.Text            = "$w warning$(if($w -ne 1){'s'}) found. Review the descriptions belowï¿½ no action may be needed."
         $conclusionText.Foreground      = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#FBBF24'}else{'#8A5C00'}))
     } else {
         $conclusionBanner.Background    = New-Object Windows.Media.SolidColorBrush($(if($isDark){'#1F0D0D'}else{'#FFF0F0'}))

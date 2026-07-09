@@ -1,4 +1,34 @@
+#Requires -Version 7.0
 <#
+.SYNOPSIS
+    Deploys an interactive, deferrable reboot prompt to managed Windows devices.
+
+.DESCRIPTION
+    Installs a SYSTEM-context scheduled task orchestrator that periodically checks
+    whether a reboot is required. When active user sessions are found, a per-user
+    WinRT toast notification is displayed giving the user the option to reboot
+    immediately or defer. After the configured deadline passes the reboot becomes
+    mandatory and a countdown shutdown is initiated automatically.
+
+    This _Ex variant requires PowerShell 7 (pwsh.exe) and leverages PS7-native
+    syntax including null-coalescing (??) and null-conditional (?.) operators.
+    The scheduled task orchestrator and per-user toast helper are both launched
+    via pwsh.exe rather than the legacy Windows PowerShell host.
+
+.NOTES
+    Script Name  : Invoke_RebootWithUserDefer_Ex_1.2.0.7.ps1
+    Version      : 1.2.0.7
+    Architecture : Any (x86/x64)
+    Context      : System
+    Author       : Chase Bradley
+    Last Modified: 2026-07-08
+    Requires     : PowerShell 7.0+
+
+    Workspace ONE Script Configuration:
+      - Execution Context : System
+      - Architecture      : Any
+      - Timeout (seconds) : 30
+
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
     to test and validate scripts in a non-production environment before deployment.
@@ -23,14 +53,19 @@ $PollMinutes = 5 # how often to check reboot in seconds
 $BasePath = "$env:ProgramData\AirWatch\Extensions\AdvancedReboot"
 $MachineKey = 'HKLM:\Software\AirWatch\Extensions\AdvancedReboot'
 
+# Resolve the PowerShell 7 executable — prefer the running instance's path,
+# fall back to the standard PS7 install location.
+$PwshExe = (Get-Command pwsh -ErrorAction SilentlyContinue)?.Source ??
+            (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe')
+
 # ===================== INSTALL FUNCTION =====================   
 Function Invoke-RebootPrompt{
 [CmdletBinding(SupportsShouldProcess=$true)]
 param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeconds = 300,[int]$PollMinutes = 15,
     [string]$BasePath = "$env:ProgramData\AirWatch\Extensions\AdvancedReboot",
-    [string]$MachineKey = 'HKLM:\Software\AirWatch\Extensions\AdvancedReboot'
+    [string]$MachineKey = 'HKLM:\Software\AirWatch\Extensions\AdvancedReboot',
+    [string]$PwshExe = 'pwsh.exe'
 )
-    
     $TaskPath = '\WorkspaceOneEx\'
     $TaskName = 'RebootPrompt-Orchestrator'
     # -------- Policy Limits ----------
@@ -43,7 +78,7 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
     
     $lastBootOld=$false
     $lastBoot = $(Get-CimInstance Win32_OperatingSystem).LastBootUpTime
-    $firstRunAt = (Get-ItemProperty -Path $MachineKey -ErrorAction SilentlyContinue | Select-Object "FirstRunAt" -ExpandProperty "FirstRunAt" -ErrorAction SilentlyContinue)
+    $firstRunAt = (Get-ItemProperty -Path $MachineKey -ErrorAction SilentlyContinue)?.FirstRunAt
     If($firstRunAt){
         $dtFirstRunAt = [datetime]::Parse($firstRunAt) 
         $dtDiff=$dtFirstRunAt.Subtract($lastBoot)
@@ -53,7 +88,7 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
     $taskOld=$false
     $ScheduledTask = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
     $ScheduledTaskInstallDate = $null
-    If($ScheduledTask.Description){ $ScheduledTaskInstallDate = $ScheduledTask.Description -as [datetime] }
+    If($ScheduledTask?.Description){ $ScheduledTaskInstallDate = $ScheduledTask.Description -as [datetime] }
     If($ScheduledTaskInstallDate){
         $taskOld=$(Get-Date).Subtract($ScheduledTaskInstallDate).TotalHours -gt $MaxHours
     }
@@ -72,7 +107,7 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
         Write-Verbose "Removing helper scripts."           
     }
    
-    if(($ScheduledTask | Measure).Count -and $taskOld){
+    if(@($ScheduledTask).Count -and $taskOld){
         Write-Verbose "Reboot has occured, removing scheduled task."            
         # Remove Scheduled Task 
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false | Out-Null
@@ -92,11 +127,11 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
     Write-Verbose "Wrote helpers: $userToastPath; $countdownToastPath; $incrementDeferralPath"
 
     $ScheduledTask = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
-    If(($ScheduledTask | measure).Count -eq 0){
+    If(@($ScheduledTask).Count -eq 0){
         # Ensure machine state exists
         $mainThreadPath = Join-Path $BasePath 'RebootMainThread.ps1'
         # Register SYSTEM Orchestrator (AtStartup + AtLogOn + Once w/ Repetition)
-        $exe  = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+        $exe  = $PwshExe
         $args = @(
             '-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$mainThreadPath`"",
             '-MaxHours', $MaxHours,
@@ -115,11 +150,8 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
         $settings.CimInstanceProperties['MultipleInstances'].Value = 3  # IgnoreNew
 
         $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest -LogonType ServiceAccount
-        # $tStart,$tLogon
         $def = New-ScheduledTask -Action $action -Principal $principal -Settings $settings -Trigger @($tRepeat) -Description (Get-Date).ToString("yyyy:MM:dd hh:mm:ss")
         Register-ScheduledTask -InputObject $def -TaskPath $TaskPath -TaskName $TaskName -Force | Out-Null
-
-        #Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName | Out-Null
 
         Write-Verbose "Registered SYSTEM orchestrator: $TaskPath$TaskName"
         Write-Verbose "Installed. Orchestrator will run at startup, at logon, and every $PollMinutes minute(s)."
@@ -131,7 +163,7 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
 # ===================== UserToast ===================== 
 $UserToastSource = {
 
-
+#Requires -Version 7.0
 # UserToast.ps1
 [CmdletBinding(SupportsShouldProcess=$true)]
 param([string]$UserId,
@@ -158,11 +190,11 @@ if (-not (Test-Path $Key)) { New-Item -Path $Key -Force | Out-Null }
 function Get-State {
     $p = Get-ItemProperty -Path $Key -ErrorAction SilentlyContinue
     [ordered]@{
-        StartAt        = $p.StartAt
-        DeadlineAt     = $p.DeadlineAt
-        LastShownAt    = $p.LastShownAt
-        MaxHours        = $p.MaxHours
-        ShowEveryMinutes = $p.ShowEveryMinutes
+        StartAt          = $p?.StartAt
+        DeadlineAt       = $p?.DeadlineAt
+        LastShownAt      = $p?.LastShownAt
+        MaxHours         = $p?.MaxHours
+        ShowEveryMinutes = $p?.ShowEveryMinutes
     }
 }
 function Set-State([hashtable]$h) {
@@ -198,7 +230,7 @@ If(!$Force.IsPresent){
     if ($nextNotification -gt $now) { Write-Verbose "Notification not available.  Next notification not until: $($nextNotification.ToString())" ; return }
 }
 
-# Mandatory if beyond deadline or deferrals >= max
+# Mandatory if beyond deadline
 $deadline  = [datetime]::Parse($s.DeadlineAt)
 if($diffDeadline){
     if($diffDeadline.Subtract($deadline).TotalSeconds -lt 0){
@@ -207,7 +239,7 @@ if($diffDeadline){
     }
 }
 
-$deferrals = If($s.Deferrals){ $s.Deferrals } Else{ 0 }
+$deferrals = $s.Deferrals ?? 0
 $mandatory = ($now -ge $deadline) 
 
 $timeleft=$deadline.Subtract((Get-Date))
@@ -252,7 +284,7 @@ $ToastMessage=@"
 "@
 
 If($mandatory){
-    # Explicit path to shutdown.exe ensures corret version is used
+    # Explicit path to shutdown.exe ensures correct version is used
     $shutdown="$env:WINDIR\System32\shutdown.exe"
 
     # Starts the reboot countdown (force-close all apps) with given delay
@@ -274,8 +306,6 @@ $null = [Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notificati
 $null = [Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime]
 $mins=[math]::Max(1,[math]::Min($ShowEveryMinutes,1440))
 
-
-
 $xml = @"
 <toast launch="reboot-consent">
   <visual><binding template="ToastGeneric">
@@ -289,9 +319,10 @@ $xml = @"
 "@
 
 $doc = [Windows.Data.Xml.Dom.XmlDocument]::new(); $doc.LoadXml($xml)
-$appId = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
-$WorkspaceOne=Get-StartApps | Where Name -Like "Workspace ONE Intelligent Hub" | Select Name,AppId
-If(($WorkspaceOne | Measure).Count -gt 0){
+# PS7 fallback AppId — overridden below if Workspace ONE Intelligent Hub is found
+$appId = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\PowerShell\7\pwsh.exe'
+$WorkspaceOne = Get-StartApps | Where-Object { $_.Name -like "Workspace ONE Intelligent Hub" } | Select-Object Name,AppId
+If(@($WorkspaceOne).Count -gt 0){
     $appId = $WorkspaceOne.AppId
 }
 
@@ -313,7 +344,7 @@ Invoke-UserMessage -UserId $UserId -MaxHours $MaxHours -ShowEveryMinutes $ShowEv
 # ===================== MainThread =====================
 $MainThreadSource = {
 
-
+#Requires -Version 7.0
 [CmdletBinding(SupportsShouldProcess=$true)]
 param([int]$MaxHours = 72, [int]$ShowEveryMinutes = 240, [int]$RebootCountdownSeconds = 300, [int]$PollMinutes = 60)
 
@@ -328,12 +359,12 @@ Function Invoke-MainThread{
     $MainTaskPath = '\WorkspaceOneEx\'
     $MainTaskName = 'RebootPrompt-Orchestrator'
         
-    $lastBoot = $(Get-CimInstance Win32_OperatingSystem).LastBootUpTime
-    $firstRunAt = (Get-ItemProperty -Path $MachineKey -ErrorAction SilentlyContinue | Select-Object "FirstRunAt" -ExpandProperty "FirstRunAt" -ErrorAction SilentlyContinue)
-    $deadline = (Get-ItemProperty -Path $MachineKey -ErrorAction SilentlyContinue | Select-Object "Deadline" -ExpandProperty "Deadline" -ErrorAction SilentlyContinue)
+    $lastBoot  = $(Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+    $firstRunAt = (Get-ItemProperty -Path $MachineKey -ErrorAction SilentlyContinue)?.FirstRunAt
+    $deadline   = (Get-ItemProperty -Path $MachineKey -ErrorAction SilentlyContinue)?.Deadline
     
     if($firstRunAt){ $dtFirstRunAt = $firstRunAt -as [DateTime] }
-    if($deadline){ $dtDeadline = $deadline -as [DateTime] }
+    if($deadline)  { $dtDeadline   = $deadline   -as [DateTime] }
 
     if (-not (Test-Path $MachineKey)){
         New-Item -Path $MachineKey -Force | Out-Null
@@ -348,22 +379,20 @@ Function Invoke-MainThread{
     # main thread gets removed   
     if($dtFirstRunAt){
         $dtDiff=$dtFirstRunAt.Subtract($lastBoot)
-            if(($dtDiff.TotalMilliseconds -le 0)){
+        if($dtDiff.TotalMilliseconds -le 0){
             Write-Verbose "Reboot has occured, removing scheduled task."            
             # Remove Scheduled Task 
             Unregister-ScheduledTask -TaskName $MainTaskName -Confirm:$false | Out-Null
             Write-Verbose "Removing registry key at $MachineKey."            
-            # Remove Scheduled Task
+            # Remove registry key
             Remove-Item -Path $MachineKey -Recurse -Force | Out-Null
             Write-Verbose "Removing helper scripts."           
             # Remove scripts
-            $Scripts=Get-ChildItem -Path $BasePath -Filter "*.ps1"
+            $Scripts = Get-ChildItem -Path $BasePath -Filter "*.ps1"
             ForEach($Script in $Scripts){
                 Remove-Item $Script.FullName -Force | Out-Null
             }
-            If(-not $ForceCleanup.IsPresent){
-                return         
-            }
+            return
         }
     }
 
@@ -377,7 +406,7 @@ Function Invoke-MainThread{
     $quser = quser 2>$null
     if (-not $quser) { 
         Write-Verbose "quser returned no output."
-        if($mandatoryReboot=$true){ $SystemReboot = $true } else { return; }
+        if($mandatoryReboot){ $SystemReboot = $true } else { return }
     }
 
     $rows = $quser | Select-Object -Skip 1 |
@@ -399,7 +428,8 @@ Function Invoke-MainThread{
 
     $activeUsers = $rows | Where-Object { $_.STATE -eq 'Active' -and $_.USERNAME }
 
-    if (-not $activeUsers) { Write-Log "No active user sessions."; 
+    if (-not $activeUsers) { 
+        Write-Verbose "No active user sessions."
         if($mandatoryReboot){ $SystemReboot = $true } else { return }
     }
 
@@ -408,12 +438,14 @@ Function Invoke-MainThread{
         return
     }
 
+    # Resolve pwsh.exe for per-user toast scheduled task
+    $exe = (Get-Command pwsh -ErrorAction SilentlyContinue)?.Source ??
+           (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe')
 
     foreach ($UserRecord in @($activeUsers)) {
         # Some hosts mark current user with a leading '>' — remove if present
         $user = $UserRecord.USERNAME -replace '^>',''
         try {
-            $exe = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
             $userToastPath = Join-Path $BasePath 'UserToast.ps1'
         
             $args = @(
@@ -454,4 +486,4 @@ $mainThreadPath = Join-Path $BasePath 'RebootMainThread.ps1'
 Set-Content -Path $userToastPath -Value $UserToastSource -Encoding UTF8 -Force
 Set-Content -Path $mainThreadPath -Value $MainThreadSource -Encoding UTF8 -Force
 
-Invoke-RebootPrompt -MaxHours $MaxHours -ShowEveryMinutes $ShowEveryMinutes -RebootCountdownSeconds $RebootCountdownSeconds -PollMinutes $PollMinutes
+Invoke-RebootPrompt -MaxHours $MaxHours -ShowEveryMinutes $ShowEveryMinutes -RebootCountdownSeconds $RebootCountdownSeconds -PollMinutes $PollMinutes -PwshExe $PwshExe

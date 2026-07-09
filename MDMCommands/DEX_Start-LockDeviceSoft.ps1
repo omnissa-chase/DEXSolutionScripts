@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Soft-locks the active console session on a managed device.
 
@@ -20,6 +20,12 @@
       - Execution Context : System
       - Architecture      : Any
       - Timeout (seconds) : 5
+
+.DISCLAIMER
+    These scripts are provided "AS IS". It is the administrator's sole responsibility
+    to test and validate scripts in a non-production environment before deployment.
+    The author(s) accept no liability for damage, data loss, or unintended consequences.
+    See LICENSE in the repository root for full license terms (MIT).
 #>
 
 $LockDevice={

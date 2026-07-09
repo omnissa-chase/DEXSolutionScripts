@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Troubleshooter-Modular - Generic JSON-Driven Diagnostic Engine (PowerShell 5.1 Compatible)
 .DESCRIPTION
@@ -38,6 +38,12 @@
     .\Troubleshooter-Modular-PS5.ps1 -StepsJson ".\NetworkDiagSteps.json"
 .EXAMPLE
     .\Troubleshooter-Modular-PS5.ps1 -StepsJson "C:\Diag\AppSteps.json" -Title "App Health Check" -AutoRemediate
+
+.DISCLAIMER
+    These scripts are provided "AS IS". It is the administrator's sole responsibility
+    to test and validate scripts in a non-production environment before deployment.
+    The author(s) accept no liability for damage, data loss, or unintended consequences.
+    See LICENSE in the repository root for full license terms (MIT).
 #>
 
 [CmdletBinding()]

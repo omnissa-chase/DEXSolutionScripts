@@ -19,6 +19,12 @@
     PowerShell 5.1 compatible.
     Based on logic from ControlUp's Analyze GPO Extensions Load Time script by @guyrleech.
     Run via WorkspaceONE as a logon-triggered script under SYSTEM context.
+
+.DISCLAIMER
+    These scripts are provided "AS IS". It is the administrator's sole responsibility
+    to test and validate scripts in a non-production environment before deployment.
+    The author(s) accept no liability for damage, data loss, or unintended consequences.
+    See LICENSE in the repository root for full license terms (MIT).
 #>
 
 [CmdletBinding()]

@@ -1,4 +1,12 @@
-﻿# Configuration
+<#
+.DISCLAIMER
+    These scripts are provided "AS IS". It is the administrator's sole responsibility
+    to test and validate scripts in a non-production environment before deployment.
+    The author(s) accept no liability for damage, data loss, or unintended consequences.
+    See LICENSE in the repository root for full license terms (MIT).
+#>
+
+# Configuration
 $ENROLLMENTUSER="chase"     # Name of the Windows User Used for enrollment.  Deleting the Windows user that enrolled can have adverse effects
 $DAYS_INACTIVE = 30         # Number of days since last use
 $SIZE_THRESHOLD_MB = 500    # Profile size threshold in MB.  0 will delete all inactive profiles reguardless the space they use.
