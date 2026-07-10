@@ -20,20 +20,16 @@
     Version      : 1.2.0.7
     Architecture : Any (x86/x64)
     Context      : System
-    Author       : Chase Bradley
+    Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-07-08
     Requires     : PowerShell 7.0+
-
-    Workspace ONE Script Configuration:
-      - Execution Context : System
-      - Architecture      : Any
-      - Timeout (seconds) : 30
+    Timeout      : 30 seconds
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
     to test and validate scripts in a non-production environment before deployment.
     The author(s) accept no liability for damage, data loss, or unintended consequences.
-    See LICENSE in the repository root for full license terms (MIT).
+    See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
 
 # Admin modified values
