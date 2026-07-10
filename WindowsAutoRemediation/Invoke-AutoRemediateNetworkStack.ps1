@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    NetworkResolutionWizard — Automated network diagnostic and remediation.
+    NetworkResolutionWizard -- Automated network diagnostic and remediation.
 
 .NOTES
-    Script Name  : NetworkResolutionWizard.ps1
+    Script Name  : Invoke-AutoRemediateNetworkStack.ps1
     Version      : 1.0.0
     Architecture : Any (x86/x64)
     Context      : System
@@ -18,7 +18,7 @@
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
 
-# ── Step Definitions ──────────────────────────────────────────────────────────
+# -- Step Definitions ----------------------------------------------------------
 # Only supported fields: Name, Order, Enabled, ResolveOnWarning,
 #                        DetectionScript, ResolutionScript
 $Steps = @(
@@ -117,7 +117,7 @@ $Steps = @(
                 if ($ok) {
                     return @{ Status = 'Passed'; Message = 'TCP/IP stack is functional' }
                 }
-                return @{ Status = 'Failed'; Message = 'TCP/IP stack unresponsive — socket timed out' }
+                return @{ Status = 'Failed'; Message = 'TCP/IP stack unresponsive -- socket timed out' }
             } catch {
                 return @{ Status = 'Failed'; Message = "TCP/IP stack error: $($_.Exception.Message)" }
             }
@@ -131,10 +131,40 @@ $Steps = @(
     },
 
     @{
-        Name             = 'Firewall Status'
+        Name             = 'Adapter Bounce'
         Order            = 5
         Enabled          = $true
-        ResolveOnWarning = $true   # Firewall disabled returns 'Warning' — still remediate
+        # Detection always returns Warning so ResolveOnWarning triggers the bounce
+        # unconditionally as a layer-2 failsafe after Winsock/IP stack remediation.
+        ResolveOnWarning = $true
+        DetectionScript  = {
+            $adapters = Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Status -eq 'Up' }
+
+            if (-not $adapters -or $adapters.Count -eq 0) {
+                return @{ Status = 'Failed'; Message = 'No active adapters found to bounce' }
+            }
+            return @{ Status = 'Warning'; Message = "Adapter bounce queued for: $(($adapters.Name) -join ', ')" }
+        }
+        ResolutionScript = {
+            $adapters = Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Status -eq 'Up' }
+            foreach ($adapter in $adapters) {
+                Disable-NetAdapter -Name $adapter.Name -Confirm:$false -ErrorAction SilentlyContinue
+            }
+            Start-Sleep -Seconds 3
+            foreach ($adapter in $adapters) {
+                Enable-NetAdapter -Name $adapter.Name -Confirm:$false -ErrorAction SilentlyContinue
+            }
+            Start-Sleep -Seconds 5   # Allow DHCP and link negotiation to settle
+        }
+    },
+
+    @{
+        Name             = 'Firewall Status'
+        Order            = 6
+        Enabled          = $true
+        ResolveOnWarning = $true   # Firewall disabled returns 'Warning' -- still remediate
         DetectionScript  = {
             $profiles = Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction SilentlyContinue |
                         Where-Object { $_.Enabled }
@@ -152,7 +182,7 @@ $Steps = @(
 
     @{
         Name             = 'Internet Connectivity'
-        Order            = 6
+        Order            = 7
         Enabled          = $true
         ResolveOnWarning = $false
         DetectionScript  = {
@@ -174,7 +204,7 @@ $Steps = @(
     }
 )
 
-# ── Execution Engine ──────────────────────────────────────────────────────────
+# -- Execution Engine ----------------------------------------------------------
 $activeSteps = $Steps |
     Where-Object { $_.Enabled } |
     Sort-Object   { [int]$_.Order }
@@ -182,9 +212,9 @@ $activeSteps = $Steps |
 $results = [System.Collections.Generic.List[PSCustomObject]]::new()
 
 Write-Host ''
-Write-Host '── NetworkResolutionWizard ──────────────────────────────────────' -ForegroundColor Cyan
+Write-Host "`n-- NetworkResolutionWizard --------------------------------------" -ForegroundColor Cyan
 Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
-Write-Host '────────────────────────────────────────────────────────────────' -ForegroundColor Cyan
+Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
 
 foreach ($step in $activeSteps) {
 
@@ -193,7 +223,7 @@ foreach ($step in $activeSteps) {
     $remediated = $false
     $remError   = ''
 
-    # ── Detection ────────────────────────────────────────────────────────────
+    # -- Detection ------------------------------------------------------------
     try {
         $result  = & $step.DetectionScript
         $status  = $result.Status
@@ -203,7 +233,7 @@ foreach ($step in $activeSteps) {
         $message = "Detection exception: $($_.Exception.Message)"
     }
 
-    # ── Remediation ──────────────────────────────────────────────────────────
+    # -- Remediation ----------------------------------------------------------
     $shouldRemediate = ($status -eq 'Failed') -or
                        ($status -eq 'Warning' -and $step.ResolveOnWarning)
 
@@ -216,18 +246,18 @@ foreach ($step in $activeSteps) {
         }
     }
 
-    # ── Output ───────────────────────────────────────────────────────────────
+    # -- Output ---------------------------------------------------------------
     $color = switch ($status) {
         'Passed'  { 'Green'  }
         'Warning' { 'Yellow' }
         'Failed'  { 'Red'    }
         default   { 'White'  }
     }
-    $remNote = if ($remediated)          { '  → Remediation ran' }
-               elseif ($remError)        { "  → Remediation ERROR: $remError" }
+    $remNote = if ($remediated)          { '  -> Remediation ran' }
+               elseif ($remError)        { "  -> Remediation ERROR: $remError" }
                else                      { '' }
 
-    Write-Host "  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
 
     $results.Add([PSCustomObject]@{
         Order       = $step.Order
@@ -239,15 +269,15 @@ foreach ($step in $activeSteps) {
     })
 }
 
-# ── Summary ───────────────────────────────────────────────────────────────────
+# -- Summary -------------------------------------------------------------------
 $passed   = ($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = ($results | Where-Object { $_.Remediated }).Count
 
-Write-Host '────────────────────────────────────────────────────────────────' -ForegroundColor Cyan
+Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
 Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
-Write-Host '────────────────────────────────────────────────────────────────' -ForegroundColor Cyan
+Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
 Write-Host ''
 
 if ($failed -gt 0) { exit 1 }
