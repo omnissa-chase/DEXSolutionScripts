@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Signs off user sessions on a managed device. Defaults to all sessions;
     use -CurrentUser to target only the active console user.
@@ -41,8 +41,57 @@ $SignoffDevice = {
     param([switch]$CurrentUser)
     
     if(-not ($CurrentUser.IsPresent)){
-        Write-Host "Current user not specified. Flagging all users.`r`n"
-        $SessionPref="/all"
+        Write-Host "Signing off all active user sessions.`r`n"
+        # query session lists all sessions; filter for Active/Disc states and
+        # extract the numeric session ID from column 3, then logoff each one.
+        $allSessions = query session 2>&1 |
+            Select-String '^\s*(Active|Disc|\S+\s+\S+\s+\d+\s+(Active|Disc))' |
+            ForEach-Object {
+                # Normalise variable-width columns → split on 2+ spaces
+                ($_.ToString().Trim() -replace '\s{2,}', "`t").Split("`t")
+            } |
+            Where-Object { $_ -match '^\d+$' }   # keep only the ID tokens
+
+        # Fallback: parse every non-header line and grab the numeric ID field
+        if (-not $allSessions) {
+            $allSessions = (query session 2>&1) |
+                Where-Object { $_ -notmatch '^\s*SESSIONNAME' } |
+                ForEach-Object {
+                    $cols = $_.ToString().Trim() -split '\s{2,}'
+                    # ID is the column that is purely numeric
+                    $cols | Where-Object { $_ -match '^\d+$' }
+                }
+        }
+
+        if (-not $allSessions) {
+            Write-Host "No active user sessions found."
+        } else {
+            # Identify the console user's session ID so it can be logged off last
+            $consoleUser = (Get-CimInstance Win32_ComputerSystem).UserName.Split('\')[-1]
+            $consoleSessionId = $null
+            if ($consoleUser) {
+                $consoleMatch = (query session 2>&1) | Select-String $consoleUser
+                if ($consoleMatch) {
+                    $consoleCols = $consoleMatch.ToString().Trim() -split '\s{2,}'
+                    $consoleSessionId = $consoleCols | Where-Object { $_ -match '^\d+$' } | Select-Object -First 1
+                }
+            }
+
+            # Sort: non-console sessions first, console user session last
+            $sorted = @($allSessions | Where-Object { $_ -ne $consoleSessionId })
+            if ($consoleSessionId) { $sorted += $consoleSessionId }
+
+            foreach ($id in $sorted) {
+                if (-not $WhatIfPreference) {
+                    $label = if ($id -eq $consoleSessionId) { " (console user — last)" } else { "" }
+                    Write-Host "Logging off session ID: $id$label"
+                    logoff $id
+                } else {
+                    Write-Host "WhatIf: logoff $id"
+                }
+            }
+        }
+        return   # handled above — skip the single-session logoff at the bottom
     }
     elseif($CurrentUser.IsPresent){
         # Retrieve the username of the user currently at the physical console
@@ -75,7 +124,7 @@ $SignoffDevice = {
         $SessionPref="$($session.ID)"
     }
 
-
+    # Single-session logoff for the -CurrentUser path
     if (-not $WhatIfPreference) {
         # Terminate the session — equivalent to "Sign out" in the Start menu
         Write-Host "Executing command, 'logoff $SessionPref'"
