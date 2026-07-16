@@ -19,12 +19,12 @@
 
 .NOTES
     Script Name  : DEX_Invoke-SignoffWindows.ps1
-    Version      : 2.0.0
+    Version      : 2.5.0
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-07-09
-    Timeout      : 5 seconds
+    Timeout      : 15 seconds
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
