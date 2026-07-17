@@ -32,7 +32,7 @@
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-07-10
-    Timeout      : 120 seconds
+    Timeout      : 30 seconds
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility

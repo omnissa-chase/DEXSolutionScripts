@@ -1,4 +1,13 @@
 <#
+.NOTES
+    Script Name  : performance_windowsupdate_status.ps1
+    Data Type    : String 
+    Version      : 1.0.0
+    Architecture : Any (x86/x64)
+    Context      : System
+    Author       : Chase Bradley, Omnissa DEX team
+    Last Modified: 2026-07-10
+
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
     to test and validate scripts in a non-production environment before deployment.

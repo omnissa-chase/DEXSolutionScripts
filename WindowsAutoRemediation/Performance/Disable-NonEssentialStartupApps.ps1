@@ -2,34 +2,11 @@
 .SYNOPSIS
     Disable-NonEssentialStartupApps -- Removes non-essential applications from Windows startup.
 
-.DESCRIPTION
-    Identifies and disables startup entries for known non-essential applications
-    (gaming clients, media players, personal utilities) from the current user's
-    registry Run key (HKCU). Only user-scope entries are modified automatically --
-    machine-scope (HKLM) entries are reported but not touched.
-
-    Disabling a startup entry does NOT uninstall the application; it simply
-    prevents it from launching automatically at login.
-
-    +------+------------------------------------------+--------------------+
-    | Step | Name                                     | Remediates On      |
-    +------+------------------------------------------+--------------------+
-    |  1   | HKCU Run -- Gaming Clients               | Failed             |
-    |  2   | HKCU Run -- Media & Entertainment        | Failed             |
-    |  3   | HKCU Run -- Personal Utilities           | Failed             |
-    |  4   | HKLM Run -- Non-Essential Entries (Audit)| Warning (audit)    |
-    |  5   | Startup Folder -- User Scope             | Failed             |
-    +------+------------------------------------------+--------------------+
-
-    Each step returns @{ Status = 'Passed'|'Warning'|'Failed'; Message = '...' }
-    Resolution removes the registry Run value or shortcut; errors are captured
-    and reported at the end.
-
 .NOTES
     Script Name  : Disable-NonEssentialStartupApps.ps1
     Version      : 1.0.0
     Architecture : Any (x86/x64)
-    Context      : User (HKCU modifications) -- run as the logged-on user
+    Context      : System
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-07-10
     Timeout      : 30 seconds

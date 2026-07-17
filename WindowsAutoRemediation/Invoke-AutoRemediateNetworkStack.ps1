@@ -9,7 +9,7 @@
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-07-09
-    Timeout      : 15 seconds
+    Timeout      : 30 seconds
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility

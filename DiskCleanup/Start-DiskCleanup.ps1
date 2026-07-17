@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Runs Windows Disk Cleanup targeting specific system cleanup categories.
 
@@ -11,12 +11,12 @@
 
 .NOTES
     Script Name  : DEX_Start-DiskCleanup.ps1
-    Version      : 1.0.0
+    Version      : 1.1.0
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-07-08
-    Timeout      : 60 seconds
+    Timeout      : 30 seconds
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
