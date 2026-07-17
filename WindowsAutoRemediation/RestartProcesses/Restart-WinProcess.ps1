@@ -7,6 +7,7 @@
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-07-10
+    Timeout      : 30 seconds
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -17,7 +18,8 @@
 
 param(
     [Parameter(Mandatory=$true)]
-    [string]$FileDescription=$env:FileDescription
+    [string]$FileDescription=$env:FileDescription,
+    [bool]$StartService=$env:StartService
 )
 
 $proc = Get-Process -ErrorAction SilentlyContinue | Where Description -like "*FileDescription*"
@@ -26,8 +28,10 @@ if ($proc) {
     Write-Host "Stopping process '$ProcessName' (PID: $($proc.Id))..."
     Stop-Process -Name $ProcessName -Force
     Start-Sleep -Seconds 5
-    Write-Host "Starting process '$ProcessName'..."
-    Start-Process $ProcessName
+    if($StartService){
+        Write-Host "Starting process '$ProcessName'..."
+        Start-Process $ProcessName
+    }
 } else {
     Write-Host "Process '$ProcessName' not currently running."
 }
