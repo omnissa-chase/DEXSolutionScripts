@@ -50,7 +50,7 @@ $ConfiguredOptions = @(
    #"Offline Pages Files"
    #"Old ChkDsk Files"
    "Previous Installations"
-   #"Recycle Bin"
+   "Recycle Bin"
    #"RetailDemo Offline Content"
    #"Setup Log Files"
    "System error memory dump files"
@@ -78,16 +78,17 @@ $WindowsDiskCleanOptions = Get-ChildItem $DskCleanPresetLocation | Select-Object
 # Loop through each available cleanup option
 ForEach ($CleanOption in $WindowsDiskCleanOptions) {
    # Check if the registry path for the option exists
-   If (Test-Path "$DskCleanPresetLocation\$CleanOption") {
+    $CleanOptionPath="$DskCleanPresetLocation\$($CleanOption.Options)"
+   If (Test-Path $CleanOptionPath) {
        $CnfgValue = 0 # Default to disabled
 
        # Enable the option if it's in the configured list
-       If ($CleanOption -in $ConfiguredOptions) {
+       If ($CleanOption.Options -in $ConfiguredOptions) {
            $CnfgValue = 2 # Value 2 enables the cleanup option
        }
 
        # Write the configuration value to the registry for the specified profile ID
-       $Results = New-ItemProperty -Path "$DskCleanPresetLocation\$CleanOption" -Name "StateFlags00$DskCleanProfileId" -Value $CnfgValue -Force
+       $Results = New-ItemProperty -Path $CleanOptionPath -Name "StateFlags00$DskCleanProfileId" -Value $CnfgValue -Force
    }
 }
 

@@ -12,3 +12,5 @@
 
 4. Is the issue reproducible and persistent?
    Yes -> Collect CSWinDiag, ProcMon/WPR if requested, open CrowdStrike Support case.
+
+   The best way to force Crowdstrike to update is to force a reboot
