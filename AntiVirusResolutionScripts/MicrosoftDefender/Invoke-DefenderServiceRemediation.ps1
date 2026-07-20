@@ -55,4 +55,3 @@ If($CurrentRtStatus){
 }
 
 Exit 0
-
