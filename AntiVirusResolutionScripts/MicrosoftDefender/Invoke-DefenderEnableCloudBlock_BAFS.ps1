@@ -1,4 +1,32 @@
-﻿$SCRIPT_VERSION = "1.0.2.1"
+﻿<#
+.SYNOPSIS
+    Invoke-DefenderEnableCloudBlock_BAFS -- Enables Microsoft Defender cloud protection and Block-at-First-Sight.
+
+.DESCRIPTION
+    Configures three Microsoft Defender cloud protection settings if they are not already
+    at the required values:
+        CloudBlockLevel     -- set to High (1); controls aggressiveness of cloud-based blocking
+        MAPSReporting       -- set to Advanced; enables full telemetry to Microsoft Active Protection Service
+        SubmitSamplesConsent -- set to 1 (Send safe samples automatically)
+    All changes are applied via Set-MpPreference and are idempotent.
+
+.NOTES
+    Script Name  : Invoke-DefenderEnableCloudBlock_BAFS.ps1
+    Version      : 1.0.2.1
+    Architecture : Any (x86/x64)
+    Context      : System
+    Author       : Chase Bradley, Omnissa DEX team
+    Last Modified: 2026-07-20
+    Timeout      : 30 seconds
+
+.DISCLAIMER
+    These scripts are provided "AS IS". It is the administrator's sole responsibility
+    to test and validate scripts in a non-production environment before deployment.
+    The author(s) accept no liability for damage, data loss, or unintended consequences.
+    See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
+#>
+
+$SCRIPT_VERSION = "1.0.2.1"
 
 $RunEventId = ([Random]::new()).Next(1000,9999)
 Write-Host "[$RunEventId] Executing script, $SCRIPT_VERSION.  Started @ '$((Get-Date).ToString("yyyy-MM-dd hh:mm:ss"))'"

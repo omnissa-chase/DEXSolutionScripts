@@ -1,3 +1,29 @@
+<#
+.SYNOPSIS
+    Invoke-DefenderDynamicPerformance -- Tunes Microsoft Defender scan CPU limits based on device hardware.
+
+.DESCRIPTION
+    Calculates a hardware performance score from BIOS generation date, logical processor
+    count, and system disk type (HDD/SSD/NVMe), then maps the score to one of four
+    Defender CPU profiles (VeryLow / Low / Medium / High) and applies the corresponding
+    ScanAvgCPULoadFactor and EnableLowCpuPriority settings via Set-MpPreference.
+    The score and active profile are persisted under the AirWatch HealthDetection registry
+    key so subsequent runs can skip recalculation.
+
+.NOTES
+    Script Name  : Invoke-DefenderDynamicPerformance.ps1
+    Architecture : Any (x86/x64)
+    Context      : System
+    Author       : Chase Bradley, Omnissa DEX team
+    Last Modified: 2026-07-20
+
+.DISCLAIMER
+    These scripts are provided "AS IS". It is the administrator's sole responsibility
+    to test and validate scripts in a non-production environment before deployment.
+    The author(s) accept no liability for damage, data loss, or unintended consequences.
+    See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
+#>
+
 $healthDetectionPath =  "HKLM:\SOFTWARE\AIRWATCH\Extensions\HealthDetection"
 if(-not (Test-Path $healthDetectionPath)){ New-Item -Path $healthDetectionPath -Force | Out-Null }
 

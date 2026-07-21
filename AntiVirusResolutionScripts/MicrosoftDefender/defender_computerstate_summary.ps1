@@ -1,8 +1,16 @@
-﻿# Name: defender_computerstate_summary
-# Type: PowerShell 
-# Context: System 
-# Data Type: String 
-# Timeout: 10–20 seconds 
+﻿<#
+.SYNOPSIS
+    defender_computerstate_summary -- Detection sensor: reports a summary of Microsoft Defender computer protection state.
+
+.NOTES
+    Script Name  : defender_computerstate_summary.ps1
+    Type         : Sensor (detection only -- no remediation)
+    Data Type    : String
+    Context      : System
+    Author       : Chase Bradley, Omnissa DEX team
+    Last Modified: 2026-07-20
+    Timeout      : 10-20 seconds
+#>
 
 # Check if running in PowerShell 7 or later
 If ($PSVersionTable.PSVersion.Major -ge 7) {

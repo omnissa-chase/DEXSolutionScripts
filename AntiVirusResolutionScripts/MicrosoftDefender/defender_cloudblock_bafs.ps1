@@ -1,7 +1,15 @@
-﻿# Name: defender_cloudblock_bafs
-# Type: PowerShell 
-# Context: System 
-# Data Type: String 
+﻿<#
+.SYNOPSIS
+    defender_cloudblock_bafs -- Detection sensor: reports the Microsoft Defender Block-at-First-Sight (BAFS) and cloud protection state.
+
+.NOTES
+    Script Name  : defender_cloudblock_bafs.ps1
+    Type         : Sensor (detection only -- no remediation)
+    Data Type    : String
+    Context      : System
+    Author       : Chase Bradley, Omnissa DEX team
+    Last Modified: 2026-07-20
+#>
 
 if ($PSVersionTable.PSVersion.Major -ge 7) {
     Import-Module -Name ConfigDefender -SkipEditionCheck -ErrorAction Stop

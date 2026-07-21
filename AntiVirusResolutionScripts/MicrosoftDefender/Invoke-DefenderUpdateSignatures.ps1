@@ -1,9 +1,27 @@
-﻿# Name: 
-# Context: System 
-# Timeout: 15 seconds (runs updates as a seperate job)
-# User impact: None 
-# Trigger: On-demand (Should automatically update on its own. Remidiation script is designed to force an update.)
-# Feel free to modify to use desired source if you want
+﻿<#
+.SYNOPSIS
+    Invoke-DefenderUpdateSignatures -- Forces a Microsoft Defender signature update if definitions are out of date.
+
+.DESCRIPTION
+    Checks DefenderSignaturesOutOfDate via Get-MpComputerStatus and exits immediately if
+    signatures are current. If out of date, triggers Update-MpSignature as a background
+    job so the script returns quickly without blocking the MDM agent timeout window.
+
+.NOTES
+    Script Name  : Invoke-DefenderUpdateSignatures.ps1
+    Version      : 1.0.0.0
+    Architecture : Any (x86/x64)
+    Context      : System
+    Author       : Chase Bradley, Omnissa DEX team
+    Last Modified: 2026-07-20
+    Timeout      : 15 seconds (update runs as a background job)
+
+.DISCLAIMER
+    These scripts are provided "AS IS". It is the administrator's sole responsibility
+    to test and validate scripts in a non-production environment before deployment.
+    The author(s) accept no liability for damage, data loss, or unintended consequences.
+    See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
+#>
 
 $SCRIPT_VERSION = "1.0.0.0"
 

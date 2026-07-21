@@ -1,8 +1,28 @@
-﻿# Name: Defender_ServiceRemediation_1.6.1.0
-# Context: System
-# Timeout: 30 seconds 
-# User impact: None 
-# Trigger: On-Demand - designed to be used in conjunction with freestyle
+﻿<#
+.SYNOPSIS
+    Invoke-DefenderServiceRemediation -- Ensures Microsoft Defender services are running and Real-Time Protection is enabled.
+
+.DESCRIPTION
+    Sets the core Defender services (MDCoreSvc, WinDefend, WdNisSvc, mpssvc) to Automatic
+    startup and starts any that are not running. Also re-enables Real-Time Protection if it
+    has been disabled. Safe to run on a healthy device -- exits cleanly if everything is
+    already in the correct state.
+
+.NOTES
+    Script Name  : Invoke-DefenderServiceRemediation.ps1
+    Version      : 1.6.1.0
+    Architecture : Any (x86/x64)
+    Context      : System
+    Author       : Chase Bradley, Omnissa DEX team
+    Last Modified: 2026-07-20
+    Timeout      : 30 seconds
+
+.DISCLAIMER
+    These scripts are provided "AS IS". It is the administrator's sole responsibility
+    to test and validate scripts in a non-production environment before deployment.
+    The author(s) accept no liability for damage, data loss, or unintended consequences.
+    See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
+#>
 
 
 $SCRIPT_VERSION="1.6.1.0"
