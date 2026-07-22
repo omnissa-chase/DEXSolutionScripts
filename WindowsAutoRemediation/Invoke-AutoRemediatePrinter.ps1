@@ -2,6 +2,9 @@
 .SYNOPSIS
     Invoke-AutoRemediatePrinter -- Automated printer diagnostic and remediation.
 
+@TODO -  need to add a way to report the status to Omnissa UEM and if its a driver issue
+prompt the admin if they want to fix the driver
+    
 .DESCRIPTION
     Runs a hard-coded sequence of printer health checks and automatically
     executes the corresponding remediation for any step that fails (or warns,

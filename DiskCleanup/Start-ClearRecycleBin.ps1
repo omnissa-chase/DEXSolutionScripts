@@ -1,9 +1,16 @@
 ﻿<#
 .SYNOPSIS
-    Runs Windows Disk Cleanup targeting specific system cleanup categories.
+    Clears the contents of the Recycle Bin using Windows Disk Cleanup.
+
+.DESCRIPTION
+    Automates the Windows built-in Disk Cleanup utility (cleanmgr.exe) by
+    programmatically configuring cleanup options via the registry and executing
+    a cleanup profile. Targets system-level categories such as previous Windows
+    installations, update artifacts, error dumps, and upgrade log files.
+    Upon completion, outputs the amount of disk space reclaimed in GB.
 
 .NOTES
-    Script Name  : DEX_Start-ClearRecycleBin.ps1
+    Script Name  : Start-ClearRecycleBin.ps1
     Version      : 1.1.0
     Architecture : Any (x86/x64)
     Context      : System
@@ -28,7 +35,38 @@ $DskCleanProfileID = 56
 # List of cleanup options to enable for this run
 # Comment/uncomment lines to include/exclude specific cleanup tasks
 $ConfiguredOptions = @(
+   #"Active Setup Temp Folders"
+   #"BranchCache"
+   #"Content Indexer Cleaner"
+   #"D3D Shader Cache"
+   #"Delivery Optimization Files"
+   #"Device Driver Packages"
+   #"Diagnostic Data Viewer database files"
+   #"Downloaded Program Files"
+   #"DownloadsFolder"
+   #"Feedback Hub Archive log files"
+   #"Internet Cache Files"
+   #"Language Pack"
+   #"Offline Pages Files"
+   #"Old ChkDsk Files"
+   #"Previous Installations"
    "Recycle Bin"
+   #"RetailDemo Offline Content"
+   #"Setup Log Files"
+   #"System error memory dump files"
+   #"System error minidump files"
+   #"Temporary Files"
+   #"Temporary Setup Files"
+   #"Temporary Sync Files"
+   #"Thumbnail Cache"
+   #"Update Cleanup"
+   #"Upgrade Discarded Files"
+   #"User file versions"
+   #"Windows Defender"
+   #"Windows Error Reporting Files"
+   #"Windows ESD installation files"
+   #"Windows Reset Log Files"
+   #"Windows Upgrade Log Files"
 )
 
 # Registry path where disk cleanup options are configured
@@ -40,7 +78,8 @@ $WindowsDiskCleanOptions = Get-ChildItem $DskCleanPresetLocation | Select-Object
 # Loop through each available cleanup option
 ForEach ($CleanOption in $WindowsDiskCleanOptions) {
    # Check if the registry path for the option exists
-   If (Test-Path "$DskCleanPresetLocation\$CleanOption") {
+   $OptionPath="$DskCleanPresetLocation\$($CleanOption.Option)"
+   If (Test-Path $OptionPath) {
        $CnfgValue = 0 # Default to disabled
 
        # Enable the option if it's in the configured list
@@ -49,7 +88,7 @@ ForEach ($CleanOption in $WindowsDiskCleanOptions) {
        }
 
        # Write the configuration value to the registry for the specified profile ID
-       $Results = New-ItemProperty -Path "$DskCleanPresetLocation\$CleanOption" -Name "StateFlags00$DskCleanProfileId" -Value $CnfgValue -Force
+       $Results = New-ItemProperty -Path $OptionPath -Name "StateFlags00$DskCleanProfileId" -Value $CnfgValue -Force
    }
 }
 
