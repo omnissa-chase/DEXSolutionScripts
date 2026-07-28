@@ -2,6 +2,27 @@
 .SYNOPSIS
     NetworkResolutionWizard -- Automated network diagnostic and remediation.
 
+.DESCRIPTION
+    Runs an ordered sequence of network health checks and automatically executes
+    the corresponding remediation for any step that fails (or warns, when
+    ResolveOnWarning is set). Fully self-contained -- no JSON, no UI, no
+    external dependencies.
+
+    +------+----------------------+----------------------------------+
+    | Step | Name                 | Remediates On                    |
+    +------+----------------------+----------------------------------+
+    |  1   | DNS Resolution       | Failed                           |
+    |  2   | Default Gateway      | Failed                           |
+    |  3   | Network Adapters     | Failed                           |
+    |  4   | Winsock / IP Stack   | Failed                           |
+    |  5   | Adapter Bounce       | Warning (ResolveOnWarning)       |
+    |  6   | Firewall Status      | Warning (ResolveOnWarning)       |
+    |  7   | Internet Connectivity| Failed                           |
+    +------+----------------------+----------------------------------+
+
+    Each step returns @{ Status = 'Passed'|'Warning'|'Failed'; Message = '...' }
+    Resolution scripts run silently; errors are captured and reported at the end.
+
 .NOTES
     Script Name  : Invoke-AutoRemediateNetworkStack.ps1
     Version      : 1.0.0

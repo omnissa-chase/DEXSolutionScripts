@@ -41,7 +41,7 @@ $WhatIfPreference = $false
 #   bits        — Background Intelligent Transfer Service (download engine)
 #   cryptsvc    — Cryptographic Services (certificate validation for updates)
 #   msiserver   — Windows Installer (required for update package installation)
-$services = @("wuauserv")
+$services = @("wuauserv","bits","cryptsvc","msiserver")
 
 # ── Execution ─────────────────────────────────────────────────────────────────
 
