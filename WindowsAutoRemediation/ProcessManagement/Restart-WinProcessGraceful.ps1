@@ -1,33 +1,64 @@
 <#
 .SYNOPSIS
     Gracefully close (and optionally restart) a Windows process matched by
-    FileDescription, escalating to a force-kill only if the process does not
-    exit within the configurable timeout or stops responding.
+    FileDescription. Dispatches a detached watchdog so Intelligent Hub is never
+    blocked, and force-kills ONLY a process confirmed to be hung.
 
 .DESCRIPTION
-    Unlike Restart-WinProcess.ps1 which immediately force-kills, this script
-    attempts a clean shutdown first. The sequence for each matched process is:
+    Two-part architecture. This script is a thin launcher that returns to Hub in
+    ~1-2 seconds; all waiting and escalation happens in a detached watchdog owned
+    by Task Scheduler.
 
-      1. Send a graceful close signal.
-           - GUI apps with an accessible main window: CloseMainWindow (WM_CLOSE).
-           - Windowless / console apps, or when CloseMainWindow is blocked
-             (e.g. running as SYSTEM targeting a user-session process):
-             taskkill /PID <id> without /F, which delivers CTRL_CLOSE_EVENT
-             or WM_CLOSE via the kernel and works across session boundaries.
-      2. Poll for exit every 500 ms up to GracefulTimeoutSec.
-             If the process stops responding (Responding = false) at any point
-             during the wait, escalate immediately rather than waiting for the
-             full timeout.
-      3. If the process has still not exited: force-kill with Stop-Process -Force.
+        Launcher (Hub thread)  ->  Watchdog (Task Scheduler)  ->  Sensor (reads result)
 
-    All matching instances are stopped. If Restart is true and an exe path was
-    captured before stopping, one new instance is launched after all have closed.
+    LAUNCHER (this file)
+      1. Discover processes matching FileDescription. Exit 0 immediately if none.
+      2. Self-extract the watchdog to
+         %ProgramData%\AirWatch\Extensions\ProcessGraceful\Watch-ProcessClose.ps1
+         and write state.json alongside it.
+      3. Register scheduled task 'WS1_ProcessGracefulWatchdog' with no trigger,
+         start it on demand, and exit 0.
 
-    NOTE: When running as SYSTEM (MDM remediation context), cross-session
-    window message delivery (WM_CLOSE) may be blocked by UIPI for processes
-    running in a user session. In that case the taskkill fallback is used, which
-    has broader cross-session reach. If that also fails, the process will be
-    force-killed after GracefulTimeoutSec seconds.
+    WATCHDOG (self-extracted, runs detached)
+      1. Send the graceful close signal: CloseMainWindow (WM_CLOSE) for windowed
+         processes, else taskkill /PID <id> without /F.
+      2. Poll each target once per second:
+           - exited                      -> ClosedGracefully
+           - unresponsive N checks in a row -> ForceKilled  (N = UnresponsiveSampleCount)
+           - deadline hit while responding  -> UserActionRequired, LEFT RUNNING
+      3. Optionally restart, write result.json, self-unregister the task.
+
+    WHY A SCHEDULED TASK, NOT Start-Job
+    Background jobs are child runspaces of the calling process. When Hub reaps
+    this script's process tree the job dies with it. A Task Scheduler-owned
+    process is genuinely detached and survives.
+
+    WHY THE WATCHDOG RUNS IN THE USER SESSION
+    Hang detection requires window-station access, which exists only inside an
+    interactive session. Running as SYSTEM in session 0, MainWindowHandle is
+    always IntPtr::Zero for user-session processes, so Responding cannot be read
+    and a restart would launch invisibly into session 0. The watchdog therefore
+    runs as the logged-on user (LogonType Interactive, RunLevel Limited).
+
+    WHEN NO USER IS LOGGED ON
+    The watchdog falls back to SYSTEM context. Responsiveness is unmeasurable
+    there, so it sends the graceful close signal and reports the outcome but
+    NEVER force-kills -- a process that cannot be measured must not be assumed hung.
+
+    A RESPONDING PROCESS IS NEVER FORCE-KILLED
+    By default (ForceOnlyIfUnresponsive = $true) a process that is healthy but
+    still open at the deadline is reported as UserActionRequired and left alone.
+    This is almost always an app waiting on the user, e.g. a "Save changes?"
+    prompt -- exactly the case where force-killing destroys work.
+
+    EXIT CODE CAVEAT
+    In Detached mode the exit code reflects successful DISPATCH, not the final
+    close outcome, because the launcher returns before the watchdog finishes.
+    The authoritative result is written to:
+        %ProgramData%\AirWatch\Extensions\ProcessGraceful\state\result.json
+    and surfaced by the companion sensor process_graceful_lastresult.ps1.
+    Use -Mode Inline for lab testing when you need the exit code to reflect the
+    real outcome.
 
 .PARAMETER FileDescription
     Substring matched (case-insensitive wildcard) against each process's
@@ -36,26 +67,47 @@
     Accepts env var: $env:FileDescription. Required.
 
 .PARAMETER GracefulTimeoutSec
-    Maximum seconds to wait for a graceful exit before force-killing.
-    The not-responding early-escalation path ignores this timeout.
+    Seconds to wait for a graceful exit. On expiry a still-responding process is
+    reported as UserActionRequired (it is NOT force-killed unless
+    ForceOnlyIfUnresponsive is explicitly set to $false).
     Accepts env var: $env:GracefulTimeoutSec. Default: 15.
 
 .PARAMETER Restart
-    When true, re-launches one instance after all matching processes have
-    stopped, using the executable path captured from the first matched process.
-    Note: the captured path may be inaccessible from SYSTEM context if the
-    process runs from a user profile or protected directory; restart will be
-    skipped with a warning in that case.
+    When true, re-launches one instance after all matching processes have closed.
+    Skipped if any process ended as UserActionRequired or Error. Because the
+    watchdog runs in the user's session, the relaunched window is visible to them.
     Accepts env var: $env:Restart. Default: false.
+
+.PARAMETER ForceOnlyIfUnresponsive
+    When $true (default) force-kill is reserved for processes confirmed hung.
+    Set $false to restore the legacy behaviour of force-killing at the deadline
+    regardless of responsiveness -- risks data loss on apps showing a save prompt.
+    Ignored (always treated as $true) when no user session exists.
+    Accepts env var: $env:ForceOnlyIfUnresponsive. Default: true.
+
+.PARAMETER UnresponsiveSampleCount
+    Consecutive 1-second checks a windowed process must report Responding = false
+    before it is treated as hung. Guards against a momentary UI stall (e.g. a
+    large save) being misread as a hang. Streak resets on any recovery.
+    Accepts env var: $env:UnresponsiveSampleCount. Default: 3.
+
+.PARAMETER Mode
+    Detached (default) -- dispatch the watchdog via Task Scheduler and return
+    immediately. The only supported production mode.
+    Inline -- run the watchdog synchronously in this process. Blocks the caller;
+    for lab testing only.
+    Accepts env var: $env:Mode.
 
 .NOTES
     Script Name  : Restart-WinProcessGraceful.ps1
-    Version      : 1.0.0
+    Version      : 2.0.0
     Architecture : Any (x86/x64)
-    Context      : System (see UIPI note in .DESCRIPTION)
+    Context      : System (watchdog runs as the logged-on user -- see .DESCRIPTION)
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-07-28
-    Timeout      : GracefulTimeoutSec x matched-process-count + ~10 s overhead
+    Timeout      : ~1-2 s (Detached). Watchdog is capped at GracefulTimeoutSec + 120 s.
+    Reporting    : HKLM:\Software\AirWatch\Extension\DEXRecords\ProcessGraceful
+                   %ProgramData%\AirWatch\Extensions\ProcessGraceful\state\result.json
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -65,9 +117,13 @@
 #>
 
 param(
-    [string]$FileDescription    = $(if ($env:FileDescription)    { $env:FileDescription }                          else { '' }),
-    [int]   $GracefulTimeoutSec = $(if ($env:GracefulTimeoutSec) { [int]$env:GracefulTimeoutSec }                  else { 15 }),
-    [bool]  $Restart            = $(if ($env:Restart)            { [System.Convert]::ToBoolean($env:Restart) }     else { $false })
+    [string]$FileDescription          = $(if ($env:FileDescription)          { $env:FileDescription }                                        else { '' }),
+    [int]   $GracefulTimeoutSec       = $(if ($env:GracefulTimeoutSec)       { [int]$env:GracefulTimeoutSec }                                else { 15 }),
+    [bool]  $Restart                  = $(if ($env:Restart)                  { [System.Convert]::ToBoolean($env:Restart) }                   else { $false }),
+    [bool]  $ForceOnlyIfUnresponsive  = $(if ($env:ForceOnlyIfUnresponsive)  { [System.Convert]::ToBoolean($env:ForceOnlyIfUnresponsive) }    else { $true }),
+    [int]   $UnresponsiveSampleCount  = $(if ($env:UnresponsiveSampleCount)  { [int]$env:UnresponsiveSampleCount }                           else { 3 }),
+    [ValidateSet('Detached','Inline')]
+    [string]$Mode                     = $(if ($env:Mode)                     { $env:Mode }                                                   else { 'Detached' })
 )
 
 if ([string]::IsNullOrEmpty($FileDescription)) {
@@ -75,131 +131,419 @@ if ([string]::IsNullOrEmpty($FileDescription)) {
     exit 1
 }
 
-# -- Discover matching processes -----------------------------------------------
+# -- Constants ----------------------------------------------------------------
+$TaskName    = 'WS1_ProcessGracefulWatchdog'
+$BaseDir     = Join-Path $env:ProgramData 'AirWatch\Extensions\ProcessGraceful'
+$StateDir    = Join-Path $BaseDir 'state'
+$WatchdogPs1 = Join-Path $BaseDir 'Watch-ProcessClose.ps1'
+$StateFile   = Join-Path $StateDir 'state.json'
+$RegPath     = 'HKLM:\Software\AirWatch\Extension\DEXRecords\ProcessGraceful'
+
+# -- Helper: write a DEXRecords summary --------------------------------------
+# Only succeeds when running elevated/SYSTEM. Failure is non-fatal: the watchdog
+# writes the authoritative outcome to result.json which the companion sensor reads.
+function Set-DexRecord {
+    param([hashtable]$Values)
+    try {
+        if (-not (Test-Path $RegPath)) { New-Item -Path $RegPath -Force -ErrorAction Stop | Out-Null }
+        foreach ($k in $Values.Keys) {
+            $v    = $Values[$k]
+            $type = if ($v -is [int]) { 'DWord' } else { 'String' }
+            Set-ItemProperty -Path $RegPath -Name $k -Value $v -Type $type -ErrorAction Stop
+        }
+    } catch {
+        Write-Host "  [Registry] Write skipped: $($_.Exception.Message)"
+    }
+}
+
+# -- Resolve execution context ------------------------------------------------
+# Hang detection depends on window-station access, which exists only inside an
+# interactive user session. Determine up front which context the watchdog can use.
+$isSystem = [Security.Principal.WindowsIdentity]::GetCurrent().IsSystem
+
+$loggedOnUser = $null
+try {
+    $loggedOnUser = (Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue).UserName
+} catch { }
+
+# 'User' => watchdog runs in the interactive session and CAN measure Responding.
+# 'SYSTEM' => no interactive session; graceful close only, never force-kill.
+#
+# Inline mode is special: the watchdog runs in THIS process, so what matters is
+# whether this process is in session 0, not whether a user happens to be logged
+# on. Running Inline as SYSTEM cannot read Responding even with a user present.
+$watchdogContext = if ($Mode -eq 'Inline') {
+    if ($isSystem) { 'SYSTEM' } else { 'User' }
+} elseif ($loggedOnUser) {
+    'User'
+} else {
+    'SYSTEM'
+}
+
+# -- Discover matching processes ----------------------------------------------
+# Process enumeration works fine from SYSTEM -- only window handles are unavailable.
 $procs = @(Get-Process -ErrorAction SilentlyContinue |
     Where-Object { $_.Description -like "*$FileDescription*" })
 
+Write-Host "`n-- Restart-WinProcessGraceful (dispatch) ------------------------" -ForegroundColor Cyan
+Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Target: '$FileDescription'   Mode: $Mode   Context: $watchdogContext"
+Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+
 if ($procs.Count -eq 0) {
-    Write-Host "No running process found matching description '*$FileDescription*'. Nothing to do."
+    Write-Host "  No running process matches description '*$FileDescription*'. Nothing to do."
+    Set-DexRecord @{
+        LastRunTime       = (Get-Date -Format 'o')
+        TargetDescription = $FileDescription
+        Status            = 'NoMatch'
+        WatchdogContext   = $watchdogContext
+        MatchedCount      = 0
+    }
     exit 0
 }
 
-Write-Host "$($procs.Count) process(es) found matching '$FileDescription':"
+Write-Host "  $($procs.Count) process(es) matched:"
 foreach ($p in $procs) {
-    Write-Host "  PID $($p.Id.ToString().PadLeft(5))  $($p.Name.PadRight(20))  $($p.Description)"
+    Write-Host "    PID $($p.Id.ToString().PadLeft(5))  $($p.Name.PadRight(20))  $($p.Description)"
 }
-Write-Host ''
 
-$restartPath      = $null
-$gracefulCount    = 0
-$forceKilledCount = 0
-$errorCount       = 0
+# -- Watchdog source ----------------------------------------------------------
+# Single-quoted here-string: nothing below is expanded by the launcher. All
+# variables resolve at watchdog runtime. Regenerated on every dispatch.
+$WatchdogSource = @'
+<#
+    Watch-ProcessClose.ps1 -- GENERATED FILE. DO NOT EDIT.
+    Emitted by Restart-WinProcessGraceful.ps1 v2.0.0 and overwritten on every dispatch.
 
-foreach ($proc in $procs) {
+    Runs detached under Task Scheduler so Intelligent Hub is never held waiting.
+    Sends the graceful close signal, monitors each target, and force-kills ONLY a
+    process confirmed hung. A process that is still responding is left running.
+#>
 
-    Write-Host "[$($proc.Name) / PID $($proc.Id)]"
+$StateDir   = Join-Path $PSScriptRoot 'state'
+$StateFile  = Join-Path $StateDir 'state.json'
+$ResultFile = Join-Path $StateDir 'result.json'
+$LogFile    = Join-Path $StateDir 'watchdog.log'
 
-    # Capture exe path before stopping -- needed for optional restart
-    if (-not $restartPath) {
-        try { $restartPath = $proc.Path } catch { }
+function Write-Log {
+    param([string]$Message)
+    try { "$(Get-Date -Format 'o')  $Message" | Out-File -FilePath $LogFile -Append -Encoding UTF8 -ErrorAction SilentlyContinue } catch { }
+}
+
+$state = $null
+try {
+    $state = Get-Content -Path $StateFile -Raw -ErrorAction Stop | ConvertFrom-Json
+} catch {
+    Write-Log "FATAL: cannot read state file. $($_.Exception.Message)"
+    exit 1
+}
+
+$tracked     = @()
+$restartPath = $null
+$restarted   = $false
+$status      = 'Completed'
+
+try {
+    Write-Log "Start. Target='$($state.FileDescription)' Context=$($state.WatchdogContext) Timeout=$($state.GracefulTimeoutSec)s ForceOnlyIfUnresponsive=$($state.ForceOnlyIfUnresponsive)"
+
+    # Re-discover: PIDs may have shifted between dispatch and execution.
+    $procs = @(Get-Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.Description -like "*$($state.FileDescription)*" })
+
+    if ($procs.Count -eq 0) {
+        Write-Log 'No matching processes at watchdog start -- already closed.'
+        $status = 'NoMatch'
     }
 
-    # -- Step 1: Graceful close signal -----------------------------------------
-
-    $gracefulSent = $false
-
-    # For GUI apps: CloseMainWindow sends WM_CLOSE to the main window handle.
-    # Returns $false (and $gracefulSent stays $false) when the process has no
-    # accessible main window -- common when running as SYSTEM vs. a user session.
-    if ($proc.MainWindowHandle -ne [IntPtr]::Zero) {
-        try {
-            $gracefulSent = $proc.CloseMainWindow()
-            if ($gracefulSent) { Write-Host '  Graceful signal sent (CloseMainWindow / WM_CLOSE).' }
-        } catch { }
+    foreach ($p in $procs) {
+        if (-not $restartPath) { try { $restartPath = $p.Path } catch { } }
+        $hasWindow = $false
+        try { $hasWindow = ($p.MainWindowHandle -ne [IntPtr]::Zero) } catch { }
+        $tracked += [PSCustomObject]@{
+            Proc      = $p
+            Id        = $p.Id
+            Name      = $p.Name
+            HasWindow = $hasWindow
+            Outcome   = 'Pending'
+            Detail    = ''
+            Streak    = 0
+        }
     }
 
-    # Fallback: taskkill without /F delivers CTRL_CLOSE_EVENT (console) or
-    # WM_CLOSE (GUI) via the kernel. This has broader reach from SYSTEM context
-    # and works for windowless processes that CloseMainWindow cannot target.
-    if (-not $gracefulSent) {
-        Write-Host '  No accessible main window -- sending graceful signal via taskkill (no /F)...'
-        $null = & taskkill /PID $proc.Id 2>&1
-        $gracefulSent = $true
+    # -- Graceful close signal -------------------------------------------------
+    foreach ($t in $tracked) {
+        $sent = $false
+        if ($t.HasWindow) {
+            # Works here because the watchdog shares the target's session/desktop.
+            try {
+                $sent = $t.Proc.CloseMainWindow()
+                if ($sent) { Write-Log "PID $($t.Id) [$($t.Name)] graceful signal sent (CloseMainWindow)." }
+            } catch { }
+        }
+        if (-not $sent) {
+            # taskkill without /F delivers WM_CLOSE / CTRL_CLOSE_EVENT via the kernel
+            # and reaches windowless processes CloseMainWindow cannot target.
+            try { $null = & taskkill.exe /PID $t.Id 2>&1 } catch { }
+            Write-Log "PID $($t.Id) [$($t.Name)] graceful signal sent (taskkill, no /F). HasWindow=$($t.HasWindow)"
+        }
     }
 
-    # -- Step 2: Wait for exit, escalate if not responding --------------------
+    # -- Monitor ---------------------------------------------------------------
+    # Responding is only meaningful inside an interactive session AND for a process
+    # that owns a window. Headless processes always report Responding = $true.
+    $canMeasure = ($state.WatchdogContext -eq 'User')
+    $samples    = [int]$state.UnresponsiveSampleCount
+    $deadline   = (Get-Date).AddSeconds([int]$state.GracefulTimeoutSec)
 
-    $deadline      = [DateTime]::UtcNow.AddSeconds($GracefulTimeoutSec)
-    $notResponding = $false
-    $exited        = $false
-
-    while ([DateTime]::UtcNow -lt $deadline) {
-        Start-Sleep -Milliseconds 500
-        try {
-            $proc.Refresh()
-            if ($proc.HasExited) { $exited = $true; break }
-
-            # Escalate immediately if the process has hung (stopped processing messages).
-            # Only meaningful for windowed processes; headless processes always report Responding=$true.
-            if ($proc.MainWindowHandle -ne [IntPtr]::Zero -and -not $proc.Responding) {
-                $notResponding = $true
-                Write-Host '  Process stopped responding. Escalating to force-kill.'
-                break
+    while ((Get-Date) -lt $deadline -and @($tracked | Where-Object { $_.Outcome -eq 'Pending' }).Count -gt 0) {
+        Start-Sleep -Seconds 1
+        foreach ($t in @($tracked | Where-Object { $_.Outcome -eq 'Pending' })) {
+            try {
+                $t.Proc.Refresh()
+                if ($t.Proc.HasExited) {
+                    $t.Outcome = 'ClosedGracefully'
+                    $t.Detail  = 'Exited cleanly after graceful signal.'
+                    Write-Log "PID $($t.Id) closed gracefully."
+                    continue
+                }
+                if ($canMeasure -and $t.HasWindow) {
+                    if (-not $t.Proc.Responding) {
+                        $t.Streak++
+                        Write-Log "PID $($t.Id) not responding ($($t.Streak)/$samples)."
+                        if ($t.Streak -ge $samples) {
+                            Stop-Process -Id $t.Id -Force -ErrorAction Stop
+                            try { $t.Proc.WaitForExit(5000) | Out-Null } catch { }
+                            $t.Outcome = 'ForceKilled'
+                            $t.Detail  = "Confirmed hung: unresponsive for $($t.Streak) consecutive 1s checks."
+                            Write-Log "PID $($t.Id) FORCE-KILLED (confirmed hung)."
+                        }
+                    } else {
+                        # Reset on recovery so a momentary UI stall never escalates.
+                        $t.Streak = 0
+                    }
+                }
+            } catch {
+                $t.Outcome = 'ClosedGracefully'
+                $t.Detail  = 'Process handle invalidated -- treated as exited.'
             }
-        } catch {
-            # Process object invalidated -- treat as exited
-            $exited = $true
-            break
         }
     }
 
-    # Refresh one final time in case the loop ended on timeout
-    if (-not $exited) {
-        try { $proc.Refresh(); $exited = $proc.HasExited } catch { $exited = $true }
-    }
-
-    # -- Step 3: Evaluate and force-kill if needed ----------------------------
-
-    if ($exited) {
-        Write-Host "  [OK]  Closed gracefully."
-        $gracefulCount++
-    } else {
-        $reason = if ($notResponding) { 'not responding' } else { "timeout (${GracefulTimeoutSec}s) exceeded" }
-        Write-Host "  [!!]  Did not close gracefully ($reason) -- force-killing..."
-        try {
-            Stop-Process -Id $proc.Id -Force -ErrorAction Stop
-            # Brief wait so downstream logic (restart) doesn't race the OS cleanup
-            try { $proc.WaitForExit(5000) | Out-Null } catch { }
-            Write-Host "  [OK]  Force-killed."
-            $forceKilledCount++
-        } catch {
-            Write-Host "  [ERR] Force-kill failed: $($_.Exception.Message)"
-            $errorCount++
+    # -- Resolve anything still running at the deadline -------------------------
+    foreach ($t in @($tracked | Where-Object { $_.Outcome -eq 'Pending' })) {
+        # Force at timeout only when explicitly opted in AND we could actually
+        # measure responsiveness. In SYSTEM context we never force: an unmeasurable
+        # process must not be assumed hung.
+        $forceAtTimeout = (-not [bool]$state.ForceOnlyIfUnresponsive) -and $canMeasure
+        if ($forceAtTimeout) {
+            try {
+                Stop-Process -Id $t.Id -Force -ErrorAction Stop
+                try { $t.Proc.WaitForExit(5000) | Out-Null } catch { }
+                $t.Outcome = 'ForceKilled'
+                $t.Detail  = 'Deadline reached; ForceOnlyIfUnresponsive was disabled.'
+                Write-Log "PID $($t.Id) force-killed at deadline (ForceOnlyIfUnresponsive disabled)."
+            } catch {
+                $t.Outcome = 'Error'
+                $t.Detail  = "Force-kill failed: $($_.Exception.Message)"
+                Write-Log "PID $($t.Id) force-kill FAILED: $($_.Exception.Message)"
+            }
+        } else {
+            $t.Outcome = 'UserActionRequired'
+            $t.Detail  = 'Still responding at deadline -- left running. Likely awaiting user input (e.g. an unsaved-work prompt).'
+            Write-Log "PID $($t.Id) still responding at deadline -- LEFT RUNNING (user action required)."
         }
     }
 
-    Write-Host ''
-}
-
-# -- Summary -------------------------------------------------------------------
-Write-Host "Summary: $gracefulCount graceful, $forceKilledCount force-killed, $errorCount error(s)."
-
-# -- Optional restart ----------------------------------------------------------
-if ($Restart) {
-    if ($restartPath) {
-        Write-Host "Restarting: $restartPath"
-        Start-Sleep -Seconds 2
+    # -- Optional restart -------------------------------------------------------
+    # Runs in the user's session here, so the window is actually visible to them.
+    $blocked = @($tracked | Where-Object { $_.Outcome -eq 'UserActionRequired' -or $_.Outcome -eq 'Error' }).Count
+    if ([bool]$state.Restart -and $blocked -eq 0 -and $restartPath) {
         try {
+            Start-Sleep -Seconds 2
             Start-Process -FilePath $restartPath -ErrorAction Stop
-            Write-Host 'Process restarted.'
+            $restarted = $true
+            Write-Log "Restarted: $restartPath"
         } catch {
-            Write-Host "[ERR] Restart failed: $($_.Exception.Message)"
-            exit 1
+            Write-Log "Restart FAILED: $($_.Exception.Message)"
         }
-    } else {
-        Write-Host '[WARN] Restart requested but executable path could not be determined (may be inaccessible from SYSTEM context). Restart manually.'
+    } elseif ([bool]$state.Restart) {
+        Write-Log "Restart skipped (blocked=$blocked, path='$restartPath')."
     }
 }
+catch {
+    $status = 'Error'
+    Write-Log "FATAL: $($_.Exception.Message)"
+}
+finally {
+    # -- Write authoritative outcome for the companion sensor ------------------
+    try {
+        $summary = [PSCustomObject]@{
+            Status                  = $status
+            TargetDescription       = $state.FileDescription
+            WatchdogContext         = $state.WatchdogContext
+            CompletedAt             = (Get-Date -Format 'o')
+            MatchedCount            = @($tracked).Count
+            ClosedGracefullyCount   = @($tracked | Where-Object { $_.Outcome -eq 'ClosedGracefully' }).Count
+            ForceKilledCount        = @($tracked | Where-Object { $_.Outcome -eq 'ForceKilled' }).Count
+            UserActionRequiredCount = @($tracked | Where-Object { $_.Outcome -eq 'UserActionRequired' }).Count
+            ErrorCount              = @($tracked | Where-Object { $_.Outcome -eq 'Error' }).Count
+            Restarted               = $restarted
+            Processes               = @($tracked | ForEach-Object {
+                [PSCustomObject]@{ Id = $_.Id; Name = $_.Name; Outcome = $_.Outcome; Detail = $_.Detail }
+            })
+        }
+        $summary | ConvertTo-Json -Depth 4 | Set-Content -Path $ResultFile -Encoding UTF8 -ErrorAction Stop
+        Write-Log "Result written: matched=$($summary.MatchedCount) graceful=$($summary.ClosedGracefullyCount) forced=$($summary.ForceKilledCount) userpending=$($summary.UserActionRequiredCount)"
+    } catch {
+        Write-Log "Result write FAILED: $($_.Exception.Message)"
+    }
 
-if ($errorCount -gt 0) { exit 1 }
+    # Best-effort HKLM mirror. Succeeds in SYSTEM context; expected to fail for a
+    # standard user -- result.json above remains the source of truth either way.
+    try {
+        $reg = 'HKLM:\Software\AirWatch\Extension\DEXRecords\ProcessGraceful'
+        if (-not (Test-Path $reg)) { New-Item -Path $reg -Force -ErrorAction Stop | Out-Null }
+        Set-ItemProperty -Path $reg -Name 'Status'                  -Value $status                          -Type String -ErrorAction Stop
+        Set-ItemProperty -Path $reg -Name 'CompletedAt'             -Value (Get-Date -Format 'o')           -Type String -ErrorAction Stop
+        Set-ItemProperty -Path $reg -Name 'MatchedCount'            -Value @($tracked).Count                -Type DWord  -ErrorAction Stop
+        Set-ItemProperty -Path $reg -Name 'ClosedGracefullyCount'   -Value @($tracked | Where-Object { $_.Outcome -eq 'ClosedGracefully' }).Count   -Type DWord -ErrorAction Stop
+        Set-ItemProperty -Path $reg -Name 'ForceKilledCount'        -Value @($tracked | Where-Object { $_.Outcome -eq 'ForceKilled' }).Count        -Type DWord -ErrorAction Stop
+        Set-ItemProperty -Path $reg -Name 'UserActionRequiredCount' -Value @($tracked | Where-Object { $_.Outcome -eq 'UserActionRequired' }).Count -Type DWord -ErrorAction Stop
+        Set-ItemProperty -Path $reg -Name 'ErrorCount'              -Value @($tracked | Where-Object { $_.Outcome -eq 'Error' }).Count              -Type DWord -ErrorAction Stop
+        Set-ItemProperty -Path $reg -Name 'Restarted'               -Value ([int]$restarted)                -Type DWord  -ErrorAction Stop
+        foreach ($t in $tracked) {
+            Set-ItemProperty -Path $reg -Name "PID$($t.Id)_Result" -Value "$($t.Name) :: $($t.Outcome) :: $($t.Detail)" -Type String -ErrorAction SilentlyContinue
+        }
+    } catch { }
+
+    # -- Self-cleanup ----------------------------------------------------------
+    try { Remove-Item -Path $StateFile -Force -ErrorAction SilentlyContinue } catch { }
+    try {
+        if ($state -and $state.TaskName) {
+            if (Get-ScheduledTask -TaskName $state.TaskName -ErrorAction SilentlyContinue) {
+                Unregister-ScheduledTask -TaskName $state.TaskName -Confirm:$false -ErrorAction SilentlyContinue
+                Write-Log "Scheduled task '$($state.TaskName)' unregistered."
+            }
+        }
+    } catch { }
+    Write-Log 'Watchdog end.'
+}
+
+exit 0
+'@
+
+# -- Stage watchdog and state -------------------------------------------------
+try {
+    foreach ($dir in @($BaseDir, $StateDir)) {
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop | Out-Null }
+    }
+
+    # The watchdog script itself stays in $BaseDir under default ACLs (SYSTEM/Admins
+    # writable only). Only $StateDir is opened up, so a standard user can never
+    # modify the code that runs -- just the JSON it reads and writes.
+    if ($watchdogContext -eq 'User' -and $loggedOnUser) {
+        try {
+            $acl  = Get-Acl -Path $StateDir -ErrorAction Stop
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                        $loggedOnUser, 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+            $acl.SetAccessRule($rule)
+            Set-Acl -Path $StateDir -AclObject $acl -ErrorAction Stop
+        } catch {
+            Write-Host "  [ACL] Could not grant '$loggedOnUser' write access to state folder: $($_.Exception.Message)"
+        }
+    }
+
+    Set-Content -Path $WatchdogPs1 -Value $WatchdogSource -Encoding UTF8 -Force -ErrorAction Stop
+
+    [PSCustomObject]@{
+        FileDescription         = $FileDescription
+        GracefulTimeoutSec      = $GracefulTimeoutSec
+        Restart                 = $Restart
+        ForceOnlyIfUnresponsive = $ForceOnlyIfUnresponsive
+        UnresponsiveSampleCount = $UnresponsiveSampleCount
+        WatchdogContext         = $watchdogContext
+        TaskName                = $(if ($Mode -eq 'Detached') { $TaskName } else { '' })
+        DispatchedAt            = (Get-Date -Format 'o')
+        MatchedPids             = @($procs | ForEach-Object { $_.Id })
+    } | ConvertTo-Json -Depth 3 | Set-Content -Path $StateFile -Encoding UTF8 -Force -ErrorAction Stop
+}
+catch {
+    Write-Host "  [ERR] Failed to stage watchdog: $($_.Exception.Message)"
+    Set-DexRecord @{
+        LastRunTime       = (Get-Date -Format 'o')
+        TargetDescription = $FileDescription
+        Status            = 'Error'
+        WatchdogContext   = $watchdogContext
+    }
+    exit 1
+}
+
+# -- Inline mode: run synchronously (lab/testing only) ------------------------
+if ($Mode -eq 'Inline') {
+    Write-Host '  Running watchdog inline (blocking). Not for production use.'
+    & $WatchdogPs1
+    $code = $LASTEXITCODE
+    Write-Host "  Watchdog finished inline with exit code $code."
+    exit $code
+}
+
+# -- Detached mode: hand off to Task Scheduler and return immediately ---------
+# Task Scheduler owns the watchdog process, so it survives Hub reaping this
+# script's process tree. (Start-Job would NOT: job runspaces are children of
+# this process and die with it.)
+try {
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
+
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+        -Argument "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -File `"$WatchdogPs1`""
+
+    $principal = if ($watchdogContext -eq 'User') {
+        # Interactive => shares the target's desktop, so MainWindowHandle and
+        # Responding are readable and a restart lands in the visible session.
+        # Limited (not Highest) keeps this at least privilege; it is sufficient
+        # for closing the user's own non-elevated processes.
+        New-ScheduledTaskPrincipal -UserId $loggedOnUser -LogonType Interactive -RunLevel Limited
+    } else {
+        New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    }
+
+    # Hard cap so a wedged watchdog can never linger.
+    $settings = New-ScheduledTaskSettingsSet `
+        -ExecutionTimeLimit (New-TimeSpan -Seconds ($GracefulTimeoutSec + 120)) `
+        -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+
+    # Registered with no trigger, then started on demand: it runs immediately
+    # under the Task Scheduler service rather than waiting on a clock trigger.
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal `
+        -Settings $settings -Force -ErrorAction Stop | Out-Null
+    Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+
+    Write-Host "  Watchdog dispatched as scheduled task '$TaskName' ($watchdogContext context)."
+    Write-Host "  Outcome will be written to: $(Join-Path $StateDir 'result.json')"
+}
+catch {
+    Write-Host "  [ERR] Failed to dispatch watchdog: $($_.Exception.Message)"
+    Set-DexRecord @{
+        LastRunTime       = (Get-Date -Format 'o')
+        TargetDescription = $FileDescription
+        Status            = 'Error'
+        WatchdogContext   = $watchdogContext
+        MatchedCount      = $procs.Count
+    }
+    exit 1
+}
+
+Set-DexRecord @{
+    LastRunTime       = (Get-Date -Format 'o')
+    TargetDescription = $FileDescription
+    Status            = 'Dispatched'
+    WatchdogContext   = $watchdogContext
+    MatchedCount      = $procs.Count
+}
+
+Write-Host "----------------------------------------------------------------`n" -ForegroundColor Cyan
+
+# Exit code reflects successful dispatch, NOT the final close outcome.
+# Read result.json (or the companion sensor) for the actual result.
 exit 0
