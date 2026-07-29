@@ -42,7 +42,7 @@
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-07-29
-    Timeout      : 300 seconds
+    Timeout      : ~5 seconds (launcher exits immediately; payload runs via scheduled task up to 300 seconds)
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -50,6 +50,61 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
+
+param([switch]$RunAsPayload)
+
+# -- Dispatch constants (shared by launcher and payload) ----------------------
+$TaskName   = 'DEX_SCCMRemediateWMI'
+$BaseDir    = Join-Path $env:ProgramData 'Omnissa\DEX\SCCM'
+$PayloadPs1 = Join-Path $BaseDir 'Invoke-AutoRemediateWMIRepository.ps1'
+$RegPath    = 'HKLM:\Software\AirWatch\Extension\DEXRecords\SCCM\WMIRepository'
+
+# -- Launcher (UEM dispatcher) -------------------------------------------------
+# When UEM delivers this script it runs WITHOUT -RunAsPayload. The launcher copies
+# the script to a stable on-disk path and dispatches a one-shot scheduled task
+# that runs the step engine with -RunAsPayload. The launcher exits in ~5 seconds,
+# well within UEM's script timeout. The scheduled task runs the heavy work outside
+# UEM's timeout window and writes results to the registry for DEX sensors to read.
+if (-not $RunAsPayload) {
+    try {
+        if (-not (Test-Path $BaseDir)) {
+            New-Item -ItemType Directory -Path $BaseDir -Force -ErrorAction Stop | Out-Null
+        }
+
+        # Copy the full script to a path that survives UEM's temp file cleanup.
+        Copy-Item -Path $PSCommandPath -Destination $PayloadPs1 -Force -ErrorAction Stop
+
+        # Stamp a 'Dispatched' record so sensors have a known value before the
+        # payload finishes -- avoids a 'no data' gap in DEX dashboards.
+        if (-not (Test-Path $RegPath)) { New-Item -Path $RegPath -Force -ErrorAction Stop | Out-Null }
+        Set-ItemProperty -Path $RegPath -Name 'Status'           -Value 'Dispatched'         -Type String
+        Set-ItemProperty -Path $RegPath -Name 'LastDispatchTime' -Value (Get-Date -Format 'o') -Type String
+
+        # Unregister any stale previous task before re-registering.
+        if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+        }
+
+        $action    = New-ScheduledTaskAction -Execute 'powershell.exe' `
+                         -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$PayloadPs1`" -RunAsPayload"
+        $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $settings  = New-ScheduledTaskSettingsSet `
+                         -ExecutionTimeLimit '00:10:00' `
+                         -DeleteExpiredTaskAfter '00:01:00' `
+                         -StartWhenAvailable
+
+        Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal `
+            -Settings $settings -Force -ErrorAction Stop | Out-Null
+        Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+
+        Write-Host "Task '$TaskName' dispatched. Results will appear at: $RegPath"
+        exit 0
+    } catch {
+        Write-Host "[ERROR] Launcher failed: $($_.Exception.Message)"
+        exit 1
+    }
+}
+# -- Payload runs below this line (scheduled task context) --------------------
 
 # -- Tunables ------------------------------------------------------------------
 $Winmgmt = Join-Path $env:SystemRoot 'System32\wbem\winmgmt.exe'
@@ -228,6 +283,22 @@ Write-Host "`n----------------------------------------------------------------" 
 Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
 Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
 Write-Host ''
+
+# -- Persist results for DEX sensors ------------------------------------------
+try {
+    if (-not (Test-Path $RegPath)) { New-Item -Path $RegPath -Force -ErrorAction Stop | Out-Null }
+    Set-ItemProperty -Path $RegPath -Name 'Status'          -Value $(if ($failed -gt 0) { 'Failed' } elseif ($warnings -gt 0) { 'Warning' } else { 'Passed' }) -Type String
+    Set-ItemProperty -Path $RegPath -Name 'LastRunTime'     -Value (Get-Date -Format 'o') -Type String
+    Set-ItemProperty -Path $RegPath -Name 'Passed'          -Value $passed   -Type DWord
+    Set-ItemProperty -Path $RegPath -Name 'Warnings'        -Value $warnings -Type DWord
+    Set-ItemProperty -Path $RegPath -Name 'Failed'          -Value $failed   -Type DWord
+    Set-ItemProperty -Path $RegPath -Name 'RemediationsRun' -Value $remCount -Type DWord
+} catch { }
+
+# -- Self-cleanup: unregister the scheduled task ------------------------------
+if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+}
 
 if ($failed -gt 0) { exit 1 }
 exit 0
