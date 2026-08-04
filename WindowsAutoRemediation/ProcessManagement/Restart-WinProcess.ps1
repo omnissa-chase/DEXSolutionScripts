@@ -22,17 +22,23 @@ param(
     [bool]$StartService=$env:StartService
 )
 
-$proc = Get-Process -ErrorAction SilentlyContinue | Where Description -like "*FileDescription*"
+$proc = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Description -like "*$FileDescription*" }
 
 if ($proc) {
     Write-Host "Stopping process '$ProcessName' (PID: $($proc.Id))..."
-    Stop-Process -Name $ProcessName -Force
+    Try{
+        Stop-Process -Name $ProcessName -Force 
+    }Catch{
+        Write-Host "Failed to stop process '$ProcessName' (PID: $($proc.Id)). Exception: $_"
+        Exit 1
+    }
     Start-Sleep -Seconds 5
     if($StartService){
         Write-Host "Starting process '$ProcessName'..."
-        Start-Process $ProcessName
+        Start-Process $ProcessName -ErrorAction SilentlyContinue
     }
 } else {
     Write-Host "Process '$ProcessName' not currently running."
 }
+Exit 0
 

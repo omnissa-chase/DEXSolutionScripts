@@ -42,6 +42,7 @@
 # -- Step Definitions ----------------------------------------------------------
 # Only supported fields: Name, Order, Enabled, ResolveOnWarning,
 #                        DetectionScript, ResolutionScript
+[CmdletBinding(SupportsShouldProcess=$true)]
 $Steps = @(
 
     @{
