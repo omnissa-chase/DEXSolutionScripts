@@ -4,17 +4,6 @@
     Records key logon duration metrics for the currently logged-on interactive user
     to the registry. Designed to run as SYSTEM via a WorkspaceONE logon script trigger.
 
-.PARAMETER DeployMode
-    RunNow             (default) Run the measurement immediately and write results to registry.
-    DeployScheduledTask        Copy this script to C:\ProgramData\AirWatch\Extensions\DEXTools
-                               and register a SYSTEM scheduled task that runs at every user
-                               logon. Use this from a WSO one-time deployment script so the
-                               measurement runs locally without consuming WSO agent time.
-    ConfigureLogging           Check and enable the optional Windows event logs required for
-                               full metric coverage (PrintService/Operational,
-                               TaskScheduler/Operational). Run once as a prerequisite step
-                               before deploying the scheduled task or running measurements.
-
 .DESCRIPTION
     Mines Windows event logs for the most recent interactive logon of the active user
     and captures the following phases:
@@ -34,14 +23,60 @@
     All values are written as string registry values under:
       HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration
 
+    Both parameters default to their matching environment variable, so UEM can configure
+    the script by setting $env:DeployMode / $env:ConfigureLoggingFirst while a human or
+    another script can still pass -DeployMode / -ConfigureLoggingFirst directly. An
+    explicitly passed parameter always wins over the environment.
+
+.PARAMETER DeployMode
+    Defaults to $env:DeployMode, or RunNow when that is unset.
+
+      RunNow              Measure immediately and write results to the registry.
+                          Intended for direct WSO logon script execution.
+      DeployScheduledTask Copy this script to C:\ProgramData\AirWatch\Extensions\DEXTools
+                          and register a SYSTEM scheduled task that runs at every user
+                          logon. Run once from WSO; thereafter the local task handles all
+                          subsequent captures without consuming WSO agent time.
+      ConfigureLogging    Enable the optional Windows event logs required for full metric
+                          coverage (PrintService/Operational, TaskScheduler/Operational).
+                          Safe to re-run — skips already-enabled logs.
+
+    An unrecognised $env:DeployMode falls back to RunNow with a warning, so a typo in the
+    UEM console degrades to a measurement instead of failing the deployment. An
+    unrecognised -DeployMode argument throws, because a caller who typed it should know.
+
+.PARAMETER ConfigureLoggingFirst
+    Defaults to $true when $env:ConfigureLoggingFirst is true / 1 / yes / y, otherwise
+    $false. Enables the optional event logs before running the requested DeployMode, so
+    one deployment configures logging and starts measuring in a single pass. Anything
+    unrecognised is false — this shells out to wevtutil, so it fails closed.
+
+    Idempotent: a registry marker records success and later runs skip the work rather
+    than calling wevtutil at every logon. DeployMode ConfigureLogging ignores the marker,
+    because that is an explicit request rather than a first-run convenience.
+
+.EXAMPLE
+    .\Measure-LogonDuration.ps1 -DeployMode DeployScheduledTask -ConfigureLoggingFirst $true
+
+    Enables the optional logs, then installs the per-logon scheduled task.
+
+.EXAMPLE
+    $env:DeployMode = 'RunNow'
+    .\Measure-LogonDuration.ps1
+
+    How UEM invokes the script: configuration arrives as an environment variable.
+
 .NOTES
     PowerShell 5.1 compatible.
-    DeployMode RunNow            : intended for direct WSO logon script execution.
-    DeployMode DeployScheduledTask : run once from WSO; thereafter the local scheduled task
-                                     handles all subsequent logon captures independently.
-    DeployMode ConfigureLogging  : run once as a prerequisite; enables optional event logs
-                                   so PrintersMappedCount/Duration and LogonTask metrics
-                                   are populated. Safe to re-run — skips already-enabled logs.
+
+    Numeric and timestamp registry values are written using InvariantCulture. A device in
+    a comma-decimal locale would otherwise record "42,5" and a Buddhist-calendar locale
+    would record year 2569, either of which silently breaks every sensor that parses them.
+
+    Sentinel strings written to the registry, and their meaning to a consuming sensor:
+      Unknown      the phase could not be measured on this logon
+      N/A          the feature is not present or did not run on this device
+      LogDisabled  the required event log is turned off -- run DeployMode ConfigureLogging
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -52,9 +87,16 @@
 
 [CmdletBinding()]
 param(
-    [Parameter()]
+    # Defaults are read from the environment because that is how UEM passes configuration.
+    # Anything bound explicitly overrides them, since a default only applies when unbound.
     [ValidateSet('RunNow', 'DeployScheduledTask', 'ConfigureLogging')]
-    [string]$DeployMode = 'RunNow'
+    [string]$DeployMode = $(
+        if ([string]::IsNullOrWhiteSpace($env:DeployMode)) { 'RunNow' } else { $env:DeployMode.Trim() }
+    ),
+
+    [bool]$ConfigureLoggingFirst = $(
+        $env:ConfigureLoggingFirst -and $env:ConfigureLoggingFirst.Trim() -in @('true', '1', 'yes', 'y')
+    )
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -64,6 +106,43 @@ $ProgressPreference    = 'SilentlyContinue'
 $script:ToolsDir   = 'C:\ProgramData\AirWatch\Extensions\DEXTools'
 $script:ScriptName = 'Measure-LogonDuration.ps1'
 $script:TaskName   = 'DEXTools_MeasureLogonDuration'
+$script:RegPath    = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration'
+$script:Version    = '1.1.0'
+$script:ValidModes = @('RunNow', 'DeployScheduledTask', 'ConfigureLogging')
+#endregion
+
+#region --- Configuration normalisation ---
+# ValidateSet is not applied to default values, so an unrecognised $env:DeployMode
+# arrives here unchecked. Degrade to RunNow rather than failing the whole deployment.
+if (-not $PSBoundParameters.ContainsKey('DeployMode')) {
+    # -eq on strings is case-insensitive, so this also normalises casing to the canonical value.
+    $matched = $script:ValidModes | Where-Object { $_ -eq $DeployMode } | Select-Object -First 1
+
+    if ($matched) {
+        $DeployMode = $matched
+    }
+    else {
+        Write-Warning "Unrecognised `$env:DeployMode '$DeployMode'. Using 'RunNow'. Valid values: $($script:ValidModes -join ', ')"
+        $DeployMode = 'RunNow'
+    }
+}
+#endregion
+
+#region --- Formatting helpers ---
+# Registry values are consumed by sensors that parse them back into numbers and dates.
+# Both sides must agree on culture or the round trip silently fails on non-en-US devices.
+function Format-Metric {
+    param($Value)
+    if ($null -eq $Value)     { return 'Unknown' }
+    if ($Value -is [string])  { return $Value }
+    return [string]::Format([System.Globalization.CultureInfo]::InvariantCulture, '{0}', $Value)
+}
+
+function Format-Stamp {
+    param($Value)
+    if ($null -eq $Value) { return 'Unknown' }
+    return $Value.ToString('yyyy-MM-dd HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture)
+}
 #endregion
 
 #region --- Measurement function ---
@@ -149,11 +228,25 @@ $gpStartEvent = Get-WinEvent -ProviderName 'Microsoft-Windows-GroupPolicy' `
 if ($gpStartEvent) {
     $gpStartTime    = $gpStartEvent.TimeCreated
     $gpEndXPath     = "*[EventData[Data[@Name='PrincipalSamName'] and (Data='$loggedOnUser')]] and *[System[(EventID='8001')]]"
-    $gpEndEvent     = Get-WinEvent -ProviderName 'Microsoft-Windows-GroupPolicy' `
-        -FilterXPath $gpEndXPath -MaxEvents 1 -ErrorAction SilentlyContinue
+    $gpEndCandidates = Get-WinEvent -ProviderName 'Microsoft-Windows-GroupPolicy' `
+        -FilterXPath $gpEndXPath -MaxEvents 20 -ErrorAction SilentlyContinue
+
+    # Group Policy stamps one ActivityId per processing cycle. Taking the newest 8001 to
+    # pair with the newest 4001 can straddle two different cycles and produce a duration
+    # that is wrong, or negative.
+    $gpEndEvent = $gpEndCandidates |
+        Where-Object { $null -ne $_.ActivityId -and $_.ActivityId -eq $gpStartEvent.ActivityId } |
+        Select-Object -First 1
+
+    if (-not $gpEndEvent) {
+        $gpEndEvent = $gpEndCandidates |
+            Where-Object { $_.TimeCreated -ge $gpStartTime } |
+            Sort-Object TimeCreated | Select-Object -First 1
+    }
 
     if ($gpEndEvent) {
-        $gpDurationSec = [math]::Round(($gpEndEvent.TimeCreated - $gpStartEvent.TimeCreated).TotalSeconds, 2)
+        $gpSpan = ($gpEndEvent.TimeCreated - $gpStartEvent.TimeCreated).TotalSeconds
+        if ($gpSpan -ge 0) { $gpDurationSec = [math]::Round($gpSpan, 2) }
     }
 }
 #endregion
@@ -170,11 +263,25 @@ if ($gpStartEvent) {
 
     $gpScriptStart = Get-WinEvent -ProviderName 'Microsoft-Windows-GroupPolicy' `
         -FilterXPath $gpScriptStartXPath -MaxEvents 1 -ErrorAction SilentlyContinue
-    $gpScriptEnd   = Get-WinEvent -ProviderName 'Microsoft-Windows-GroupPolicy' `
-        -FilterXPath $gpScriptEndXPath   -MaxEvents 1 -ErrorAction SilentlyContinue
+    $gpScriptEndCandidates = Get-WinEvent -ProviderName 'Microsoft-Windows-GroupPolicy' `
+        -FilterXPath $gpScriptEndXPath   -MaxEvents 20 -ErrorAction SilentlyContinue
 
-    if ($gpScriptStart -and $gpScriptEnd) {
-        $gpScriptsDurSec = [math]::Round(($gpScriptEnd.TimeCreated - $gpScriptStart.TimeCreated).TotalSeconds, 2)
+    if ($gpScriptStart) {
+        # Same cycle-straddling risk as the 4001/8001 pair above.
+        $gpScriptEnd = $gpScriptEndCandidates |
+            Where-Object { $null -ne $_.ActivityId -and $_.ActivityId -eq $gpScriptStart.ActivityId } |
+            Select-Object -First 1
+
+        if (-not $gpScriptEnd) {
+            $gpScriptEnd = $gpScriptEndCandidates |
+                Where-Object { $_.TimeCreated -ge $gpScriptStart.TimeCreated } |
+                Sort-Object TimeCreated | Select-Object -First 1
+        }
+
+        if ($gpScriptEnd) {
+            $gpScriptSpan = ($gpScriptEnd.TimeCreated - $gpScriptStart.TimeCreated).TotalSeconds
+            if ($gpScriptSpan -ge 0) { $gpScriptsDurSec = [math]::Round($gpScriptSpan, 2) }
+        }
     }
 }
 #endregion
@@ -415,37 +522,56 @@ if (-not $taskLogInfo -or -not $taskLogInfo.IsEnabled) {
 #endregion
 
 #region --- Write results to registry ---
-$regPath = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration'
+$regPath = $script:RegPath
 if (-not (Test-Path $regPath)) {
     New-Item -Path $regPath -Force | Out-Null
 }
 
 $regValues = [ordered]@{
     Username                  = $loggedOnUser
-    LogonTime                 = if ($logonTime)                  { $logonTime.ToString('yyyy-MM-dd HH:mm:ss') }       else { 'Unknown' }
-    ShellReadyTime            = if ($shellReadyTime)             { $shellReadyTime.ToString('yyyy-MM-dd HH:mm:ss') }  else { 'Unknown' }
-    TotalLogonDurationSec     = if ($null -ne $totalLogonDurSec) { [string]$totalLogonDurSec }                        else { 'Unknown' }
-    GPStartTime               = if ($gpStartTime)                { $gpStartTime.ToString('yyyy-MM-dd HH:mm:ss') }    else { 'Unknown' }
-    GPDurationSec             = if ($null -ne $gpDurationSec)    { [string]$gpDurationSec }                           else { 'Unknown' }
-    GPScriptsDurationSec      = if ($null -ne $gpScriptsDurSec)  { [string]$gpScriptsDurSec }                         else { 'N/A' }
-    FolderRedirDurationSec    = if ($null -ne $folderRedirDurSec){ [string]$folderRedirDurSec }                        else { 'N/A' }
-    ProfileLoadDurationSec    = if ($null -ne $profileDurationSec){ [string]$profileDurationSec }                     else { 'Unknown' }
-    FSLogixAttachDurationSec  = [string]$fslogixDurationSec
-    ActiveSetupDurationSec    = [string]$activeSetupDurSec
-    AppXLoadDurationSec       = [string]$appxDurSec
-    PrintersMappedCount       = [string]$printerCount
-    PrinterMappingDurationSec = [string]$printerDurSec
-    LogonTaskCount            = [string]$logonTaskCount
-    LogonTaskTotalDurationSec = [string]$logonTaskTotalSec
-    DataCollectedAt           = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    LogonTime                 = Format-Stamp  $logonTime
+    ShellReadyTime            = Format-Stamp  $shellReadyTime
+    TotalLogonDurationSec     = Format-Metric $totalLogonDurSec
+    GPStartTime               = Format-Stamp  $gpStartTime
+    GPDurationSec             = Format-Metric $gpDurationSec
+    GPScriptsDurationSec      = if ($null -ne $gpScriptsDurSec)   { Format-Metric $gpScriptsDurSec }   else { 'N/A' }
+    FolderRedirDurationSec    = if ($null -ne $folderRedirDurSec) { Format-Metric $folderRedirDurSec } else { 'N/A' }
+    ProfileLoadDurationSec    = Format-Metric $profileDurationSec
+    FSLogixAttachDurationSec  = Format-Metric $fslogixDurationSec
+    ActiveSetupDurationSec    = Format-Metric $activeSetupDurSec
+    AppXLoadDurationSec       = Format-Metric $appxDurSec
+    PrintersMappedCount       = Format-Metric $printerCount
+    PrinterMappingDurationSec = Format-Metric $printerDurSec
+    LogonTaskCount            = Format-Metric $logonTaskCount
+    LogonTaskTotalDurationSec = Format-Metric $logonTaskTotalSec
+    DataCollectedAt           = Format-Stamp  (Get-Date)
+    CollectorVersion          = $script:Version
 }
 
+# Registry writes are the one place a silenced error would be invisible and fatal to
+# every downstream sensor, so surface a failure here rather than reporting success.
+$writeFailures = 0
 foreach ($key in $regValues.Keys) {
-    Set-ItemProperty -Path $regPath -Name $key -Value $regValues[$key] -Type String -Force
+    Set-ItemProperty -Path $regPath -Name $key -Value $regValues[$key] -Type String -Force -ErrorAction SilentlyContinue -ErrorVariable writeErr
+    if ($writeErr) { $writeFailures++ }
+}
+
+if ($writeFailures -gt 0) {
+    Write-Warning "$writeFailures of $($regValues.Count) registry values could not be written to '$regPath'."
 }
 #endregion
 
-Write-Output "Logon duration metrics recorded for '$loggedOnUser' at '$regPath'"
+# Reporting success after a failed write would leave an operator believing sensors
+# have fresh data when the key is empty or stale. Say what actually happened.
+if ($writeFailures -eq 0) {
+    Write-Output "Logon duration metrics recorded for '$loggedOnUser' at '$regPath'"
+}
+elseif ($writeFailures -lt $regValues.Count) {
+    Write-Output "Logon duration metrics PARTIALLY recorded for '$loggedOnUser' at '$regPath' ($($regValues.Count - $writeFailures) of $($regValues.Count) values)."
+}
+else {
+    Write-Output "Logon duration metrics NOT recorded for '$loggedOnUser'. No values could be written to '$regPath' (elevation required?)."
+}
 } # end Invoke-LogonDurationCapture
 #endregion
 
@@ -468,10 +594,14 @@ function Install-LogonDurationTask {
     $destScript = Join-Path $script:ToolsDir $script:ScriptName
     Copy-Item -Path $PSCommandPath -Destination $destScript -Force
 
-    # Task action — runs the saved worker copy with RunNow (default), hidden
+    # Passed explicitly so the task can never inherit a machine-level environment variable
+    # and re-deploy or re-configure at every logon. Logging setup is a deployment-time
+    # concern, not a per-logon one. -Command rather than -File because -File would pass
+    # $false as the literal string '$false', which a [bool] parameter reads as true.
+    $taskCommand = "& '$destScript' -DeployMode RunNow -ConfigureLoggingFirst `$false"
     $action    = New-ScheduledTaskAction `
         -Execute  'powershell.exe' `
-        -Argument "-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$destScript`""
+        -Argument "-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"$taskCommand`""
 
     # AtLogon trigger for any user; 30-second delay ensures event log entries are flushed
     $trigger         = New-ScheduledTaskTrigger -AtLogOn
@@ -513,7 +643,20 @@ function Enable-DEXAuditLogs {
     .SYNOPSIS
         Enables the optional Windows event logs used by Measure-LogonDuration.
         Safe to run multiple times — already-enabled logs are reported and skipped.
+    .PARAMETER Force
+        Runs even when the completion marker is already set. Used by DeployMode
+        ConfigureLogging, where the admin has explicitly asked for the work.
     #>
+    [CmdletBinding()]
+    param([switch]$Force)
+
+    if (-not $Force) {
+        $marker = (Get-ItemProperty -Path $script:RegPath -Name 'AuditLogsConfiguredAt' -ErrorAction SilentlyContinue).AuditLogsConfiguredAt
+        if (-not [string]::IsNullOrWhiteSpace($marker)) {
+            Write-Output "Audit logs already configured at $marker. Skipping."
+            return
+        }
+    }
 
     # Logs that are disabled by default but required for full metric coverage
     $targets = @(
@@ -562,15 +705,34 @@ function Enable-DEXAuditLogs {
         Write-Output ''
     }
 
+    # Marker makes ConfigureLoggingFirst a one-time cost rather than a wevtutil call
+    # on every single logon.
+    if (-not (Test-Path $script:RegPath)) {
+        New-Item -Path $script:RegPath -Force | Out-Null
+    }
+    Set-ItemProperty -Path $script:RegPath -Name 'AuditLogsConfiguredAt' `
+        -Value (Format-Stamp (Get-Date)) -Type String -Force -ErrorAction SilentlyContinue
+
     Write-Output '=== Configuration complete ==='
-    Write-Output 'Re-run with -DeployMode RunNow or DeployScheduledTask when ready.'
+    Write-Output 'Re-run with -DeployMode RunNow or DeployScheduledTask (or the matching $env:DeployMode) when ready.'
 }
 #endregion
 
 #region --- Entry point ---
 switch ($DeployMode) {
-    'RunNow'              { Invoke-LogonDurationCapture }
-    'DeployScheduledTask' { Install-LogonDurationTask }
-    'ConfigureLogging'    { Enable-DEXAuditLogs }
+    'RunNow' {
+        if ($ConfigureLoggingFirst) { Enable-DEXAuditLogs }
+        Invoke-LogonDurationCapture
+    }
+    'DeployScheduledTask' {
+        if ($ConfigureLoggingFirst) { Enable-DEXAuditLogs }
+        Install-LogonDurationTask
+    }
+    'ConfigureLogging' {
+        # Explicit request, so the marker does not suppress it.
+        Enable-DEXAuditLogs -Force
+    }
 }
+
+exit 0
 #endregion
