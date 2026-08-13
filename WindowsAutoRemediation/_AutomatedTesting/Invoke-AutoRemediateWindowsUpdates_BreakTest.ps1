@@ -1,73 +1,104 @@
 <#
 .SYNOPSIS
-    Invoke-AutoRemediatePrinter_BreakTest -- deliberately breaks printer components,
-    then verifies Invoke-AutoRemediatePrinter.ps1 actually fixes them.
+    Invoke-AutoRemediateWindowsUpdates_BreakTest -- deliberately breaks Windows
+    Update service-level components, then verifies
+    Invoke-AutoRemediateWindowsUpdates.ps1 actually fixes them.
 
 .DESCRIPTION
     Break -> verify-the-break -> remediate -> validate -> restore. Writes a uniform
-    JSON result to C:\Temp\FixReport\Invoke-AutoRemediatePrinter\ for
+    JSON result to C:\Temp\FixReport\Invoke-AutoRemediateWindowsUpdates\ for
     Invoke-FixReportAnalysis.ps1 to aggregate.
 
-    THIS SCRIPT IS DELIBERATELY DESTRUCTIVE. It stops the Spooler, marks printers
-    offline, and disables a Windows optional feature. Run it only on a disposable
-    VM or a marked test host. See Assert-DexTestHost in DEXTestFramework.psm1.
+    SCOPE (v1) -- SERVICE-LEVEL STEPS, PLUS A SAFE DATASTORE SIMULATION
+    This catalog covers the 4 of 8 target steps that are (a) backed by a real
+    ResolutionScript and (b) safely and deterministically reversible:
+      WuauservStopped  -- stops the Windows Update service (step 1).
+      BitsDisabled      -- disables BITS, the update download engine (step 2).
+      CryptSvcStopped   -- stops Cryptographic Services, required for update
+                           signature verification (step 3).
+      DataStoreBloated  -- simulates step 4's "DataStore.edb > 500MB" condition
+                           WITHOUT ever touching the real update cache: the real
+                           C:\Windows\SoftwareDistribution\DataStore folder is
+                           renamed aside intact, a brand-new DataStore folder is
+                           created at the real path, and a fake DataStore.edb is
+                           dropped in using `fsutil sparse` so it reports as
+                           ~600MB to Test-Path/Get-Item without consuming real
+                           disk space. The target's own remediation (which wipes
+                           the folder contents and restarts the services) only
+                           ever touches this disposable fake folder. The real
+                           folder is renamed back in Restore regardless of what
+                           remediation did to the fake one.
+    All four are standard, well-precedented troubleshooting actions (the first
+    three are the same "net stop/start" steps used in SFC/DISM guides) and
+    restore cleanly.
+
+    DEFERRED, NOT IN THIS CATALOG:
+      Pending Reboot Check (step 5), Windows Update Policy (step 6), and Last
+        Update Date (step 8) -- ResolutionScript = $null on all three by design
+        (informational only; reboot scheduling, GPO, and update installation
+        all require a human or a separate maintenance window).
+      Disk Space for Updates (step 7) -- remediation runs the REAL
+        `cleanmgr.exe /sagerun:1`, a system-wide cleanup tool whose effect
+        depends on whatever Disk Cleanup profile #1 is configured to delete on
+        this machine. It can permanently remove real files unrelated to the
+        break test's own filler data, so it is excluded rather than gated --
+        there is no filler-file break that reliably undoes itself once
+        cleanmgr has run. (Unlike DataStoreBloated, there's no way to redirect
+        cleanmgr onto a disposable fake target -- it operates on the real C:
+        drive by design.)
 
     VERIFY-THE-BREAK
-    Every break is followed by a probe proving the component is genuinely broken.
-    A break that silently no-ops would let the remediation "pass" against a healthy
-    machine -- a false green, and the failure mode that makes a harness like this
-    worthless. A break that cannot be verified aborts the run as BreakFailed.
+    Every break is followed by a probe proving the component is genuinely
+    broken. A break that silently no-ops would let the remediation "pass"
+    against an already-healthy machine -- a false green.
 
-    EXPECTED OUTCOMES
-    Five of the nine steps in Invoke-AutoRemediatePrinter.ps1 have
-    ResolutionScript = $null by design, so breaking them must NOT expect a repair.
-    Each break declares which it is:
-      ExpectFixed        -- remediation must repair the component
-      ExpectReportedOnly -- remediation must DETECT and report it, and leave it alone
+    All four breaks in this catalog are ExpectFixed: each corresponding step
+    in Invoke-AutoRemediateWindowsUpdates.ps1 has a real ResolutionScript.
 
-    REBOOTS
-    Breaks flagged RequiresReboot suspend the run, register an AtStartup resume
-    task, and reboot. The run re-enters at the recorded Phase. Opt in with
-    -IncludeRebootBreaks; they are excluded by default.
+    DataStoreBloated briefly stops wuauserv/BITS and renames a system folder
+    while the fake data is in place -- a crash mid-run would leave the real
+    DataStore sitting under a `.dextest.bak` name until the run is resumed or
+    `-Restore` is used, the same transient-exposure window every other break
+    in this catalog has while its service is stopped.
 
 .PARAMETER RemediationTest
-    After breaking, run Invoke-AutoRemediatePrinter.ps1 and validate the outcome.
-    Without this the script breaks and reports only.
+    After breaking, run Invoke-AutoRemediateWindowsUpdates.ps1 and validate the
+    outcome. Without this the script breaks and reports only.
 
 .PARAMETER Environment
     Physical (default) restores the machine when the run ends.
     Snapshot skips restore on the assumption the host reverts a checkpoint.
 
 .PARAMETER Seed
-    Replays an earlier run's random break selection exactly. Omit for a new random
-    seed, which is always recorded in the result.
+    Replays an earlier run's random break selection exactly. Omit for a new
+    random seed, which is always recorded in the result.
 
 .PARAMETER BreakName
     Force specific breaks instead of a random selection.
 
 .PARAMETER BreakCount
-    How many components to break when selecting randomly. Default 2.
-
-.PARAMETER IncludeRebootBreaks
-    Allow breaks that require a reboot to take effect. Default off.
+    How many components to break when selecting randomly. Default 2 (this
+    catalog currently has 4 entries).
 
 .PARAMETER Restore
     Undo an in-flight run's breaks and exit. No remediation, no validation.
 
 .PARAMETER Resume
-    Internal. Used by the AtStartup task to re-enter after a reboot.
+    Internal. Used by the AtStartup task to re-enter after a reboot (unused by
+    this catalog today since none of its breaks require one; kept for symmetry
+    with the shared framework).
 
 .PARAMETER Force
     Required acknowledgement that this machine will be broken.
 
 .NOTES
-    Script Name  : Invoke-AutoRemediatePrinter_BreakTest.ps1
+    Script Name  : Invoke-AutoRemediateWindowsUpdates_BreakTest.ps1
     Version      : 1.0.0
     Architecture : Any (x86/x64)
     Context      : Administrator (elevated)
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-08-07
-    Reporting    : C:\Temp\FixReport\Invoke-AutoRemediatePrinter\
+    Reporting    : C:\Temp\FixReport\Invoke-AutoRemediateWindowsUpdates\
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -85,7 +116,6 @@ param(
     [int]$Seed = 0,
     [string[]]$BreakName,
     [int]$BreakCount = 2,
-    [switch]$IncludeRebootBreaks,
     [switch]$Restore,
     [switch]$Resume,
     [switch]$Force,
@@ -94,9 +124,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptUnderTest   = 'Invoke-AutoRemediatePrinter'
-$RemediationScript = Join-Path $PSScriptRoot '..\Invoke-AutoRemediatePrinter.ps1'
-$DexRecordsPath    = 'HKLM:\Software\AirWatch\Extension\DEXRecords\PrinterErrors'
+$ScriptUnderTest   = 'Invoke-AutoRemediateWindowsUpdates'
+$RemediationScript = Join-Path $PSScriptRoot '..\Invoke-AutoRemediateWindowsUpdates.ps1'
 $SelfPath          = $MyInvocation.MyCommand.Path
 
 $modulePath = Join-Path $PSScriptRoot '..\..\AutomatedTesting\DEXTestFramework.psm1'
@@ -105,71 +134,24 @@ if (-not (Test-Path -LiteralPath $modulePath)) {
 }
 Import-Module $modulePath -Force
 
-# -- Fixture ------------------------------------------------------------------
-# A bare VM often has only Microsoft Print to PDF/XPS, so the breaks need a
-# printer of their own to act on rather than mutating whatever happens to exist.
-$FixturePrinter    = 'DEXTest Printer'
-$FixtureNetPrinter = 'DEXTest NetPrinter'
-# 192.0.2.0/24 is TEST-NET-1 (RFC 5737): guaranteed unroutable, so the network
-# reachability check fails deterministically instead of depending on the LAN.
-$FixtureNetPort    = 'DEXTEST_192.0.2.1'
-$FixtureNetAddress = '192.0.2.1'
-
-function Initialize-Fixture {
-    if (-not (Get-Printer -Name $FixturePrinter -ErrorAction SilentlyContinue)) {
-        $driver = Get-PrinterDriver -ErrorAction SilentlyContinue |
-                  Where-Object { $_.Name -like 'Microsoft Print*PDF*' } |
-                  Select-Object -First 1
-        if (-not $driver) {
-            $driver = Get-PrinterDriver -ErrorAction SilentlyContinue | Select-Object -First 1
-        }
-        if (-not $driver) { throw 'No printer driver available to build the test fixture.' }
-
-        Add-Printer -Name $FixturePrinter -DriverName $driver.Name -PortName 'FILE:' -ErrorAction Stop
-        Write-DexStep -Status 'Info' -Name 'Fixture' -Message "Created '$FixturePrinter' on driver '$($driver.Name)'"
-    }
-}
-
-function Remove-Fixture {
-    foreach ($p in @($FixturePrinter, $FixtureNetPrinter)) {
-        if (Get-Printer -Name $p -ErrorAction SilentlyContinue) {
-            Remove-Printer -Name $p -ErrorAction SilentlyContinue
-        }
-    }
-    if (Get-PrinterPort -Name $FixtureNetPort -ErrorAction SilentlyContinue) {
-        Remove-PrinterPort -Name $FixtureNetPort -ErrorAction SilentlyContinue
-    }
-}
-
 # -- Helpers ------------------------------------------------------------------
+# Get-Service's StartType/Status already use the same names Set-Service accepts
+# ('Automatic'/'Manual'/'Disabled', 'Running'/'Stopped'), so no string-mapping
+# helper is needed here (unlike the Win32_Service-based scripts elsewhere).
 
-function Get-SpoolerCim {
-    Get-CimInstance -ClassName Win32_Service -Filter "Name='Spooler'" -ErrorAction SilentlyContinue
+function Get-DexService {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if (-not $svc) { throw "Service '$Name' not found on this device." }
+    $svc
 }
 
-function ConvertTo-StartupType {
-    param([string]$StartMode)
-    switch ($StartMode) {
-        'Auto'     { 'Automatic' }
-        'Manual'   { 'Manual'    }
-        'Disabled' { 'Disabled'  }
-        default    { 'Automatic' }
-    }
-}
-
-function Test-DexRecordContains {
-    <#
-        Confirms the remediation script reported a finding for a given step. Used
-        by ExpectReportedOnly breaks, where the correct behaviour is to surface the
-        problem rather than fix it.
-    #>
-    param([Parameter(Mandatory = $true)][string]$ValueNamePrefix)
-
-    if (-not (Test-Path -LiteralPath $DexRecordsPath)) { return $false }
-    $key = Get-Item -LiteralPath $DexRecordsPath -ErrorAction SilentlyContinue
-    if (-not $key) { return $false }
-    return @($key.GetValueNames() | Where-Object { $_ -like "$ValueNamePrefix*" }).Count -gt 0
-}
+# DataStoreBloated operates on a disposable stand-in, never the real folder --
+# see the .DESCRIPTION block above for how the rename+sparse-file swap works.
+$script:DataStorePath       = Join-Path $env:SystemRoot 'SoftwareDistribution\DataStore'
+$script:DataStoreBackupPath = "$script:DataStorePath.dextest.bak"
+$script:FakeDbPath          = Join-Path $script:DataStorePath 'DataStore.edb'
+$script:FakeDbSizeBytes     = 600MB
 
 # -- Break definitions ---------------------------------------------------------
 # Capture runs before any mutation; Restore consumes what it returned.
@@ -177,144 +159,168 @@ function Test-DexRecordContains {
 $BreakCatalog = @(
 
     @{
-        Name            = 'SpoolerService'
+        Name            = 'WuauservStopped'
         ExpectedOutcome = 'ExpectFixed'
         RequiresReboot  = $false
         Methods         = @(
             @{
                 Name  = 'StopService'
-                Apply = { Stop-Service -Name Spooler -Force -ErrorAction Stop }
-            },
-            @{
-                Name  = 'DisableAndStop'
-                Apply = {
-                    Set-Service -Name Spooler -StartupType Disabled -ErrorAction Stop
-                    Stop-Service -Name Spooler -Force -ErrorAction Stop
-                }
+                Apply = { Stop-Service -Name wuauserv -Force -ErrorAction Stop }
             }
         )
         Capture  = {
-            $svc = Get-SpoolerCim
-            @{ StartMode = $svc.StartMode; State = $svc.State }
+            $svc = Get-DexService -Name wuauserv
+            @{ StartType = "$($svc.StartType)"; Status = "$($svc.Status)" }
         }
-        Verify   = { (Get-Service -Name Spooler -ErrorAction SilentlyContinue).Status -ne 'Running' }
-        Validate = { (Get-Service -Name Spooler -ErrorAction SilentlyContinue).Status -eq 'Running' }
+        Verify   = {
+            (Get-DexService -Name wuauserv).Status -ne 'Running'
+        }
+        Validate = {
+            $svc = Get-DexService -Name wuauserv
+            @{ Passed = ($svc.Status -eq 'Running'); Detail = "Status=$($svc.Status) StartType=$($svc.StartType)" }
+        }
         Restore  = {
             param($Original)
-            Set-Service -Name Spooler -StartupType (ConvertTo-StartupType $Original.StartMode) -ErrorAction SilentlyContinue
-            if ($Original.State -eq 'Running') {
-                Start-Service -Name Spooler -ErrorAction SilentlyContinue
+            Set-Service -Name wuauserv -StartupType $Original.StartType -ErrorAction SilentlyContinue
+            if ($Original.Status -eq 'Running') {
+                Start-Service -Name wuauserv -ErrorAction SilentlyContinue
+            } else {
+                Stop-Service -Name wuauserv -Force -ErrorAction SilentlyContinue
             }
         }
     },
 
     @{
-        Name            = 'PrinterOffline'
+        Name            = 'BitsDisabled'
         ExpectedOutcome = 'ExpectFixed'
         RequiresReboot  = $false
         Methods         = @(
             @{
-                Name  = 'SetWorkOfflineFlag'
-                Apply = {
-                    $p = Get-WmiObject -Class Win32_Printer -Filter "Name='$FixturePrinter'" -ErrorAction Stop
-                    $p.WorkOffline = $true
-                    $p.Put() | Out-Null
-                }
+                Name  = 'DisableService'
+                Apply = { Set-Service -Name BITS -StartupType Disabled -ErrorAction Stop }
             }
         )
         Capture  = {
-            $p = Get-WmiObject -Class Win32_Printer -Filter "Name='$FixturePrinter'" -ErrorAction SilentlyContinue
-            @{ WorkOffline = [bool]$p.WorkOffline }
+            $svc = Get-DexService -Name BITS
+            @{ StartType = "$($svc.StartType)"; Status = "$($svc.Status)" }
         }
         Verify   = {
-            $p = Get-WmiObject -Class Win32_Printer -Filter "Name='$FixturePrinter'" -ErrorAction SilentlyContinue
-            [bool]$p.WorkOffline
+            (Get-DexService -Name BITS).StartType -eq 'Disabled'
         }
         Validate = {
-            $p = Get-WmiObject -Class Win32_Printer -Filter "Name='$FixturePrinter'" -ErrorAction SilentlyContinue
-            -not [bool]$p.WorkOffline
+            $svc = Get-DexService -Name BITS
+            @{ Passed = ($svc.StartType -ne 'Disabled' -and $svc.Status -eq 'Running'); Detail = "Status=$($svc.Status) StartType=$($svc.StartType)" }
         }
         Restore  = {
             param($Original)
-            $p = Get-WmiObject -Class Win32_Printer -Filter "Name='$FixturePrinter'" -ErrorAction SilentlyContinue
-            if ($p) { $p.WorkOffline = $false; $p.Put() | Out-Null }
+            Set-Service -Name BITS -StartupType $Original.StartType -ErrorAction SilentlyContinue
+            if ($Original.Status -eq 'Running') {
+                Start-Service -Name BITS -ErrorAction SilentlyContinue
+            } else {
+                Stop-Service -Name BITS -Force -ErrorAction SilentlyContinue
+            }
         }
     },
 
     @{
-        Name            = 'NetworkPrinterUnreachable'
-        ExpectedOutcome = 'ExpectReportedOnly'
+        Name            = 'CryptSvcStopped'
+        ExpectedOutcome = 'ExpectFixed'
         RequiresReboot  = $false
         Methods         = @(
             @{
-                Name  = 'AddPrinterOnUnroutableAddress'
-                Apply = {
-                    if (-not (Get-PrinterPort -Name $FixtureNetPort -ErrorAction SilentlyContinue)) {
-                        Add-PrinterPort -Name $FixtureNetPort -PrinterHostAddress $FixtureNetAddress -ErrorAction Stop
-                    }
-                    $driver = Get-PrinterDriver -ErrorAction SilentlyContinue |
-                              Where-Object { $_.Name -like 'Microsoft Print*PDF*' } |
-                              Select-Object -First 1
-                    if (-not $driver) {
-                        $driver = Get-PrinterDriver -ErrorAction SilentlyContinue | Select-Object -First 1
-                    }
-                    Add-Printer -Name $FixtureNetPrinter -DriverName $driver.Name -PortName $FixtureNetPort -ErrorAction Stop
-                }
+                Name  = 'StopService'
+                Apply = { Stop-Service -Name CryptSvc -Force -ErrorAction Stop }
             }
         )
-        Capture  = { @{ Existed = [bool](Get-Printer -Name $FixtureNetPrinter -ErrorAction SilentlyContinue) } }
-        Verify   = { [bool](Get-Printer -Name $FixtureNetPrinter -ErrorAction SilentlyContinue) }
-        # Correct behaviour is to report and leave alone: the printer must still be
-        # here afterwards, and the finding must have reached the registry.
+        Capture  = {
+            $svc = Get-DexService -Name CryptSvc
+            @{ StartType = "$($svc.StartType)"; Status = "$($svc.Status)" }
+        }
+        Verify   = {
+            (Get-DexService -Name CryptSvc).Status -ne 'Running'
+        }
         Validate = {
-            $stillThere = [bool](Get-Printer -Name $FixtureNetPrinter -ErrorAction SilentlyContinue)
-            $reported   = Test-DexRecordContains -ValueNamePrefix 'Step07_'
-            $stillThere -and $reported
+            $svc = Get-DexService -Name CryptSvc
+            @{ Passed = ($svc.Status -eq 'Running'); Detail = "Status=$($svc.Status)" }
         }
         Restore  = {
             param($Original)
-            if (Get-Printer -Name $FixtureNetPrinter -ErrorAction SilentlyContinue) {
-                Remove-Printer -Name $FixtureNetPrinter -ErrorAction SilentlyContinue
-            }
-            if (Get-PrinterPort -Name $FixtureNetPort -ErrorAction SilentlyContinue) {
-                Remove-PrinterPort -Name $FixtureNetPort -ErrorAction SilentlyContinue
+            Set-Service -Name CryptSvc -StartupType $Original.StartType -ErrorAction SilentlyContinue
+            if ($Original.Status -eq 'Running') {
+                Start-Service -Name CryptSvc -ErrorAction SilentlyContinue
+            } else {
+                Stop-Service -Name CryptSvc -Force -ErrorAction SilentlyContinue
             }
         }
     },
 
     @{
-        Name            = 'PrintFoundationFeature'
+        Name            = 'DataStoreBloated'
         ExpectedOutcome = 'ExpectFixed'
-        # Disable leaves the feature in DisablePending until the machine reboots,
-        # and the re-enable needs a second reboot before it reads back as Enabled.
-        RequiresReboot  = $true
+        RequiresReboot  = $false
         Methods         = @(
             @{
-                Name  = 'DisableOptionalFeature'
+                Name  = 'InjectSparseOversizedFile'
                 Apply = {
-                    Disable-WindowsOptionalFeature -Online -FeatureName 'Printing-Foundation-Features' `
-                        -NoRestart -ErrorAction Stop | Out-Null
+                    # Real folder moves aside intact; only the fake replacement is ever touched.
+                    Stop-Service -Name wuauserv -Force -ErrorAction SilentlyContinue
+                    Stop-Service -Name BITS     -Force -ErrorAction SilentlyContinue
+                    Rename-Item -LiteralPath $script:DataStorePath `
+                        -NewName (Split-Path -Path $script:DataStoreBackupPath -Leaf) -ErrorAction Stop
+                    New-Item -ItemType Directory -Path $script:DataStorePath -Force | Out-Null
+                    & fsutil.exe file createnew $script:FakeDbPath $script:FakeDbSizeBytes   | Out-Null
+                    & fsutil.exe sparse setflag  $script:FakeDbPath                          | Out-Null
+                    & fsutil.exe sparse setrange $script:FakeDbPath 0 $script:FakeDbSizeBytes | Out-Null
                 }
             }
         )
         Capture  = {
-            $f = Get-WindowsOptionalFeature -Online -FeatureName 'Printing-Foundation-Features' -ErrorAction SilentlyContinue
-            @{ State = "$($f.State)" }
+            if (-not (Test-Path -LiteralPath $script:DataStorePath)) {
+                throw 'SoftwareDistribution\DataStore not found; cannot test DataStoreBloated.'
+            }
+            if (Test-Path -LiteralPath $script:DataStoreBackupPath) {
+                throw "Leftover backup at $script:DataStoreBackupPath from a previous run; resolve manually before testing DataStoreBloated."
+            }
+            $freeBytes = (Get-PSDrive -Name $env:SystemDrive.TrimEnd(':')).Free
+            if ($freeBytes -lt 1GB) {
+                throw "Less than 1GB free on $env:SystemDrive; refusing to test DataStoreBloated."
+            }
+            $wu   = Get-DexService -Name wuauserv
+            $bits = Get-DexService -Name BITS
+            @{
+                WuauservStartType = "$($wu.StartType)"
+                WuauservStatus    = "$($wu.Status)"
+                BitsStartType     = "$($bits.StartType)"
+                BitsStatus        = "$($bits.Status)"
+            }
         }
         Verify   = {
-            $f = Get-WindowsOptionalFeature -Online -FeatureName 'Printing-Foundation-Features' -ErrorAction SilentlyContinue
-            $f -and $f.State -ne 'Enabled'
+            (Test-Path -LiteralPath $script:FakeDbPath) -and
+                ((Get-Item -LiteralPath $script:FakeDbPath).Length / 1MB) -gt 500
         }
         Validate = {
-            $f = Get-WindowsOptionalFeature -Online -FeatureName 'Printing-Foundation-Features' -ErrorAction SilentlyContinue
-            $f -and $f.State -eq 'Enabled'
+            $exists  = Test-Path -LiteralPath $script:FakeDbPath
+            $bloated = $exists -and ((Get-Item -LiteralPath $script:FakeDbPath).Length / 1MB) -gt 500
+            $detail  = if ($exists) {
+                "DataStore.edb still present, $([math]::Round((Get-Item -LiteralPath $script:FakeDbPath).Length / 1MB, 1))MB"
+            } else {
+                'DataStore.edb cleared'
+            }
+            @{ Passed = -not $bloated; Detail = $detail }
         }
         Restore  = {
             param($Original)
-            if ($Original.State -eq 'Enabled') {
-                Enable-WindowsOptionalFeature -Online -FeatureName 'Printing-Foundation-Features' `
-                    -NoRestart -ErrorAction SilentlyContinue | Out-Null
+            Stop-Service -Name wuauserv -Force -ErrorAction SilentlyContinue
+            Stop-Service -Name BITS     -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $script:DataStorePath) {
+                Remove-Item -LiteralPath $script:DataStorePath -Recurse -Force -ErrorAction SilentlyContinue
             }
+            Rename-Item -LiteralPath $script:DataStoreBackupPath `
+                -NewName (Split-Path -Path $script:DataStorePath -Leaf) -ErrorAction Stop
+            Set-Service -Name wuauserv -StartupType $Original.WuauservStartType -ErrorAction SilentlyContinue
+            Set-Service -Name BITS     -StartupType $Original.BitsStartType     -ErrorAction SilentlyContinue
+            if ($Original.WuauservStatus -eq 'Running') { Start-Service -Name wuauserv -ErrorAction SilentlyContinue }
+            if ($Original.BitsStatus     -eq 'Running') { Start-Service -Name BITS     -ErrorAction SilentlyContinue }
         }
     }
 )
@@ -339,7 +345,7 @@ function Request-TestReboot {
 
 Assert-DexTestHost -Force:$Force -ProductionDomainDenyList $ProductionDomainDenyList
 
-Write-DexBanner -Title "Invoke-AutoRemediatePrinter_BreakTest" -Detail "Environment: $Environment"
+Write-DexBanner -Title "Invoke-AutoRemediateWindowsUpdates_BreakTest" -Detail "Environment: $Environment"
 
 # -- Restore-only mode ---------------------------------------------------------
 if ($Restore) {
@@ -354,7 +360,6 @@ if ($Restore) {
             Write-DexStep -Status 'Failed' -Name "Restore $($b.Name)" -Message $_.Exception.Message
         }
     }
-    Remove-Fixture
     Unregister-DexTestResume -State $state
     $state.Phase   = 'Restored'
     $state.Overall = 'Restored'
@@ -387,12 +392,10 @@ try {
     # -- Phase: apply breaks ---------------------------------------------------
     if ($state.Phase -eq 'Init') {
 
-        Initialize-Fixture
-
         $candidates = if ($BreakName) {
             @($BreakCatalog | Where-Object { $BreakName -contains $_.Name })
         } else {
-            @($BreakCatalog | Where-Object { $IncludeRebootBreaks -or -not $_.RequiresReboot })
+            @($BreakCatalog)
         }
 
         if ($candidates.Count -eq 0) { throw 'No break definitions matched the requested selection.' }
@@ -496,7 +499,15 @@ try {
         $validation = @()
         foreach ($b in $state.Breaks) {
             $def    = Get-BreakDefinition -Name $b.Name
-            $passed = [bool](& $def.Validate)
+            $result = & $def.Validate
+
+            if ($result -is [hashtable] -or $result -is [System.Collections.IDictionary]) {
+                $passed = [bool]$result.Passed
+                $detail = "$($result.Detail)"
+            } else {
+                $passed = [bool]$result
+                $detail = $null
+            }
 
             $expected = if ($b.ExpectedOutcome -eq 'ExpectFixed') {
                 'component repaired by remediation'
@@ -504,14 +515,17 @@ try {
                 'component detected and reported, left unmodified'
             }
 
+            $actual = if ($passed) { 'as expected' } else { 'NOT as expected' }
+            if ($detail) { $actual = "$actual ($detail)" }
+
             $validation += @{
                 Name     = $b.Name
                 Expected = $expected
-                Actual   = if ($passed) { 'as expected' } else { 'NOT as expected' }
+                Actual   = $actual
                 Result   = if ($passed) { 'Pass' } else { 'Fail' }
             }
             Write-DexStep -Status $(if ($passed) { 'Passed' } else { 'Failed' }) `
-                          -Name "Validate $($b.Name)" -Message $expected
+                          -Name "Validate $($b.Name)" -Message "$expected $(if ($detail) { "-- $detail" })"
         }
 
         $state.Validation = $validation
@@ -521,7 +535,7 @@ try {
         $state.Overall = if ($failedCount -eq 0) {
             'Passed'
         } elseif ($state.Remediation -and [int]$state.Remediation.ExitCode -eq 0) {
-            # Remediation claimed success while the component is still broken.
+            # Remediation claimed success while a component is still broken.
             'FalsePass'
         } else {
             'Failed'
@@ -550,7 +564,6 @@ if ($Environment -eq 'Physical') {
             Write-DexStep -Status 'Failed' -Name "Restore $($b.Name)" -Message $_.Exception.Message
         }
     }
-    try { Remove-Fixture } catch { $restoreFailed = $true }
 
     if ($restoreFailed) {
         $state.Overall = 'Dirty'

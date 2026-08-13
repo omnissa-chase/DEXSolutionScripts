@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
     Restarts Windows Update and related services to resolve stalled or broken
-    update states.
+    update states.  NOTE:  THIS IS ALREADY HANDLED BY THE INVOKE-AUTOREMEDIATEWINDOWSUPDATE SCRIPT.
 
 .PARAMETER ForceRestart
     When $true (default), the service is stopped and restarted even if it is

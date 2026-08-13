@@ -11,7 +11,7 @@ machine explicitly marked as a test host. See [Safety interlock](#safety-interlo
 ## Layout
 
 ```
-_AutomatedTesting/                          <- this folder: shared framework + orchestrators
+AutomatedTesting/                           <- this folder: shared framework + orchestrators
     DEXTestFramework.psm1                    <- shared plumbing every break test imports
     Invoke-AllBreakTests.ps1                 <- discovers and runs every *_BreakTest.ps1
     Invoke-FixReportAnalysis.ps1             <- aggregates C:\Temp\FixReport\*.json into a summary
@@ -32,6 +32,8 @@ Current catalog:
 |---|---|---|
 | `Invoke-AutoRemediatePrinter.ps1` | `Invoke-AutoRemediatePrinter_BreakTest.ps1` | 9 steps; 4 report-only steps excluded from ExpectFixed; 1 reboot-requiring break gated behind `-IncludeRebootBreaks` |
 | `Invoke-AutoRemediateNetworkStack.ps1` | `Invoke-AutoRemediateNetworkStack_BreakTest.ps1` | 2 of 7 steps (`DhcpLeaseLoss`, `FirewallDisabled`); adapter-disable/Winsock-reset steps deferred — they can sever the session running the test |
+| `Invoke-AutoRemediateAudioBluetooth.ps1` | `Invoke-AutoRemediateAudioBluetooth_BreakTest.ps1` | 5 of 8 steps; 3 user-interaction-only steps excluded; `AudioDriverDisabled` needs real/virtual audio hardware |
+| `Invoke-AutoRemediateWindowsUpdates.ps1` | `Invoke-AutoRemediateWindowsUpdates_BreakTest.ps1` | 4 of 8 steps (`WuauservStopped`, `BitsDisabled`, `CryptSvcStopped`, `DataStoreBloated`); Disk Space/informational steps excluded — their remediations touch real user files/the C: drive and can't be safely redirected to a disposable target |
 
 ## Safety interlock
 
@@ -70,7 +72,7 @@ Every run writes a result to `C:\Temp\FixReport\<ScriptUnderTest>\<TestId>.json`
 ## Running the whole suite
 
 ```powershell
-.\_AutomatedTesting\Invoke-AllBreakTests.ps1 -RemediationTest -Force
+.\AutomatedTesting\Invoke-AllBreakTests.ps1 -RemediationTest -Force
 ```
 
 Reboot-requiring breaks are excluded from the sweep by design — a reboot mid-run would
@@ -80,7 +82,7 @@ specific break test, then re-run the analyser to pick the result up.
 ## Analysing results
 
 ```powershell
-.\_AutomatedTesting\Invoke-FixReportAnalysis.ps1
+.\AutomatedTesting\Invoke-FixReportAnalysis.ps1
 ```
 
 Prints a per-script summary and CSV (`Summary.csv`), and exits 1 if any run needs

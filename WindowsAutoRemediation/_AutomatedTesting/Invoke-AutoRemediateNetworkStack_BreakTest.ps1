@@ -108,7 +108,7 @@ $ScriptUnderTest   = 'Invoke-AutoRemediateNetworkStack'
 $RemediationScript = Join-Path $PSScriptRoot '..\Invoke-AutoRemediateNetworkStack.ps1'
 $SelfPath          = $MyInvocation.MyCommand.Path
 
-$modulePath = Join-Path $PSScriptRoot '..\..\_AutomatedTesting\DEXTestFramework.psm1'
+$modulePath = Join-Path $PSScriptRoot '..\..\AutomatedTesting\DEXTestFramework.psm1'
 if (-not (Test-Path -LiteralPath $modulePath)) {
     throw "DEXTestFramework.psm1 not found at $modulePath"
 }

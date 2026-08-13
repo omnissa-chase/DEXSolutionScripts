@@ -87,7 +87,7 @@ Endpoints may have no internet access, no PSGallery trust, and no pre-staged mod
 | JSON | External parsers | `ConvertTo-Json` / `ConvertFrom-Json` |
 | Scheduled tasks | Third-party schedulers | `ScheduledTasks` module (in-box) or `schtasks.exe` |
 | Archives | 7-Zip, external DLLs | `Expand-Archive` / `Compress-Archive`, `System.IO.Compression` |
-| HTTP | External REST modules | `Invoke-RestMethod` / `Invoke-WebRequest` (never in a sensor) |
+| HTTP | External REST modules | `Invoke-RestMethod` / `Invoke-WebRequest` (never in a recurring sensor; only inside a one-time/run-once sensor, self-deadlined per [§10](#10-sensor-authoring-rules)) |
 | AD queries | `ActiveDirectory` module (RSAT, not guaranteed) | `System.DirectoryServices` / ADSI |
 | Folder sizing | External utilities | See [§18](#18-measuring-disk-space) |
 
@@ -102,7 +102,7 @@ Execution time is the most common cause of a script that works on a test device 
 | Workload | Ideal | Acceptable | Hard Ceiling | Beyond ceiling |
 |---|---|---|---|---|
 | **Sensor** (recurring) | < 2 s | < 5 s | 30 s (UEM max) | Not allowed — split into script + cached sensor |
-| **Sensor** (one-time DEX collection) | < 5 s | < 15 s | 30 s (UEM max) | Not allowed |
+| **Sensor** (one-time / run-once) | < 5 s | < 15 s | 30 s (UEM max) | Not allowed |
 | **Script** (synchronous) | < 10 s | < 30 s | 60 s | MUST dispatch asynchronously |
 | **Script** (async payload) | n/a | n/a | Self-enforced | MUST self-enforce a deadline |
 
@@ -713,7 +713,7 @@ write-output $os
 8. Sensors MUST complete in **under 5 seconds**. See [§3](#3-execution-time-budgets).
 9. Sensors MUST NOT launch external processes, jobs, or threads.
 10. Sensors MUST NOT write to disk or the registry — that is a script's job.
-11. Sensors MUST NOT make network calls.
+11. Sensors MUST NOT make network calls **unless it is a one-time/run-once sensor** (see below) — a recurring sensor doing network I/O blocks the fleet-wide sensor queue on every sample interval.
 12. Sensors SHOULD read from a **cache written by a script** when data is expensive to compute.
 13. Date Time sensors MUST emit **ISO format** — per the docs, *"any sensor that returns a date-time data type value uses the ISO format."* Use `Get-Date -Format s`.
 
@@ -843,9 +843,9 @@ Sensors can be triggered by device events rather than only the sample schedule. 
 
 Good candidates: service state changes, hardware/driver events, security log events, installation events.
 
-### One-Time DEX Collection
+### One-Time / Run-Once Sensors
 
-There is a narrow case — a **one-time DEX data collection**, not a recurring sensor — where extending toward the 30-second UEM maximum is defensible.
+There is a narrow case — a **one-time ("run-once") DEX data collection**, not a recurring sensor — where extending toward the 30-second UEM maximum, and making network calls, is defensible. This is a distinct delivery mechanism (provided by R&D tooling separate from the recurring Sample Schedule) — confirm with the admin that the sensor is actually being deployed as run-once before relying on this section.
 
 Before doing so, confirm:
 
@@ -855,6 +855,12 @@ Before doing so, confirm:
 - 30 seconds is the **hard UEM maximum** — there is no higher value
 
 If any of these are unclear, **ask the user for the execution context** before writing a sensor that exceeds 5 seconds.
+
+A run-once sensor that performs network I/O MUST still follow every other rule in [§10](#10-sensor-authoring-rules) (single value, `Write-Output` only, try/catch, type-valid fallback) and MUST additionally:
+
+- **Self-enforce a deadline** with its own `Stopwatch` and per-request timeouts (`.Timeout` / `.ReadWriteTimeout` on `HttpWebRequest`, or `-TimeoutSec` on `Invoke-WebRequest`) — never rely solely on the UEM 30-second ceiling to cut work off cleanly.
+- **Never loop or retry** on a failed network call — one attempt, then fall through to the error path.
+- **Bound the amount of data transferred** by wall-clock time (read/write for N seconds, not until a fixed byte count completes) so a slow link can't stall the sensor past its own deadline.
 
 ---
 
@@ -1382,7 +1388,7 @@ The agent MUST NOT generate these patterns.
 
 ### For Sensors
 
-- [ ] Completes in under 5 seconds (30 s only for a confirmed one-time DEX collection)
+- [ ] Completes in under 5 seconds (30 s only for a confirmed one-time/run-once sensor; network calls only allowed there, self-deadlined)
 - [ ] Emits the value with `Write-Output` or `echo` — **never `Write-Host`**
 - [ ] `return`s immediately after writing the value
 - [ ] Nothing else on the output stream — no logging, headers, or progress
