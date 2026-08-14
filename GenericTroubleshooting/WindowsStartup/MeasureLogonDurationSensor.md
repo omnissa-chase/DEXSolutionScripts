@@ -14,7 +14,7 @@ Two files, deployed independently:
 
 | File | Type | Purpose |
 |---|---|---|
-| [`Sensors/logon_duration_measure.ps1`](./Sensors/logon_duration_measure.ps1) | Sensor (one-time / run-once) | Mines event logs directly and returns the full logon-phase breakdown as one JSON string. No collector, no scheduled task, no registry cache. |
+| [`OneTimeSensor/logon_duration_measure.ps1`](./OneTimeSensor/logon_duration_measure.ps1) | Sensor (one-time / run-once) | Mines event logs directly and returns the full logon-phase breakdown as one JSON string. No collector, no scheduled task, no registry cache. |
 | [`Enable-LogonAuditLogs.ps1`](./Enable-LogonAuditLogs.ps1) | Script | Enables the two optional Windows event logs needed for full phase coverage. Run once per device image ahead of the sensor. |
 
 This path exists because Workspace ONE Intelligence now supports triggering a
@@ -149,7 +149,7 @@ that entire window on every sample interval.
 Run the sensor manually on a target device and confirm it returns valid JSON:
 
 ```powershell
-& '.\Sensors\logon_duration_measure.ps1' | ConvertFrom-Json | Format-List
+& '.\OneTimeSensor\logon_duration_measure.ps1' | ConvertFrom-Json | Format-List
 ```
 
 - `TimedOut: false` and no `-4` values means the run completed within budget.

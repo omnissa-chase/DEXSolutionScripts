@@ -31,20 +31,34 @@ $Profiles = Get-WmiObject -Class Win32_UserProfile | Where-Object {
    !$_.Special -and ($_.SID -in $DomainUsersSID)
 }
 
-# Function to calculate folder size in MB
+# Function to calculate folder size in MB using native .NET enumeration (no Get-ChildItem pipeline overhead)
 Function Get-FolderSizeMB($Path) {
-   If (Test-Path $Path) {
-       $SizeBytes = 0
-       (Get-ChildItem -Path $Path -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
-            If (!($_.PSIsContainer)) {
-                $SizeBytes += $_.Length
-            }
-       })
-        
+   If (-not (Test-Path -LiteralPath $Path)) { return 0 }
 
-       return [math]::Round($SizeBytes / 1MB, 2)
+   [Int64]$SizeBytes = 0
+   $Stack = [System.Collections.Generic.Stack[string]]::new()
+   $Stack.Push($Path)
+
+   While ($Stack.Count -gt 0) {
+       $Current = $Stack.Pop()
+       Try {
+           $DirInfo = [System.IO.DirectoryInfo]::new($Current)
+           ForEach ($File in $DirInfo.EnumerateFiles()) {
+               Try { $SizeBytes += $File.Length } Catch { }
+           }
+           ForEach ($SubDir in $DirInfo.EnumerateDirectories()) {
+               # Skip reparse points (e.g. legacy "Local Settings"/"Application Data" junctions) to avoid double-counting/loops
+               If (($SubDir.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) {
+                   $Stack.Push($SubDir.FullName)
+               }
+           }
+       } Catch {
+           # Access denied or IO error on this directory -- skip it, keep walking siblings
+           Continue
+       }
    }
-   return 0
+
+   return [math]::Round($SizeBytes / 1MB, 2)
 }
 
 # Initialize log
