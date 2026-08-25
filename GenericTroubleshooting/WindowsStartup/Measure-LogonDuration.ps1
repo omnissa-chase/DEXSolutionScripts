@@ -7,26 +7,18 @@
 .DESCRIPTION
     Mines Windows event logs for the most recent interactive logon of the active user
     and captures the following phases:
-      - Logon timestamp           (TerminalServices-LocalSessionManager EID 21/25)
-      - Shell / Desktop ready     (Microsoft-Windows-Winlogon EID 7001)
-      - Total logon duration      (EID 21 -> Winlogon EID 7001)
-      - Group Policy total        (GP EID 4001 -> EID 8001, by PrincipalSamName)
-      - GP Logon Scripts          (GP EID 4018 -> EID 5018, ScriptType=1)
-      - Folder Redirection        (Microsoft-Windows-Folder Redirection EID 501 -> 502)
-      - User Profile load         (User Profile Service EID 1 -> 2, by user SID)
-      - FSLogix container attach  (FSLogix Operational log, if present)
-      - ActiveSetup               (Microsoft-Windows-Shell-Core EID 62170 -> 62171)
-      - AppX / UWP packages       (Microsoft-Windows-AppReadiness EID 209)
-      - Printer mapping           (PrintService/Operational EID 300 -> 306, if log enabled)
-      - Scheduled tasks at logon  (TaskScheduler/Operational EID 100 -> 102, if log enabled)
+      Logon timestamp, Shell/Desktop ready, Total logon duration, Group Policy total,
+      GP Logon Scripts, Folder Redirection, User Profile load, FSLogix container
+      attach, ActiveSetup, AppX/UWP packages, Printer mapping, Scheduled tasks at
+      logon. Per-phase event sources: see OneTimeSensor/logon_duration_measure.ps1.
+      Printer/task phases need their optional logs enabled first.
 
     All values are written as string registry values under:
       HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration
 
-    Both parameters default to their matching environment variable, so UEM can configure
-    the script by setting $env:DeployMode / $env:ConfigureLoggingFirst while a human or
-    another script can still pass -DeployMode / -ConfigureLoggingFirst directly. An
-    explicitly passed parameter always wins over the environment.
+    Both parameters default to their matching environment variable so UEM can configure
+    the script via $env:DeployMode / $env:ConfigureLoggingFirst; an explicitly passed
+    parameter always wins over the environment.
 
 .PARAMETER DeployMode
     Defaults to $env:DeployMode, or RunNow when that is unset.
