@@ -78,12 +78,17 @@ $WindowsDiskCleanOptions = Get-ChildItem $DskCleanPresetLocation | Select-Object
 # Loop through each available cleanup option
 ForEach ($CleanOption in $WindowsDiskCleanOptions) {
    # Check if the registry path for the option exists
-   $OptionPath="$DskCleanPresetLocation\$($CleanOption.Option)"
+   # Property is 'Options' (set by Select-Object above); '.Option' returned $null,
+   # which collapsed this to the parent VolumeCaches key -- Test-Path still passed,
+   # so every handler write landed on the parent instead of the handler itself.
+   $OptionPath = Join-Path $DskCleanPresetLocation $CleanOption.Options
    If (Test-Path $OptionPath) {
        $CnfgValue = 0 # Default to disabled
 
-       # Enable the option if it's in the configured list
-       If ($CleanOption -in $ConfiguredOptions) {
+       # Enable the option if it's in the configured list.
+       # Compare the Options STRING, not the object: a PSCustomObject is never -in
+       # an array of strings, so this was always false and nothing was ever enabled.
+       If ($CleanOption.Options -in $ConfiguredOptions) {
            $CnfgValue = 2 # Value 2 enables the cleanup option
        }
 
