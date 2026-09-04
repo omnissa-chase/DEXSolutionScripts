@@ -52,7 +52,7 @@ param(
 )
 
 if (-not $Force) {
-    Write-Host 'REFUSING TO RUN. Every discovered break test is destructive; pass -Force to acknowledge.' -ForegroundColor Red
+    Write-Output 'REFUSING TO RUN. Every discovered break test is destructive; pass -Force to acknowledge.'
     exit 1
 }
 
@@ -61,20 +61,20 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $tests = @(Get-ChildItem -LiteralPath $repoRoot -Filter '*_BreakTest.ps1' -Recurse -ErrorAction SilentlyContinue |
            Where-Object { $_.Directory.Name -eq '_AutomatedTesting' -and $_.Name -like $Include })
 
-Write-Host ''
-Write-Host '-- Invoke-AllBreakTests '.PadRight(64, '-') -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Discovered: $($tests.Count)   Environment: $Environment"
-Write-Host ('-' * 64) -ForegroundColor Cyan
+Write-Output ''
+Write-Output '-- Invoke-AllBreakTests '.PadRight(64, '-')
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Discovered: $($tests.Count)   Environment: $Environment"
+Write-Output ('-' * 64)
 
 if ($tests.Count -eq 0) {
-    Write-Host "  No *_BreakTest.ps1 found under $repoRoot." -ForegroundColor Yellow
+    Write-Output "  No *_BreakTest.ps1 found under $repoRoot."
     exit 0
 }
 
 foreach ($test in $tests) {
 
-    Write-Host ''
-    Write-Host "  >> $($test.Name)" -ForegroundColor White
+    Write-Output ''
+    Write-Output "  >> $($test.Name)"
 
     $argList = @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass',
@@ -90,9 +90,9 @@ foreach ($test in $tests) {
 
     # Each test runs in its own process so one crashing cannot abort the sweep.
     $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $argList -Wait -PassThru -NoNewWindow
-    Write-Host "     exit $($proc.ExitCode)" -ForegroundColor DarkCyan
+    Write-Output "     exit $($proc.ExitCode)"
 }
 
-Write-Host ''
+Write-Output ''
 & (Join-Path $PSScriptRoot 'Invoke-FixReportAnalysis.ps1') -Path $FixReportPath
 exit $LASTEXITCODE

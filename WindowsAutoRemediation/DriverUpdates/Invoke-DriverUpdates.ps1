@@ -70,7 +70,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-DriverUpdates {
 param(
     [ValidateSet('Detect', 'Install')]
     [string]$Mode         = $(if ($env:Mode)         { $env:Mode }                                        else { 'Detect' }),
@@ -91,7 +91,7 @@ $HighRiskPatterns = @(
 )
 
 # -- Phase 1: Pre-flight -------------------------------------------------------
-Write-Host "-- Invoke-DriverUpdates ($Mode) --------------------------------------------------"
+Write-Output "-- Invoke-DriverUpdates ($Mode) --------------------------------------------------"
 
 $currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -105,7 +105,7 @@ if (-not $wuService) {
     exit 1
 }
 if ($wuService.Status -ne 'Running') {
-    Write-Host 'Windows Update service is not running. Attempting to start...'
+    Write-Output 'Windows Update service is not running. Attempting to start...'
     try {
         Start-Service -Name wuauserv -ErrorAction Stop
         Start-Sleep -Seconds 3
@@ -123,14 +123,14 @@ try {
     $wuSession = New-Object -ComObject Microsoft.Update.Session
     $wuSession.ClientApplicationID = 'DEX-DriverUpdate'
     $searcher = $wuSession.CreateUpdateSearcher()
-    Write-Host 'Searching Windows Update for available driver updates...'
+    Write-Output 'Searching Windows Update for available driver updates...'
     $searchResult = $searcher.Search("IsInstalled=0 and Type='Driver'")
 } catch {
     $hr = '0x{0:X8}' -f ($_.Exception.HResult)
     Write-Error "Windows Update search failed ($hr): $_"
     if ($_.Exception.HResult -eq -2145124284) {
         # 0x80240044 -- WU session busy (another WU process is active)
-        Write-Host 'Hint: Another Windows Update session may be active. Retry after it completes.'
+        Write-Output 'Hint: Another Windows Update session may be active. Retry after it completes.'
     }
     exit 1
 }
@@ -140,14 +140,14 @@ $allDrivers = $searchResult.Updates
 # Apply DriverFilter
 if ($DriverFilter) {
     $filtered = @($allDrivers | Where-Object { $_.Title -match $DriverFilter })
-    Write-Host "DriverFilter '$DriverFilter': $($filtered.Count) of $($allDrivers.Count) update(s) matched."
+    Write-Output "DriverFilter '$DriverFilter': $($filtered.Count) of $($allDrivers.Count) update(s) matched."
 } else {
     $filtered = @($allDrivers)
-    Write-Host "$($allDrivers.Count) driver update(s) found."
+    Write-Output "$($allDrivers.Count) driver update(s) found."
 }
 
 if ($filtered.Count -eq 0) {
-    Write-Host 'No driver updates to act on.'
+    Write-Output 'No driver updates to act on.'
     exit 0
 }
 
@@ -158,22 +158,22 @@ if ($filtered.Count -gt $MaxUpdates) {
 }
 
 # Print discovery list
-Write-Host ''
+Write-Output ''
 foreach ($drv in $filtered) {
     $rr  = if ($drv.RebootRequired) { '[RebootReq]' } else { '[NoReboot] ' }
     $ver = [string]$drv.DriverVerDate
-    Write-Host "  $rr $($drv.Title)$(if ($ver) { "  [$ver]" })"
+    Write-Output "  $rr $($drv.Title)$(if ($ver) { "  [$ver]" })"
 }
-Write-Host ''
+Write-Output ''
 
 # -- Phase 3: Detect mode exit -------------------------------------------------
 if ($Mode -eq 'Detect') {
-    Write-Host "$($filtered.Count) driver update(s) available. Run with -Mode Install to apply."
+    Write-Output "$($filtered.Count) driver update(s) available. Run with -Mode Install to apply."
     exit 1
 }
 
 # -- Phase 4: Download ---------------------------------------------------------
-Write-Host 'Downloading...'
+Write-Output 'Downloading...'
 $toDownload = New-Object -ComObject Microsoft.Update.UpdateColl
 foreach ($drv in $filtered) { [void]$toDownload.Add($drv) }
 
@@ -181,7 +181,7 @@ try {
     $downloader         = $wuSession.CreateUpdateDownloader()
     $downloader.Updates = $toDownload
     $dlResult           = $downloader.Download()
-    Write-Host ('Download finished.  ResultCode: {0}  HResult: 0x{1:X8}' -f $dlResult.ResultCode, $dlResult.HResult)
+    Write-Output ('Download finished.  ResultCode: {0}  HResult: 0x{1:X8}' -f $dlResult.ResultCode, $dlResult.HResult)
 } catch {
     $hr = '0x{0:X8}' -f ($_.Exception.HResult)
     Write-Error "Download failed ($hr): $_"
@@ -189,7 +189,7 @@ try {
 }
 
 # -- Phase 5: Install ----------------------------------------------------------
-Write-Host 'Installing...'
+Write-Output 'Installing...'
 $toInstall = New-Object -ComObject Microsoft.Update.UpdateColl
 foreach ($drv in $filtered) {
     if ($drv.IsDownloaded) {
@@ -220,8 +220,8 @@ $installedCount = 0
 $failedCount    = 0
 $rebootNeeded   = $installResult.RebootRequired   # Signal 1: COM collection-level result
 
-Write-Host ''
-Write-Host 'Install results:'
+Write-Output ''
+Write-Output 'Install results:'
 for ($i = 0; $i -lt $toInstall.Count; $i++) {
     $drv        = $toInstall.Item($i)
     $itemResult = $installResult.GetUpdateResult($i)
@@ -229,7 +229,7 @@ for ($i = 0; $i -lt $toInstall.Count; $i++) {
 
     $label = if ($succeeded) { '[OK]    ' } else { '[FAILED]' }
     $rrTag = if ($itemResult.RebootRequired) { '[RebootReq]' } else { '[NoReboot] ' }
-    Write-Host "  $label $rrTag $($drv.Title)"
+    Write-Output "  $label $rrTag $($drv.Title)"
 
     if ($succeeded) {
         $installedCount++
@@ -239,7 +239,7 @@ for ($i = 0; $i -lt $toInstall.Count; $i++) {
         foreach ($pattern in $HighRiskPatterns) {
             if ($drv.Title -match $pattern) {
                 if (-not $itemResult.RebootRequired) {
-                    Write-Host '           ^ High-risk class: reboot override applied (WU reported NoReboot).'
+                    Write-Output '           ^ High-risk class: reboot override applied (WU reported NoReboot).'
                 }
                 $rebootNeeded = $true
                 break
@@ -247,15 +247,15 @@ for ($i = 0; $i -lt $toInstall.Count; $i++) {
         }
     } else {
         $failedCount++
-        Write-Host ('           HRESULT: 0x{0:X8}' -f $itemResult.HResult)
+        Write-Output ('           HRESULT: 0x{0:X8}' -f $itemResult.HResult)
     }
 }
-Write-Host ''
+Write-Output ''
 
 # -- Phase 6: Reboot Detection -------------------------------------------------
 # Signal 2: WU registry reboot pending key
 if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') {
-    Write-Host 'Reboot signal: WU registry key present.'
+    Write-Output 'Reboot signal: WU registry key present.'
     $rebootNeeded = $true
 }
 
@@ -265,27 +265,37 @@ $pendingRenames = (Get-ItemProperty `
     -Name  PendingFileRenameOperations `
     -ErrorAction SilentlyContinue).PendingFileRenameOperations
 if ($pendingRenames) {
-    Write-Host 'Reboot signal: PendingFileRenameOperations present.'
+    Write-Output 'Reboot signal: PendingFileRenameOperations present.'
     $rebootNeeded = $true
 }
 
 # -- Phase 7: Summary Report ---------------------------------------------------
-Write-Host "Summary: $installedCount installed, $failedCount failed, RebootRequired: $rebootNeeded"
+Write-Output "Summary: $installedCount installed, $failedCount failed, RebootRequired: $rebootNeeded"
 
 if ($failedCount -gt 0) {
-    Write-Host 'One or more driver updates failed to install. Check HRESULT values above.'
+    Write-Output 'One or more driver updates failed to install. Check HRESULT values above.'
     exit 1
 }
 
 if ($rebootNeeded) {
     if ($AllowReboot) {
-        Write-Host 'Reboot required. Signaling exit 3010 for SmartReboot / DEX scheduling.'
+        Write-Output 'Reboot required. Signaling exit 3010 for SmartReboot / DEX scheduling.'
         exit 3010
     } else {
-        Write-Host 'Reboot recommended but AllowReboot=$false. Exiting 0 -- schedule a reboot separately.'
+        Write-Output 'Reboot recommended but AllowReboot=$false. Exiting 0 -- schedule a reboot separately.'
         exit 0
     }
 }
 
-Write-Host 'All driver updates installed successfully. No reboot required.'
+Write-Output 'All driver updates installed successfully. No reboot required.'
 exit 0
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-DriverUpdates
+Exit 0

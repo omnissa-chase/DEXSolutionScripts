@@ -32,7 +32,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Measure-GPLoadTimeEx {
 [CmdletBinding()]
 param()
 
@@ -109,7 +109,7 @@ $cseTimings = $cseFinishEvents | ForEach-Object {
     }
 
     $cseGuid = $_.Properties[3].Value
-    $gpos    = ($cse2Gpo[$cseGuid] -split "`n" | Where-Object { $_.Trim() }) -join '; '
+    $gpos    = ($cse2Gpo[$cseGuid] -split "`r`n" | Where-Object { $_.Trim() }) -join '; '
 
     [PSCustomObject]@{
         CSE         = [string]$_.Properties[2].Value
@@ -152,3 +152,13 @@ foreach ($key in $regValues.Keys) {
 #endregion
 
 Write-Output "GP load time metrics recorded for '$loggedOnUser' at '$regPath' (Total: ${gpTotalSec}s, $($cseTimings.Count) CSEs)"
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Measure-GPLoadTimeEx
+Exit 0

@@ -63,6 +63,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
+function Invoke-AutoRemediateAllDriverIssues {
 param(
     # Optional regex pattern to further narrow which devices are checked within each class.
     [string]$DriverFilter = $env:DriverFilter,
@@ -371,10 +372,10 @@ $results = New-Object 'System.Collections.Generic.List[PSCustomObject]'
 $scopeLine   = if ($DriverFilter) { "Within-class filter: $DriverFilter" } else { 'All devices' }
 $actionsLine = "Actions: $($AllowedActions -join ', ')"
 
-Write-Host "`n-- Invoke-AutoRemediateAllDriverIssues --------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   $scopeLine"
-Write-Host "   $actionsLine"
-Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output "`r`n-- Invoke-AutoRemediateAllDriverIssues --------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   $scopeLine"
+Write-Output "   $actionsLine"
+Write-Output '----------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {
 
@@ -417,7 +418,7 @@ foreach ($step in $activeSteps) {
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
 
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
 
     $results.Add([PSCustomObject]@{
         Order      = $step.Order
@@ -435,21 +436,31 @@ $warnings = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = ($results | Where-Object { $_.Remediated }).Count
 
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
 
 $allUnfixed = $script:UnfixedDevices | Where-Object { $_ }
 
 if ($allUnfixed) {
-    Write-Host "`n  [NOTICE] The following device(s) could not be resolved without a reboot:" -ForegroundColor Yellow
-    $allUnfixed | ForEach-Object { Write-Host "           $_" -ForegroundColor Yellow }
-    Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
-    Write-Host ''
+    Write-Output "`r`n  [NOTICE] The following device(s) could not be resolved without a reboot:"
+    $allUnfixed | ForEach-Object { Write-Output "           $_" }
+    Write-Output '----------------------------------------------------------------'
+    Write-Output ''
     exit 2   # Distinct exit code: partial remediation, reboot recommended
 }
 
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host ''
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output ''
 
 if ($failed -gt 0) { exit 1 }
 exit 0
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-AutoRemediateAllDriverIssues
+Exit 0

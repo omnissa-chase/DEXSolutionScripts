@@ -77,7 +77,7 @@ function Write-Log {
     $colorMap = @{ INFO='White'; SUCCESS='Green'; WARNING='Yellow'; ERROR='Red' }
     $color = $colorMap[$Level]
     if (-not $color) { $color = 'White' }
-    Write-Host $line -ForegroundColor $color
+    Write-Output $line
 }
 
 Write-Log "====== TroubleshootWizard Installer ======"

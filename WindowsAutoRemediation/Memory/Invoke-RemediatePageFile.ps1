@@ -35,7 +35,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-RemediatePageFile {
 param(
     [int]$PageFileUsageFailPercent = $(if ($env:PageFileUsageFailPercent) { [int]$env:PageFileUsageFailPercent } else { 80 })
 )
@@ -107,12 +107,12 @@ $remNote = if ($remediated)   { '  -> Reboot recommended for page file changes t
            elseif ($remError) { "  -> Remediation ERROR: $remError" }
            else               { '' }
 
-Write-Host "`n-- Invoke-RemediatePageFile ------------------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-Write-Host "----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "`n  $tag $message" -ForegroundColor $color
-if ($remNote) { Write-Host $remNote -ForegroundColor Yellow }
-Write-Host ''
+Write-Output "`r`n-- Invoke-RemediatePageFile ------------------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+Write-Output "----------------------------------------------------------------"
+Write-Output "`r`n  $tag $message"
+if ($remNote) { Write-Output $remNote }
+Write-Output ''
 
 # -- Registry Reporting -------------------------------------------------------
 $regPath = 'HKLM:\Software\AirWatch\Extension\DEXRecords\MemoryErrors\PageFile'
@@ -132,12 +132,22 @@ try {
         Set-ItemProperty -Path $regPath -Name 'RemediationError' -Value $remError -Type String
     }
 
-    Write-Host "  [Registry] Results written to $regPath" -ForegroundColor DarkCyan
+    Write-Output "  [Registry] Results written to $regPath"
 } catch {
-    Write-Host "  [Registry] Write failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Output "  [Registry] Write failed: $($_.Exception.Message)"
 }
 
 # -- Exit ---------------------------------------------------------------------
 # Exit 1 if an issue was detected but no remediation could be applied.
 if ($status -ne 'Passed' -and -not $remediated) { exit 1 }
 exit 0
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-RemediatePageFile
+Exit 0

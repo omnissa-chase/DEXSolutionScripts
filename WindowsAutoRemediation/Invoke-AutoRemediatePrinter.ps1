@@ -275,9 +275,9 @@ $activeSteps = $Steps |
 
 $results = New-Object 'System.Collections.Generic.List[PSCustomObject]'
 
-Write-Host "`n-- Invoke-AutoRemediatePrinter ----------------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
-Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output "`r`n-- Invoke-AutoRemediatePrinter ----------------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
+Write-Output '----------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {
 
@@ -320,7 +320,7 @@ foreach ($step in $activeSteps) {
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
 
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
 
     $results.Add([PSCustomObject]@{
         Order      = $step.Order
@@ -338,10 +338,10 @@ $warnings = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = ($results | Where-Object { $_.Remediated }).Count
 
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host ''
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output ''
 
 # -- Registry Reporting -------------------------------------------------------
 # Writes all non-Passed results to HKLM for DEX agent pickup.
@@ -376,7 +376,7 @@ try {
         Set-ItemProperty -Path $regPath -Name $valueName -Value "$tag $($issue.Message)" -Type String
     }
 
-    Write-Host "  [Registry] Results written to $regPath" -ForegroundColor DarkCyan
+    Write-Output "  [Registry] Results written to $regPath"
 } catch {
-    Write-Host "  [Registry] Write failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Output "  [Registry] Write failed: $($_.Exception.Message)"
 }

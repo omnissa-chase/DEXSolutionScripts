@@ -76,7 +76,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Measure-LogonDuration {
 [CmdletBinding()]
 param(
     # Defaults are read from the environment because that is how UEM passes configuration.
@@ -728,3 +728,13 @@ switch ($DeployMode) {
 
 exit 0
 #endregion
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Measure-LogonDuration
+Exit 0

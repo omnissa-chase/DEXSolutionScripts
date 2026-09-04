@@ -61,7 +61,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-AutoRemediateOutlook {
 param(
     [int] $CacheSizeWarningMB      = $(if ($env:CacheSizeWarningMB)      { [int]$env:CacheSizeWarningMB }                               else { 30720 }),
     [bool]$AllowDestructiveActions = $(if ($env:AllowDestructiveActions)  { [System.Convert]::ToBoolean($env:AllowDestructiveActions) } else { $false })
@@ -84,10 +84,10 @@ foreach ($p in @(
 if (-not $_outlookFound -and $_c2rConfig) { $_outlookFound = $true }
 
 if (-not $_outlookFound) {
-    Write-Host "`n-- Invoke-AutoRemediateOutlook ----------------------------------" -ForegroundColor Cyan
-    Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    Write-Host '   [Skipped] Microsoft Outlook does not appear to be installed on this device.'
-    Write-Host "----------------------------------------------------------------`n" -ForegroundColor Cyan
+    Write-Output "`r`n-- Invoke-AutoRemediateOutlook ----------------------------------"
+    Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Output '   [Skipped] Microsoft Outlook does not appear to be installed on this device.'
+    Write-Output "----------------------------------------------------------------`r`n"
     exit 0
 }
 
@@ -198,7 +198,7 @@ $Steps = @(
                 } | Select-Object -First 1
                 if ($target) {
                     Set-ItemProperty -Path $target.PSPath -Name 'LoadBehavior' -Value 0 -ErrorAction Stop
-                    Write-Host "  [Info] Add-in '$($target.PSChildName)' set to LoadBehavior=0 (disabled). Restart Outlook to take effect." -ForegroundColor DarkYellow
+                    Write-Output "  [Info] Add-in '$($target.PSChildName)' set to LoadBehavior=0 (disabled). Restart Outlook to take effect."
                     return
                 }
             }
@@ -241,7 +241,7 @@ $Steps = @(
             $ts      = Get-Date -Format 'yyyyMMdd-HHmmss'
             $newName = "$($largest.BaseName)_${ts}.bak"
             Rename-Item -Path $largest.FullName -NewName $newName -ErrorAction Stop
-            Write-Host "  [Info] Renamed '$($largest.Name)' -> '$newName'. Outlook will rebuild the OST from Exchange on next launch." -ForegroundColor DarkYellow
+            Write-Output "  [Info] Renamed '$($largest.Name)' -> '$newName'. Outlook will rebuild the OST from Exchange on next launch."
         }
     },
 
@@ -336,9 +336,9 @@ $Steps = @(
 $activeSteps = $Steps | Where-Object { $_.Enabled } | Sort-Object { [int]$_.Order }
 $results     = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-Write-Host "`n-- Invoke-AutoRemediateOutlook ----------------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)   User: $(if ($_loggedOnUser) { $_loggedOnUser } else { 'unknown' })"
-Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output "`r`n-- Invoke-AutoRemediateOutlook ----------------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)   User: $(if ($_loggedOnUser) { $_loggedOnUser } else { 'unknown' })"
+Write-Output '----------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {
     $status     = 'Failed'
@@ -372,7 +372,7 @@ foreach ($step in $activeSteps) {
     $remNote = if ($remediated)   { '  -> Remediation ran' }
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
 
     $results.Add([PSCustomObject]@{
         Order      = $step.Order
@@ -390,9 +390,9 @@ $warnings = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = ($results | Where-Object { $_.Remediated }).Count
 
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
-Write-Host "----------------------------------------------------------------`n" -ForegroundColor Cyan
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "----------------------------------------------------------------`r`n"
 
 # -- Registry Reporting -------------------------------------------------------
 $regPath = 'HKLM:\Software\AirWatch\Extension\DEXRecords\OutlookErrors'
@@ -419,11 +419,21 @@ try {
         $tag       = if ($_.Remediated) { '[Remediated]' } else { "[$($_.Status)]" }
         Set-ItemProperty -Path $regPath -Name $valueName -Value "$tag $($_.Message)" -Type String
     }
-    Write-Host "  [Registry] Results written to $regPath" -ForegroundColor DarkCyan
+    Write-Output "  [Registry] Results written to $regPath"
 } catch {
-    Write-Host "  [Registry] Write failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Output "  [Registry] Write failed: $($_.Exception.Message)"
 }
 
 # -- Exit ---------------------------------------------------------------------
 if ($failed -gt 0) { exit 1 }
 exit 0
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-AutoRemediateOutlook
+Exit 0

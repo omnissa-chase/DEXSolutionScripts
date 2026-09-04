@@ -90,12 +90,12 @@ the marker and re-run:
         }
     }
 
-    Write-Host ''
-    Write-Host '  ###############################################################' -ForegroundColor Red
-    Write-Host '  #  DESTRUCTIVE TEST HARNESS -- THIS MACHINE WILL BE BROKEN    #' -ForegroundColor Red
-    Write-Host "  #  Host: $($env:COMPUTERNAME.PadRight(52))#" -ForegroundColor Red
-    Write-Host '  ###############################################################' -ForegroundColor Red
-    Write-Host ''
+    Write-Output ''
+    Write-Output '  ###############################################################'
+    Write-Output '  #  DESTRUCTIVE TEST HARNESS -- THIS MACHINE WILL BE BROKEN    #'
+    Write-Output "  #  Host: $($env:COMPUTERNAME.PadRight(52))#"
+    Write-Output '  ###############################################################'
+    Write-Output ''
 }
 
 # ==============================================================================
@@ -246,7 +246,7 @@ function Register-DexTestResume {
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
         -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
 
-    Write-Host "  [Resume] Registered '$taskName' (AtStartup)." -ForegroundColor DarkCyan
+    Write-Output "  [Resume] Registered '$taskName' (AtStartup)."
 }
 
 function Unregister-DexTestResume {
@@ -255,7 +255,7 @@ function Unregister-DexTestResume {
     $taskName = "$script:TaskPrefix`_$($State['ScriptUnderTest'])"
     if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-        Write-Host "  [Resume] Unregistered '$taskName'." -ForegroundColor DarkCyan
+        Write-Output "  [Resume] Unregistered '$taskName'."
     }
 }
 
@@ -322,7 +322,7 @@ function Write-DexTestResult {
     $result | ConvertTo-Json -Depth 8 |
         Set-Content -LiteralPath $resultFile -Encoding UTF8 -Force -ErrorAction Stop
 
-    Write-Host "  [Result] $resultFile" -ForegroundColor DarkCyan
+    Write-Output "  [Result] $resultFile"
     return $resultFile
 }
 
@@ -333,10 +333,10 @@ function Write-DexTestResult {
 function Write-DexBanner {
     param([Parameter(Mandatory = $true)][string]$Title, [string]$Detail = '')
 
-    Write-Host ''
-    Write-Host "-- $Title ".PadRight(64, '-') -ForegroundColor Cyan
-    Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   $Detail"
-    Write-Host ('-' * 64) -ForegroundColor Cyan
+    Write-Output ''
+    Write-Output "-- $Title ".PadRight(64, '-')
+    Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   $Detail"
+    Write-Output ('-' * 64)
 }
 
 function Write-DexStep {
@@ -353,7 +353,7 @@ function Write-DexStep {
         'Info'    { 'Gray'   }
         default   { 'White'  }
     }
-    Write-Host "  [$($Status.PadRight(7))] $Name$(if ($Message) { ": $Message" })" -ForegroundColor $color
+    Write-Output "  [$($Status.PadRight(7))] $Name$(if ($Message) { ": $Message" })"
 }
 
 Export-ModuleMember -Function @(

@@ -55,7 +55,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-VpnStateCollection {
 [CmdletBinding()]
 param()
 
@@ -66,7 +66,7 @@ $LogPath        = "$env:SystemRoot\Temp\UEM_VpnStateCollection.log"
 $RunEventId = ([Random]::new()).Next(1000, 9999)
 $HEAD       = "`r`n[$RunEventId]"
 
-Write-Host "[$RunEventId] Executing Invoke-VpnStateCollection, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'"
+Write-Output "[$RunEventId] Executing Invoke-VpnStateCollection, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'"
 
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
@@ -153,7 +153,7 @@ try {
     Write-Log "Found $clientCount candidate tunnel adapter(s)."
 
     if ($clientCount -eq 0) {
-        Write-Host "$HEAD No VPN client detected on this device."
+        Write-Output "$HEAD No VPN client detected on this device."
         Write-Log "No VPN client detected. HealthScore = -1."
     }
     else {
@@ -162,7 +162,7 @@ try {
         if ($tunnel) {
             $connected   = $true
             $adapterName = $tunnel.InterfaceDescription
-            Write-Host "$HEAD Active tunnel: $adapterName (ifIndex $($tunnel.ifIndex))"
+            Write-Output "$HEAD Active tunnel: $adapterName (ifIndex $($tunnel.ifIndex))"
             Write-Log "Active tunnel: $adapterName (ifIndex $($tunnel.ifIndex))"
 
             # -- 2. Tunnel mode from default route ownership --------------------
@@ -204,7 +204,7 @@ try {
             Write-Log "Discard rate: $discardPpm ppm"
         }
         else {
-            Write-Host "$HEAD VPN client present but no active tunnel."
+            Write-Output "$HEAD VPN client present but no active tunnel."
             Write-Log "VPN client present but no active tunnel."
         }
 
@@ -319,7 +319,7 @@ try {
             $healthReason = ($deductions | Sort-Object { $_.Points } -Descending | Select-Object -First 1).Reason
         }
 
-        Write-Host "$HEAD Health score: $healthScore ($healthReason)"
+        Write-Output "$HEAD Health score: $healthScore ($healthReason)"
         Write-Log "Health score: $healthScore | Reason: $healthReason"
     }
 
@@ -343,7 +343,7 @@ try {
     Set-ItemProperty -Path $RegPath -Name "ClientCount"            -Value ([string]$clientCount)    -Type String
     Set-ItemProperty -Path $RegPath -Name "LastRun"                -Value (Get-Date -Format "o")    -Type String
 
-    Write-Host "$HEAD VPN state cached to $RegPath"
+    Write-Output "$HEAD VPN state cached to $RegPath"
     Write-Log "Collection complete."
     exit 0
 }
@@ -360,3 +360,13 @@ catch {
 
     exit 1
 }
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-VpnStateCollection
+Exit 0

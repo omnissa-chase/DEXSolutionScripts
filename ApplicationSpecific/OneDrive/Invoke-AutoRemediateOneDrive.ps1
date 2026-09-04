@@ -58,7 +58,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-AutoRemediateOneDrive {
 param(
     [bool]$AllowDestructiveActions = $(if ($env:AllowDestructiveActions) { [System.Convert]::ToBoolean($env:AllowDestructiveActions) } else { $false })
 )
@@ -101,10 +101,10 @@ if (-not $_oneDriveExe) {
 }
 
 if (-not $_oneDriveExe) {
-    Write-Host "`n-- Invoke-AutoRemediateOneDrive ---------------------------------" -ForegroundColor Cyan
-    Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    Write-Host '   [Skipped] OneDrive does not appear to be installed on this device.'
-    Write-Host "----------------------------------------------------------------`n" -ForegroundColor Cyan
+    Write-Output "`r`n-- Invoke-AutoRemediateOneDrive ---------------------------------"
+    Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Output '   [Skipped] OneDrive does not appear to be installed on this device.'
+    Write-Output "----------------------------------------------------------------`r`n"
     exit 0
 }
 
@@ -144,7 +144,7 @@ $Steps = @(
             if (-not $runKeyValue) {
                 $runValue = "`"$_oneDriveExe`" /background"
                 Set-ItemProperty -Path $runKeyPath -Name 'OneDrive' -Value $runValue -Type String -ErrorAction Stop
-                Write-Host "  [Info] Restored OneDrive auto-start Run key: $runValue" -ForegroundColor DarkYellow
+                Write-Output "  [Info] Restored OneDrive auto-start Run key: $runValue"
             }
             # Step B: start OneDrive in the user's interactive session if not running.
             # From SYSTEM context, Start-Process launches as SYSTEM, not the user.
@@ -159,7 +159,7 @@ $Steps = @(
                     Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
                     Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
                     Start-Sleep -Seconds 5   # Allow process time to launch before the task is unregistered
-                    Write-Host "  [Info] OneDrive started in user session via temporary scheduled task." -ForegroundColor DarkYellow
+                    Write-Output "  [Info] OneDrive started in user session via temporary scheduled task."
                 } finally {
                     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
                 }
@@ -272,12 +272,12 @@ $Steps = @(
             $svc = Get-Service -Name 'FileSyncHelper' -ErrorAction SilentlyContinue
             if ($svc -and $svc.StartType -eq 'Disabled') {
                 # Do not force-enable a disabled service without admin review
-                Write-Host '  [Info] FileSyncHelper is Disabled -- skipping restart. Review policy before enabling.' -ForegroundColor DarkYellow
+                Write-Output '  [Info] FileSyncHelper is Disabled -- skipping restart. Review policy before enabling.'
                 return
             }
             if ($svc -and $svc.Status -ne 'Running') {
                 Start-Service -Name 'FileSyncHelper' -ErrorAction Stop
-                Write-Host "  [Info] FileSyncHelper service started." -ForegroundColor DarkYellow
+                Write-Output "  [Info] FileSyncHelper service started."
             }
         }
     },
@@ -351,9 +351,9 @@ $oneDriveVersion = try {
     (Get-Item $_oneDriveExe -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
 } catch { 'unknown' }
 
-Write-Host "`n-- Invoke-AutoRemediateOneDrive ---------------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)   Version: $oneDriveVersion   User: $(if ($_loggedOnUser) { $_loggedOnUser } else { 'unknown' })"
-Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output "`r`n-- Invoke-AutoRemediateOneDrive ---------------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)   Version: $oneDriveVersion   User: $(if ($_loggedOnUser) { $_loggedOnUser } else { 'unknown' })"
+Write-Output '----------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {
     $status     = 'Failed'
@@ -387,7 +387,7 @@ foreach ($step in $activeSteps) {
     $remNote = if ($remediated)   { '  -> Remediation ran' }
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
 
     $results.Add([PSCustomObject]@{
         Order      = $step.Order
@@ -405,9 +405,9 @@ $warnings = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = ($results | Where-Object { $_.Remediated }).Count
 
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
-Write-Host "----------------------------------------------------------------`n" -ForegroundColor Cyan
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "----------------------------------------------------------------`r`n"
 
 # -- Registry Reporting -------------------------------------------------------
 $regPath = 'HKLM:\Software\AirWatch\Extension\DEXRecords\OneDriveErrors'
@@ -434,11 +434,21 @@ try {
         $tag       = if ($_.Remediated) { '[Remediated]' } else { "[$($_.Status)]" }
         Set-ItemProperty -Path $regPath -Name $valueName -Value "$tag $($_.Message)" -Type String
     }
-    Write-Host "  [Registry] Results written to $regPath" -ForegroundColor DarkCyan
+    Write-Output "  [Registry] Results written to $regPath"
 } catch {
-    Write-Host "  [Registry] Write failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Output "  [Registry] Write failed: $($_.Exception.Message)"
 }
 
 # -- Exit ---------------------------------------------------------------------
 if ($failed -gt 0) { exit 1 }
 exit 0
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-AutoRemediateOneDrive
+Exit 0

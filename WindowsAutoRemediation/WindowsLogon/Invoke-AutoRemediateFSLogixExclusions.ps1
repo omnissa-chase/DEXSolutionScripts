@@ -59,7 +59,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-AutoRemediateFSLogixExclusions {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param()
 
@@ -78,7 +78,7 @@ if ($env:WhatIf) {
 
 # -- Run header ----------------------------------------------------------------
 $RunEventId = ([Random]::new()).Next(1000, 9999)
-Write-Host "[$RunEventId] Executing Invoke-AutoRemediateFSLogixExclusions, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'  WhatIf=$WhatIfPreference"
+Write-Output "[$RunEventId] Executing Invoke-AutoRemediateFSLogixExclusions, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'  WhatIf=$WhatIfPreference"
 $HEAD = "`r`n[$RunEventId]"
 
 function Write-Log {
@@ -94,13 +94,13 @@ function Write-Log {
 # than one more Steps entry -- there is nothing else worth checking without it.
 $fslogixService = Get-Service -Name 'frxsvc' -ErrorAction SilentlyContinue
 if (-not $fslogixService) {
-    Write-Host "$HEAD FSLogix is not installed on this device (frxsvc service not found). Nothing to do." -ForegroundColor Yellow
+    Write-Output "$HEAD FSLogix is not installed on this device (frxsvc service not found). Nothing to do."
     Write-Log 'FSLogix not installed. Exiting without changes.'
     exit 0
 }
 
 if (-not (Get-Command -Name Add-MpPreference -ErrorAction SilentlyContinue)) {
-    Write-Host "$HEAD Windows Defender PowerShell cmdlets are not available on this device. A third-party antivirus needs these exclusions configured through its own console or policy -- out of scope for this script." -ForegroundColor Yellow
+    Write-Output "$HEAD Windows Defender PowerShell cmdlets are not available on this device. A third-party antivirus needs these exclusions configured through its own console or policy -- out of scope for this script."
     Write-Log 'Add-MpPreference unavailable (Defender module missing or AV replaced). Exiting without changes.'
     exit 0
 }
@@ -213,9 +213,9 @@ $activeSteps = $Steps |
 
 $results = New-Object 'System.Collections.Generic.List[PSCustomObject]'
 
-Write-Host "`n-- Invoke-AutoRemediateFSLogixExclusions --------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
-Write-Host '--------------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output "`r`n-- Invoke-AutoRemediateFSLogixExclusions --------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
+Write-Output '--------------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {
 
@@ -260,7 +260,7 @@ foreach ($step in $activeSteps) {
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
 
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
     Write-Log "$($step.Name): $status - $message$remNote"
 
     $results.Add([PSCustomObject]@{
@@ -280,9 +280,9 @@ $failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = ($results | Where-Object { $_.Remediated }).Count
 $remErrs  = ($results | Where-Object { $_.RemError }).Count
 
-Write-Host "`n--------------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations applied: $remCount"
-Write-Host "--------------------------------------------------------------------`n" -ForegroundColor Cyan
+Write-Output "`r`n--------------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations applied: $remCount"
+Write-Output "--------------------------------------------------------------------`r`n"
 Write-Log "Summary: Passed=$passed Warnings=$warnings Failed=$failed RemediationsApplied=$remCount RemediationErrors=$remErrs"
 
 # -- Registry Reporting --------------------------------------------------------
@@ -309,3 +309,13 @@ if (-not $WhatIfPreference) {
 }
 
 exit $(if ($remErrs -gt 0) { 1 } else { 0 })
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-AutoRemediateFSLogixExclusions
+Exit 0

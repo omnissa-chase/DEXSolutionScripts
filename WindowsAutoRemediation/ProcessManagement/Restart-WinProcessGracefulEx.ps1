@@ -7,6 +7,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
+function Restart-WinProcessGracefulEx {
 [CmdletBinding(SupportsShouldProcess=$true)]
 param(
     [string]$FileDescription    = $env:FileDescription,
@@ -23,15 +24,15 @@ $procs = @(Get-Process -ErrorAction SilentlyContinue |
     Where-Object { $_.Description -like "*$FileDescription*" })
 
 if ($procs.Count -eq 0) {
-    Write-Host "No running process found matching description '*$FileDescription*'. Nothing to do."
+    Write-Output "No running process found matching description '*$FileDescription*'. Nothing to do."
     exit 0
 }
 
-Write-Host "$($procs.Count) process(es) found matching '$FileDescription':"
+Write-Output "$($procs.Count) process(es) found matching '$FileDescription':"
 foreach ($p in $procs) {
-    Write-Host "  PID $($p.Id.ToString().PadLeft(5))  $($p.Name.PadRight(20))  $($p.Description)"
+    Write-Output "  PID $($p.Id.ToString().PadLeft(5))  $($p.Name.PadRight(20))  $($p.Description)"
 }
-Write-Host ''
+Write-Output ''
 
 $restartPath      = $null
 $gracefulCount    = 0
@@ -71,7 +72,7 @@ $process.Start() | Out-Null#>
 
 foreach ($proc in $procs) {
 
-    Write-Host "[$($proc.Name) / PID $($proc.Id)]"
+    Write-Output "[$($proc.Name) / PID $($proc.Id)]"
 
     # Capture exe path before stopping -- needed for optional restart
     if (-not $restartPath) {
@@ -89,7 +90,7 @@ foreach ($proc in $procs) {
         try {
             $gracefulSent = $proc.CloseMainWindow()
             #$gracefulSent = $proc.Close()
-            if ($gracefulSent) { Write-Host '  Graceful signal sent (CloseMainWindow / WM_CLOSE).' }
+            if ($gracefulSent) { Write-Output '  Graceful signal sent (CloseMainWindow / WM_CLOSE).' }
         } catch { }
     }
 
@@ -97,7 +98,7 @@ foreach ($proc in $procs) {
     # WM_CLOSE (GUI) via the kernel. This has broader reach from SYSTEM context
     # and works for windowless processes that CloseMainWindow cannot target.
     if (-not $gracefulSent) {
-        Write-Host '  No accessible main window -- sending graceful signal via taskkill (no /F)...'
+        Write-Output '  No accessible main window -- sending graceful signal via taskkill (no /F)...'
         $null = & taskkill /PID $proc.Id 2>&1
         $gracefulSent = $true
     }
@@ -118,7 +119,7 @@ foreach ($proc in $procs) {
             # Only meaningful for windowed processes; headless processes always report Responding=$true.
             if ($proc.MainWindowHandle -ne [IntPtr]::Zero -and -not $proc.Responding) {
                 $notResponding = $true
-                Write-Host '  Process stopped responding. Escalating to force-kill.'
+                Write-Output '  Process stopped responding. Escalating to force-kill.'
                 break
             }
         } catch {
@@ -133,29 +134,46 @@ foreach ($proc in $procs) {
         try { $proc.Refresh(); $exited = $proc.HasExited } catch { $exited = $true }
     }
 
-    Write-Host ''
+    Write-Output ''
 }
 
 # -- Summary -------------------------------------------------------------------
-Write-Host "Summary: $gracefulCount graceful, $forceKilledCount force-killed, $errorCount error(s)."
+Write-Output "Summary: $gracefulCount graceful, $forceKilledCount force-killed, $errorCount error(s)."
 
 # -- Optional restart ----------------------------------------------------------
 if ($Restart) {
     if ($restartPath) {
-        Write-Host "Restarting: $restartPath"
+        Write-Output "Restarting: $restartPath"
         Start-Sleep -Seconds 2
         try {
             Start-Process -FilePath $restartPath -ArgumentList "--restore-last-session" -ErrorAction Stop
-            Write-Host 'Process restarted.'
+            Write-Output 'Process restarted.'
         } catch {
-            Write-Host "[ERR] Restart failed: $($_.Exception.Message)"
+            Write-Output "[ERR] Restart failed: $($_.Exception.Message)"
             exit 1
         }
     } else {
-        Write-Host '[WARN] Restart requested but executable path could not be determined (may be inaccessible from SYSTEM context). Restart manually.'
+        Write-Output '[WARN] Restart requested but executable path could not be determined (may be inaccessible from SYSTEM context). Restart manually.'
     }
 }
 
 if ($errorCount -gt 0) { exit 1 }
 exit 0
+}
 
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+# Default to a LIVE run. Only an explicit, parseable "true" enables WhatIf, so a
+# missing or malformed value can never turn remediation into a silent no-op.
+$WhatIfPreference = $false
+if ($env:WhatIf) {
+    try   { $WhatIfPreference = [System.Convert]::ToBoolean($env:WhatIf) }
+    catch { $WhatIfPreference = $false }
+}
+
+Restart-WinProcessGracefulEx
+Exit 0

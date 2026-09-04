@@ -170,10 +170,10 @@ $activeSteps = $Steps |
 
 $results = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-Write-Host ''
-Write-Host "`n-- BITSBacklogResolutionWizard -----------------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
-Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output ''
+Write-Output "`r`n-- BITSBacklogResolutionWizard -----------------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
+Write-Output '----------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {
 
@@ -216,7 +216,7 @@ foreach ($step in $activeSteps) {
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
 
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
 
     $results.Add([PSCustomObject]@{
         Order      = $step.Order
@@ -234,10 +234,10 @@ $warnings = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = ($results | Where-Object { $_.Remediated }).Count
 
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host ''
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output ''
 
 if ($failed -gt 0) { exit 1 }
 exit 0

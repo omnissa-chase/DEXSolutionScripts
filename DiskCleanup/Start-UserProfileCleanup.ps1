@@ -62,7 +62,7 @@ Function Get-FolderSizeMB($Path) {
 }
 
 # Initialize log
-echo "`n[$(Get-Date)] Starting profile cleanup..."
+echo "`r`n[$(Get-Date)] Starting profile cleanup..."
 
 # Loop through profiles and evaluate conditions
 foreach ($Profile in $Profiles) {

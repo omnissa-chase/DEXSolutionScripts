@@ -59,9 +59,9 @@ $payloadFiles = @(
 $installerName = 'Install-TroubleshootWizard.ps1'
 $zipName       = 'TroubleshootWizard.zip'
 
-Write-Host "`n=== TroubleshootWizard - Create Zip Package ===" -ForegroundColor Cyan
-Write-Host "Source   : $PublishedDir"
-Write-Host "Output   : $OutputDir"
+Write-Output "`r`n=== TroubleshootWizard - Create Zip Package ==="
+Write-Output "Source   : $PublishedDir"
+Write-Output "Output   : $OutputDir"
 
 # -- Validate source -------------------------------------------------------
 $missing = @()
@@ -69,8 +69,8 @@ foreach ($f in ($payloadFiles + $installerName)) {
     if (-not (Test-Path (Join-Path $PublishedDir $f))) { $missing += $f }
 }
 if ($missing) {
-    Write-Host "`nMissing files:" -ForegroundColor Red
-    $missing | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+    Write-Output "`r`nMissing files:"
+    $missing | ForEach-Object { Write-Output "  $_" }
     exit 1
 }
 
@@ -93,15 +93,15 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 Remove-Item $stagingDir -Recurse -Force
 
 $zipSize = [math]::Round((Get-Item $zipPath).Length / 1KB, 1)
-Write-Host "`n  Created : $zipName  ($zipSize KB)" -ForegroundColor Green
+Write-Output "`r`n  Created : $zipName  ($zipSize KB)"
 
 # -- Copy installer --------------------------------------------------------
 Copy-Item (Join-Path $PublishedDir $installerName) (Join-Path $OutputDir $installerName)
-Write-Host "  Copied  : $installerName" -ForegroundColor Green
+Write-Output "  Copied  : $installerName"
 
 # -- Summary ---------------------------------------------------------------
-Write-Host "`n=== Package ready: $OutputDir ===" -ForegroundColor Cyan
-Write-Host @"
+Write-Output "`r`n=== Package ready: $OutputDir ==="
+Write-Output @"
 
 Workspace ONE Product Provisioning setup:
   Upload both files:

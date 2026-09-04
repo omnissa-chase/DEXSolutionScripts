@@ -176,21 +176,21 @@ $osCheck = $null
 try {
     $osResult = & ($Steps | Where-Object { $_.Order -eq 1 }).DetectionScript
     if ($osResult.Status -eq 'Failed') {
-        Write-Host "`n-- Enable-HardwareAcceleratedGPUScheduling ----------------------" -ForegroundColor Cyan
-        Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-        Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
-        Write-Host "`n  [Failed ] OS Version Compatibility: $($osResult.Message)" -ForegroundColor Red
-        Write-Host "`n  HAGS is not supported on this operating system. No changes made." -ForegroundColor Yellow
-        Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+        Write-Output "`r`n-- Enable-HardwareAcceleratedGPUScheduling ----------------------"
+        Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+        Write-Output '----------------------------------------------------------------'
+        Write-Output "`r`n  [Failed ] OS Version Compatibility: $($osResult.Message)"
+        Write-Output "`r`n  HAGS is not supported on this operating system. No changes made."
+        Write-Output '----------------------------------------------------------------'
         exit 1
     }
 } catch { }
 
 $results = New-Object 'System.Collections.Generic.List[PSCustomObject]'
 
-Write-Host "`n-- Enable-HardwareAcceleratedGPUScheduling ----------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
-Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output "`r`n-- Enable-HardwareAcceleratedGPUScheduling ----------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
+Write-Output '----------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {
 
@@ -233,7 +233,7 @@ foreach ($step in $activeSteps) {
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
 
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
 
     $results.Add([PSCustomObject]@{
         Order      = $step.Order
@@ -251,10 +251,10 @@ $warnings = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = ($results | Where-Object { $_.Remediated }).Count
 
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host ''
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output ''
 
 # Exit 0 even if warnings -- HAGS pending reboot (step 4 warning) is expected after enabling
 if ($failed -gt 0) { exit 1 }

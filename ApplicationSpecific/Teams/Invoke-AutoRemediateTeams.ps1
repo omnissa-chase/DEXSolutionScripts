@@ -57,7 +57,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-AutoRemediateTeams {
 param(
     [int] $CacheSizeWarningMB      = $(if ($env:CacheSizeWarningMB)      { [int]$env:CacheSizeWarningMB }                               else { 1024 }),
     [bool]$AllowDestructiveActions = $(if ($env:AllowDestructiveActions)  { [System.Convert]::ToBoolean($env:AllowDestructiveActions) } else { $false })
@@ -101,10 +101,10 @@ if ($_newPackage) { $_teamsIsNew = $true }
 
 # -- Pre-flight: app presence check -------------------------------------------
 if (-not $_teamsIsClassic -and -not $_teamsIsNew) {
-    Write-Host "`n-- Invoke-AutoRemediateTeams ------------------------------------" -ForegroundColor Cyan
-    Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    Write-Host '   [Skipped] Microsoft Teams does not appear to be installed on this device.'
-    Write-Host "----------------------------------------------------------------`n" -ForegroundColor Cyan
+    Write-Output "`r`n-- Invoke-AutoRemediateTeams ------------------------------------"
+    Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Output '   [Skipped] Microsoft Teams does not appear to be installed on this device.'
+    Write-Output "----------------------------------------------------------------`r`n"
     exit 0
 }
 
@@ -154,7 +154,7 @@ $Steps = @(
                     $cleared++
                 }
             }
-            Write-Host "  [Info] Cleared $cleared Teams cache folder(s). Teams will rebuild cache on next launch." -ForegroundColor DarkYellow
+            Write-Output "  [Info] Cleared $cleared Teams cache folder(s). Teams will rebuild cache on next launch."
         }
     },
 
@@ -197,7 +197,7 @@ $Steps = @(
                     $cleared++
                 }
             }
-            Write-Host "  [Info] Cleared $cleared Teams auth cache folder(s). Teams will prompt for sign-in on next launch." -ForegroundColor DarkYellow
+            Write-Output "  [Info] Cleared $cleared Teams auth cache folder(s). Teams will prompt for sign-in on next launch."
         }
     },
 
@@ -233,7 +233,7 @@ $Steps = @(
                 (Get-Process -Name 'TeamsUpdaterDaemon'  -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -lt $threshold })
             ) | Where-Object { $_ } | ForEach-Object {
                 Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
-                Write-Host "  [Info] Killed stuck updater: $($_.Name) (PID $($_.Id))." -ForegroundColor DarkYellow
+                Write-Output "  [Info] Killed stuck updater: $($_.Name) (PID $($_.Id))."
             }
         }
     },
@@ -325,7 +325,7 @@ $Steps = @(
             # Only runs when $AllowDestructiveActions = $true since re-registration
             # resets Teams' local user state and forces a fresh startup.
             if (-not $AllowDestructiveActions) {
-                Write-Host '  [Info] New Teams re-registration skipped -- set $AllowDestructiveActions=$true to apply.' -ForegroundColor DarkYellow
+                Write-Output '  [Info] New Teams re-registration skipped -- set $AllowDestructiveActions=$true to apply.'
                 return
             }
             $manifest = Join-Path $_newPackage.InstallLocation 'AppxManifest.xml'
@@ -333,7 +333,7 @@ $Steps = @(
                 throw "AppxManifest.xml not found at $($_newPackage.InstallLocation). Cannot re-register."
             }
             Add-AppxPackage -Register -Path $manifest -DisableDevelopmentMode -ErrorAction Stop
-            Write-Host "  [Info] New Teams package re-registered from $manifest." -ForegroundColor DarkYellow
+            Write-Output "  [Info] New Teams package re-registered from $manifest."
         }
     }
 )
@@ -347,9 +347,9 @@ $teamsVariant = (@(
     if ($_teamsIsNew)     { 'New (AppX)' }
 ) -join ' + ')
 
-Write-Host "`n-- Invoke-AutoRemediateTeams ------------------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)   Variant: $teamsVariant   User: $(if ($_loggedOnUser) { $_loggedOnUser } else { 'unknown' })"
-Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output "`r`n-- Invoke-AutoRemediateTeams ------------------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)   Variant: $teamsVariant   User: $(if ($_loggedOnUser) { $_loggedOnUser } else { 'unknown' })"
+Write-Output '----------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {
     $status     = 'Failed'
@@ -383,7 +383,7 @@ foreach ($step in $activeSteps) {
     $remNote = if ($remediated)   { '  -> Remediation ran' }
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
 
     $results.Add([PSCustomObject]@{
         Order      = $step.Order
@@ -401,9 +401,9 @@ $warnings = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = ($results | Where-Object { $_.Remediated }).Count
 
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
-Write-Host "----------------------------------------------------------------`n" -ForegroundColor Cyan
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "----------------------------------------------------------------`r`n"
 
 # -- Registry Reporting -------------------------------------------------------
 $regPath = 'HKLM:\Software\AirWatch\Extension\DEXRecords\TeamsErrors'
@@ -430,11 +430,21 @@ try {
         $tag       = if ($_.Remediated) { '[Remediated]' } else { "[$($_.Status)]" }
         Set-ItemProperty -Path $regPath -Name $valueName -Value "$tag $($_.Message)" -Type String
     }
-    Write-Host "  [Registry] Results written to $regPath" -ForegroundColor DarkCyan
+    Write-Output "  [Registry] Results written to $regPath"
 } catch {
-    Write-Host "  [Registry] Write failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Output "  [Registry] Write failed: $($_.Exception.Message)"
 }
 
 # -- Exit ---------------------------------------------------------------------
 if ($failed -gt 0) { exit 1 }
 exit 0
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-AutoRemediateTeams
+Exit 0

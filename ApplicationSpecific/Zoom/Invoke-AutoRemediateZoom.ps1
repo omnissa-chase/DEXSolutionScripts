@@ -64,7 +64,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-AutoRemediateZoom {
 param(
     [int] $CacheSizeWarningMB      = $(if ($env:CacheSizeWarningMB)      { [int]$env:CacheSizeWarningMB }                               else { 500 }),
     [bool]$AllowDestructiveActions = $(if ($env:AllowDestructiveActions)  { [System.Convert]::ToBoolean($env:AllowDestructiveActions) } else { $false })
@@ -106,10 +106,10 @@ if (-not $_zoomExe) {
 }
 
 if (-not $_zoomExe) {
-    Write-Host "`n-- Invoke-AutoRemediateZoom ------------------------------------" -ForegroundColor Cyan
-    Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    Write-Host '   [Skipped] Zoom does not appear to be installed on this device.'
-    Write-Host "----------------------------------------------------------------`n" -ForegroundColor Cyan
+    Write-Output "`r`n-- Invoke-AutoRemediateZoom ------------------------------------"
+    Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Output '   [Skipped] Zoom does not appear to be installed on this device.'
+    Write-Output "----------------------------------------------------------------`r`n"
     exit 0
 }
 
@@ -151,7 +151,7 @@ $Steps = @(
                 Get-ChildItem $_zoomLogsPath -File -ErrorAction SilentlyContinue |
                     Remove-Item -Force -ErrorAction SilentlyContinue
                 $cleared++
-                Write-Host "  [Info] Cleared Zoom log files from: $_zoomLogsPath" -ForegroundColor DarkYellow
+                Write-Output "  [Info] Cleared Zoom log files from: $_zoomLogsPath"
             }
             # Clear the Zoom data cache subdirectory only -- do not clear the full data dir
             # (it contains SQLite databases and user configuration that must be preserved)
@@ -160,10 +160,10 @@ $Steps = @(
                 Get-ChildItem $cacheSubDir -Recurse -File -ErrorAction SilentlyContinue |
                     Remove-Item -Force -ErrorAction SilentlyContinue
                 $cleared++
-                Write-Host "  [Info] Cleared Zoom data cache from: $cacheSubDir" -ForegroundColor DarkYellow
+                Write-Output "  [Info] Cleared Zoom data cache from: $cacheSubDir"
             }
             if ($cleared -eq 0) {
-                Write-Host '  [Info] No Zoom log or cache directories found to clear.' -ForegroundColor DarkYellow
+                Write-Output '  [Info] No Zoom log or cache directories found to clear.'
             }
         }
     },
@@ -290,16 +290,16 @@ $Steps = @(
                 throw 'Zoom is running -- auth files may be locked. Stop Zoom before clearing auth cache.'
             }
             if (-not (Test-Path $_zoomDataPath)) {
-                Write-Host '  [Info] Zoom data path not found -- no auth files to clear.' -ForegroundColor DarkYellow
+                Write-Output '  [Info] Zoom data path not found -- no auth files to clear.'
                 return
             }
             $authFiles = Get-ChildItem $_zoomDataPath -File -ErrorAction SilentlyContinue |
                          Where-Object { $_.Name -match 'auth|token|login|sso|credential' }
             if ($authFiles) {
                 $authFiles | Remove-Item -Force -ErrorAction SilentlyContinue
-                Write-Host "  [Info] Cleared $($authFiles.Count) Zoom auth/token file(s). Zoom will prompt for sign-in on next launch." -ForegroundColor DarkYellow
+                Write-Output "  [Info] Cleared $($authFiles.Count) Zoom auth/token file(s). Zoom will prompt for sign-in on next launch."
             } else {
-                Write-Host '  [Info] No auth/token files matched the expected pattern in Zoom data directory.' -ForegroundColor DarkYellow
+                Write-Output '  [Info] No auth/token files matched the expected pattern in Zoom data directory.'
             }
         }
     },
@@ -364,11 +364,11 @@ $Steps = @(
                     New-Item -Path $newKeyPath -Force -ErrorAction Stop | Out-Null
                 }
                 Set-ItemProperty -Path $newKeyPath -Name 'Value' -Value 'Allow' -Type String -ErrorAction Stop
-                Write-Host "  [Info] Created Zoom webcam consent key and set Value=Allow: $newKeyPath" -ForegroundColor DarkYellow
+                Write-Output "  [Info] Created Zoom webcam consent key and set Value=Allow: $newKeyPath"
             } else {
                 $zoomWebcamKeys | ForEach-Object {
                     Set-ItemProperty -Path $_.PSPath -Name 'Value' -Value 'Allow' -Type String -ErrorAction SilentlyContinue
-                    Write-Host "  [Info] Set webcam consent Value=Allow for: $($_.PSChildName)" -ForegroundColor DarkYellow
+                    Write-Output "  [Info] Set webcam consent Value=Allow for: $($_.PSChildName)"
                 }
             }
         }
@@ -383,9 +383,9 @@ $zoomVersion = try {
     (Get-Item $_zoomExe -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
 } catch { 'unknown' }
 
-Write-Host "`n-- Invoke-AutoRemediateZoom ------------------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)   Version: $zoomVersion   User: $(if ($_loggedOnUser) { $_loggedOnUser } else { 'unknown' })"
-Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output "`r`n-- Invoke-AutoRemediateZoom ------------------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)   Version: $zoomVersion   User: $(if ($_loggedOnUser) { $_loggedOnUser } else { 'unknown' })"
+Write-Output '----------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {
     $status     = 'Failed'
@@ -419,7 +419,7 @@ foreach ($step in $activeSteps) {
     $remNote = if ($remediated)   { '  -> Remediation ran' }
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
 
     $results.Add([PSCustomObject]@{
         Order      = $step.Order
@@ -437,9 +437,9 @@ $warnings = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = ($results | Where-Object { $_.Remediated }).Count
 
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
-Write-Host "----------------------------------------------------------------`n" -ForegroundColor Cyan
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "----------------------------------------------------------------`r`n"
 
 # -- Registry Reporting -------------------------------------------------------
 $regPath = 'HKLM:\Software\AirWatch\Extension\DEXRecords\ZoomErrors'
@@ -466,11 +466,21 @@ try {
         $tag       = if ($_.Remediated) { '[Remediated]' } else { "[$($_.Status)]" }
         Set-ItemProperty -Path $regPath -Name $valueName -Value "$tag $($_.Message)" -Type String
     }
-    Write-Host "  [Registry] Results written to $regPath" -ForegroundColor DarkCyan
+    Write-Output "  [Registry] Results written to $regPath"
 } catch {
-    Write-Host "  [Registry] Write failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Output "  [Registry] Write failed: $($_.Exception.Message)"
 }
 
 # -- Exit ---------------------------------------------------------------------
 if ($failed -gt 0) { exit 1 }
 exit 0
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-AutoRemediateZoom
+Exit 0

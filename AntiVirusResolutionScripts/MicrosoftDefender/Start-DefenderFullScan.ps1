@@ -8,7 +8,7 @@ $WhatIfPreference=$false
 
 $RunEventId = ([Random]::new()).Next(1000,9999)
 $MaxFullScanHours = 12
-Write-Host "[$RunEventId] Executing script, $SCRIPT_VERSION.  Started @ '$((Get-Date).ToString("yyyy-MM-dd hh:mm:ss"))'"
+Write-Output "[$RunEventId] Executing script, $SCRIPT_VERSION.  Started @ '$((Get-Date).ToString("yyyy-MM-dd hh:mm:ss"))'"
 $HEAD="`r`n[$RunEventId]"
 
 if ($PSVersionTable.PSVersion.Major -ge 7) {
@@ -17,7 +17,7 @@ if ($PSVersionTable.PSVersion.Major -ge 7) {
 
 $defendermonitor = Get-ScheduledTask -TaskPath "\WorkspaceOneEx\Defender\" -TaskName FullScanDetection -ErrorAction SilentlyContinue
 if(($defendermonitor | Measure).Count -eq 0){
-    Write-Host "$HEAD Defender monitoring task not detected.  Manually detecting for existing scan..."
+    Write-Output "$HEAD Defender monitoring task not detected.  Manually detecting for existing scan..."
 
     $healthDetectionPath="HKLM:\SOFTWARE\AIRWATCH\Extensions\HealthDetection"
     If(-not (Test-Path $healthDetectionPath)) { New-Item -Path $healthDetectionPath -Force | Out-Null } 
@@ -50,13 +50,13 @@ if(($defendermonitor | Measure).Count -eq 0){
     }
     
 }Else{
-    Write-Host "$HEAD Defender monitoring task detected.  Checking registry entry..."
+    Write-Output "$HEAD Defender monitoring task detected.  Checking registry entry..."
     $currentDetectedStatus=Get-ItemProperty -Path $healthDetectionPath -ErrorAction SilentlyContinue | Select-Object -Property FullScanInProgress -ExpandProperty FullScanInProgress -ErrorAction SilentlyContinue
     $fullScanRunning = ($currentDetectedStatus -eq 1)
 }
 
 If($fullScanRunning){
-    Write-Host "$HEAD Full scan is already running. Exiting..."
+    Write-Output "$HEAD Full scan is already running. Exiting..."
     Exit 0
 }
 
@@ -64,14 +64,14 @@ If($fullScanRunning){
 # Start Full Defender scan
 $Scan=$null
 Try{
-    Write-Host "$HEAD Starting Defender scan (Full Scan)."
+    Write-Output "$HEAD Starting Defender scan (Full Scan)."
     If(-not $WhatIfPreference){
         $Scan=Start-MpScan -ScanType FullScan -AsJob
     } Else { 
-        Write-Host "`r`nWhat if: Performing the operation 'Start-MpScan' on target 'HOST' with option 'ScanType=FullScan', as new job" 
+        Write-Output "`r`nWhat if: Performing the operation 'Start-MpScan' on target 'HOST' with option 'ScanType=FullScan', as new job" 
     }
 }Catch{
-    Write-Host "$HEAD An error has occured running Full Scan: $($_.Exception.Message)"
+    Write-Output "$HEAD An error has occured running Full Scan: $($_.Exception.Message)"
     Exit 1
 }
 Exit 0

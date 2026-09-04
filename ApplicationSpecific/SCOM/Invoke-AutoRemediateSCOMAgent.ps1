@@ -64,7 +64,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-AutoRemediateSCOMAgent {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param()
 
@@ -102,7 +102,7 @@ if ($env:WhatIf) {
 
 # -- Run header --
 $RunEventId = ([Random]::new()).Next(1000, 9999)
-Write-Host "[$RunEventId] Executing Invoke-AutoRemediateSCOMAgent, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'  WhatIf=$WhatIfPreference"
+Write-Output "[$RunEventId] Executing Invoke-AutoRemediateSCOMAgent, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'  WhatIf=$WhatIfPreference"
 $HEAD = "`r`n[$RunEventId]"
 
 function Write-Log {
@@ -759,10 +759,10 @@ $activeSteps = @($Steps | Where-Object { -not $_.ContainsKey('Enabled') -or $_.E
 
 $results = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-Write-Host ''
-Write-Host "`n-- SCOMAgentResolutionWizard -------------------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
-Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output ''
+Write-Output "`r`n-- SCOMAgentResolutionWizard -------------------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
+Write-Output '----------------------------------------------------------------'
 
 $stepIndex = 0
 foreach ($step in $activeSteps) {
@@ -810,7 +810,7 @@ foreach ($step in $activeSteps) {
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
 
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
     Write-Log "[$status] $($step.Name): $message$remNote"
 
     $results.Add([PSCustomObject]@{
@@ -829,10 +829,10 @@ $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host ''
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output ''
 
 # -- Health score --
 # Computed once here so every sensor reading agrees on a single value. Modelled on
@@ -931,3 +931,13 @@ catch {
 
 if ($failed -gt 0) { exit 1 }
 exit 0
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-AutoRemediateSCOMAgent
+Exit 0

@@ -64,7 +64,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-AutoRemediateChrome {
 param(
     [int] $CacheSizeWarningMB      = $(if ($env:CacheSizeWarningMB)      { [int]$env:CacheSizeWarningMB }                               else { 500 }),
     [int] $ExtensionCountWarning   = $(if ($env:ExtensionCountWarning)   { [int]$env:ExtensionCountWarning }                           else { 20 }),
@@ -100,10 +100,10 @@ if (-not $_chromeExe) {
 }
 
 if (-not $_chromeExe) {
-    Write-Host "`n-- Invoke-AutoRemediateChrome -----------------------------------" -ForegroundColor Cyan
-    Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-    Write-Host '   [Skipped] Google Chrome does not appear to be installed on this device.'
-    Write-Host "----------------------------------------------------------------`n" -ForegroundColor Cyan
+    Write-Output "`r`n-- Invoke-AutoRemediateChrome -----------------------------------"
+    Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    Write-Output '   [Skipped] Google Chrome does not appear to be installed on this device.'
+    Write-Output "----------------------------------------------------------------`r`n"
     exit 0
 }
 
@@ -149,7 +149,7 @@ $Steps = @(
                     $cleared++
                 }
             }
-            Write-Host "  [Info] Cleared $cleared Chrome cache folder(s). Chrome will rebuild cache on next launch." -ForegroundColor DarkYellow
+            Write-Output "  [Info] Cleared $cleared Chrome cache folder(s). Chrome will rebuild cache on next launch."
         }
     },
 
@@ -334,12 +334,12 @@ $Steps = @(
                     $manifestPath = (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).'(default)'
                     if ($manifestPath -and -not (Test-Path $manifestPath)) {
                         Remove-Item $_.PSPath -Force -ErrorAction SilentlyContinue
-                        Write-Host "  [Info] Removed orphaned NativeMessaging host: $($_.PSChildName) (manifest: $manifestPath)" -ForegroundColor DarkYellow
+                        Write-Output "  [Info] Removed orphaned NativeMessaging host: $($_.PSChildName) (manifest: $manifestPath)"
                         $removedCount++
                     }
                 }
             }
-            Write-Host "  [Info] Removed $removedCount orphaned NativeMessaging host registry key(s)." -ForegroundColor DarkYellow
+            Write-Output "  [Info] Removed $removedCount orphaned NativeMessaging host registry key(s)."
         }
     }
 )
@@ -352,9 +352,9 @@ $chromeVersion = try {
     (Get-Item $_chromeExe -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
 } catch { 'unknown' }
 
-Write-Host "`n-- Invoke-AutoRemediateChrome -----------------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)   Version: $chromeVersion   User: $(if ($_loggedOnUser) { $_loggedOnUser } else { 'unknown' })"
-Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output "`r`n-- Invoke-AutoRemediateChrome -----------------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)   Version: $chromeVersion   User: $(if ($_loggedOnUser) { $_loggedOnUser } else { 'unknown' })"
+Write-Output '----------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {
     $status     = 'Failed'
@@ -388,7 +388,7 @@ foreach ($step in $activeSteps) {
     $remNote = if ($remediated)   { '  -> Remediation ran' }
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
 
     $results.Add([PSCustomObject]@{
         Order      = $step.Order
@@ -406,9 +406,9 @@ $warnings = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = ($results | Where-Object { $_.Remediated }).Count
 
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
-Write-Host "----------------------------------------------------------------`n" -ForegroundColor Cyan
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "----------------------------------------------------------------`r`n"
 
 # -- Registry Reporting -------------------------------------------------------
 $regPath = 'HKLM:\Software\AirWatch\Extension\DEXRecords\ChromeErrors'
@@ -435,11 +435,21 @@ try {
         $tag       = if ($_.Remediated) { '[Remediated]' } else { "[$($_.Status)]" }
         Set-ItemProperty -Path $regPath -Name $valueName -Value "$tag $($_.Message)" -Type String
     }
-    Write-Host "  [Registry] Results written to $regPath" -ForegroundColor DarkCyan
+    Write-Output "  [Registry] Results written to $regPath"
 } catch {
-    Write-Host "  [Registry] Write failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Output "  [Registry] Write failed: $($_.Exception.Message)"
 }
 
 # -- Exit ---------------------------------------------------------------------
 if ($failed -gt 0) { exit 1 }
 exit 0
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-AutoRemediateChrome
+Exit 0

@@ -50,7 +50,7 @@ param(
 if (-not $CsvPath) { $CsvPath = Join-Path $Path 'Summary.csv' }
 
 if (-not (Test-Path -LiteralPath $Path)) {
-    Write-Host "No FixReport directory at $Path -- nothing to analyse." -ForegroundColor Yellow
+    Write-Output "No FixReport directory at $Path -- nothing to analyse."
     exit 0
 }
 
@@ -63,7 +63,7 @@ if ($ScriptUnderTest) {
 }
 
 if (-not $files -or @($files).Count -eq 0) {
-    Write-Host "No result files found under $Path." -ForegroundColor Yellow
+    Write-Output "No result files found under $Path."
     exit 0
 }
 
@@ -71,7 +71,7 @@ $rows = foreach ($f in $files) {
     try {
         $r = Get-Content -LiteralPath $f.FullName -Raw | ConvertFrom-Json
     } catch {
-        Write-Host "  [Skip] Unreadable result: $($f.FullName)" -ForegroundColor Yellow
+        Write-Output "  [Skip] Unreadable result: $($f.FullName)"
         continue
     }
 
@@ -104,15 +104,15 @@ $rows = foreach ($f in $files) {
 
 $rows = @($rows | Sort-Object Script, CompletedAt)
 
-Write-Host ''
-Write-Host '-- Fix Report Analysis '.PadRight(64, '-') -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Runs: $($rows.Count)   Source: $Path"
-Write-Host ('-' * 64) -ForegroundColor Cyan
+Write-Output ''
+Write-Output '-- Fix Report Analysis '.PadRight(64, '-')
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Runs: $($rows.Count)   Source: $Path"
+Write-Output ('-' * 64)
 
 foreach ($group in ($rows | Group-Object Script)) {
 
-    Write-Host ''
-    Write-Host "  $($group.Name)" -ForegroundColor White
+    Write-Output ''
+    Write-Output "  $($group.Name)"
 
     foreach ($row in $group.Group) {
         $color = switch ($row.Overall) {
@@ -134,7 +134,7 @@ foreach ($group in ($rows | Group-Object Script)) {
             $row.Validated, ($row.Validated + $row.ValidationFail),
             $row.Duration
 
-        Write-Host $line -ForegroundColor $color
+        Write-Output $line
     }
 }
 
@@ -144,39 +144,39 @@ $dirty     = @($rows | Where-Object { $_.Overall -eq 'Dirty' })
 $broken    = @($rows | Where-Object { $_.Overall -eq 'BreakFailed' })
 
 if ($falsePass.Count -gt 0) {
-    Write-Host ''
-    Write-Host '  FALSE PASS -- remediation reported success but the component was still broken:' -ForegroundColor Red
-    foreach ($r in $falsePass) { Write-Host "    $($r.Script)  $($r.TestId)  seed $($r.Seed)  on $($r.Machine)" -ForegroundColor Red }
+    Write-Output ''
+    Write-Output '  FALSE PASS -- remediation reported success but the component was still broken:'
+    foreach ($r in $falsePass) { Write-Output "    $($r.Script)  $($r.TestId)  seed $($r.Seed)  on $($r.Machine)" }
 }
 
 if ($broken.Count -gt 0) {
-    Write-Host ''
-    Write-Host '  BREAK FAILED -- the break did not land, so the run proves nothing:' -ForegroundColor Yellow
-    foreach ($r in $broken) { Write-Host "    $($r.Script)  $($r.TestId)  seed $($r.Seed)" -ForegroundColor Yellow }
+    Write-Output ''
+    Write-Output '  BREAK FAILED -- the break did not land, so the run proves nothing:'
+    foreach ($r in $broken) { Write-Output "    $($r.Script)  $($r.TestId)  seed $($r.Seed)" }
 }
 
 if ($dirty.Count -gt 0) {
-    Write-Host ''
-    Write-Host '  DIRTY -- restore failed; these machines need manual cleanup:' -ForegroundColor Red
-    foreach ($r in $dirty) { Write-Host "    $($r.Machine)  ($($r.Script), $($r.TestId))" -ForegroundColor Red }
+    Write-Output ''
+    Write-Output '  DIRTY -- restore failed; these machines need manual cleanup:'
+    foreach ($r in $dirty) { Write-Output "    $($r.Machine)  ($($r.Script), $($r.TestId))" }
 }
 
 # -- Summary -------------------------------------------------------------------
 $passed = @($rows | Where-Object { $_.Overall -eq 'Passed' }).Count
 $failed = @($rows | Where-Object { $_.Overall -in @('Failed', 'FalsePass', 'BreakFailed', 'Dirty', 'Abandoned') }).Count
 
-Write-Host ''
-Write-Host ('-' * 64) -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Failed: $failed  |  FalsePass: $($falsePass.Count)  |  Dirty: $($dirty.Count)"
-Write-Host ('-' * 64) -ForegroundColor Cyan
+Write-Output ''
+Write-Output ('-' * 64)
+Write-Output "  Passed: $passed  |  Failed: $failed  |  FalsePass: $($falsePass.Count)  |  Dirty: $($dirty.Count)"
+Write-Output ('-' * 64)
 
 try {
     $rows | Export-Csv -LiteralPath $CsvPath -NoTypeInformation -Encoding UTF8 -Force -ErrorAction Stop
-    Write-Host "  [CSV] $CsvPath" -ForegroundColor DarkCyan
+    Write-Output "  [CSV] $CsvPath"
 } catch {
-    Write-Host "  [CSV] Write failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Output "  [CSV] Write failed: $($_.Exception.Message)"
 }
-Write-Host ''
+Write-Output ''
 
 if ($failed -gt 0) { exit 1 }
 exit 0

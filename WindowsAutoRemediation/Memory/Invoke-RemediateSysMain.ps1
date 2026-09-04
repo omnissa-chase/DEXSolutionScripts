@@ -75,12 +75,12 @@ $color   = switch ($status) { 'Passed' { 'Green' } 'Warning' { 'Yellow' } 'Faile
 $tag     = if ($remediated) { '[Remediated]' } else { "[$status]" }
 $remNote = if ($remError)   { "  -> Remediation ERROR: $remError" } else { '' }
 
-Write-Host "`n-- Invoke-RemediateSysMain -------------------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-Write-Host "----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "`n  $tag $message" -ForegroundColor $color
-if ($remNote) { Write-Host $remNote -ForegroundColor Yellow }
-Write-Host ''
+Write-Output "`r`n-- Invoke-RemediateSysMain -------------------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+Write-Output "----------------------------------------------------------------"
+Write-Output "`r`n  $tag $message"
+if ($remNote) { Write-Output $remNote }
+Write-Output ''
 
 # -- Registry Reporting -------------------------------------------------------
 $regPath = 'HKLM:\Software\AirWatch\Extension\DEXRecords\MemoryErrors\SysMain'
@@ -97,9 +97,9 @@ try {
         Set-ItemProperty -Path $regPath -Name 'RemediationError' -Value $remError -Type String
     }
 
-    Write-Host "  [Registry] Results written to $regPath" -ForegroundColor DarkCyan
+    Write-Output "  [Registry] Results written to $regPath"
 } catch {
-    Write-Host "  [Registry] Write failed: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Output "  [Registry] Write failed: $($_.Exception.Message)"
 }
 
 # -- Exit ---------------------------------------------------------------------

@@ -27,7 +27,7 @@ $SCRIPT_VERSION = "1.0.0.0"
 
 $RunEventId = ([Random]::new()).Next(1000,9999)
 $MaxFullScanHours = 12
-Write-Host "[$RunEventId] Executing script, $SCRIPT_VERSION.  Started @ '$((Get-Date).ToString("yyyy-MM-dd hh:mm:ss"))'"
+Write-Output "[$RunEventId] Executing script, $SCRIPT_VERSION.  Started @ '$((Get-Date).ToString("yyyy-MM-dd hh:mm:ss"))'"
 $HEAD="`r`n[$RunEventId]"
 if ($PSVersionTable.PSVersion.Major -ge 7) {
     Import-Module -Name ConfigDefender -SkipEditionCheck -ErrorAction Stop
@@ -36,10 +36,10 @@ if ($PSVersionTable.PSVersion.Major -ge 7) {
 $ComputerStatus=(Get-MpComputerStatus)
 
 If(-not ($ComputerStatus.DefenderSignaturesOutOfDate)){
-    Write-Host "$HEAD Defender signature is already up to date."
+    Write-Output "$HEAD Defender signature is already up to date."
     Exit 0
 }
 # Line for updating source.
-Write-Host "$HEAD Updating signature as job"
+Write-Output "$HEAD Updating signature as job"
 Update-MpSignature -AsJob
 Exit 0

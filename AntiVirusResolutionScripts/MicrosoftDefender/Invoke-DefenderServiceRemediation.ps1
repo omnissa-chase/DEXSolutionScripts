@@ -30,7 +30,7 @@ $SCRIPT_VERSION="1.6.1.0"
 $WhatIfPreference=$false
 
 $RunEventId = ([Random]::new()).Next(1000,9999)
-Write-Host "[$RunEventId] Executing script, $SCRIPT_VERSION.  Started @ '$((Get-Date).ToString("yyyy-MM-dd hh:mm:ss"))'"
+Write-Output "[$RunEventId] Executing script, $SCRIPT_VERSION.  Started @ '$((Get-Date).ToString("yyyy-MM-dd hh:mm:ss"))'"
 $HEAD="`r`n[$RunEventId]"
 
 If($PSVersionTable.PSVersion.Major -ge 7){

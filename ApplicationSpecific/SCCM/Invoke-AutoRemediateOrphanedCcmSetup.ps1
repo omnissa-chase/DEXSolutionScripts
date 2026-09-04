@@ -50,7 +50,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-AutoRemediateOrphanedCcmSetup {
 param([switch]$RunAsPayload)
 
 # -- Dispatch constants (shared by launcher and payload) ----------------------
@@ -87,7 +87,7 @@ if (-not $RunAsPayload) {
         }
 
         $action    = New-ScheduledTaskAction -Execute 'powershell.exe' `
-                         -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$PayloadPs1`" -RunAsPayload"
+                         -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"`$env:RunAsPayload='true'; & '$PayloadPs1'`""
         $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
         $settings  = New-ScheduledTaskSettingsSet `
                          -ExecutionTimeLimit '00:10:00' `
@@ -98,10 +98,10 @@ if (-not $RunAsPayload) {
             -Settings $settings -Force -ErrorAction Stop | Out-Null
         Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 
-        Write-Host "Task '$TaskName' dispatched. Results will appear at: $RegPath"
+        Write-Output "Task '$TaskName' dispatched. Results will appear at: $RegPath"
         exit 0
     } catch {
-        Write-Host "[ERROR] Launcher failed: $($_.Exception.Message)"
+        Write-Output "[ERROR] Launcher failed: $($_.Exception.Message)"
         exit 1
     }
 }
@@ -288,10 +288,10 @@ $activeSteps = $Steps |
 
 $results = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-Write-Host ''
-Write-Host "`n-- OrphanedCcmSetupResolutionWizard ------------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
-Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output ''
+Write-Output "`r`n-- OrphanedCcmSetupResolutionWizard ------------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
+Write-Output '----------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {
 
@@ -334,7 +334,7 @@ foreach ($step in $activeSteps) {
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
 
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
 
     $results.Add([PSCustomObject]@{
         Order      = $step.Order
@@ -352,10 +352,10 @@ $warnings = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = ($results | Where-Object { $_.Remediated }).Count
 
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host ''
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output ''
 
 # -- Persist results for DEX sensors ------------------------------------------
 try {
@@ -376,3 +376,22 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
 
 if ($failed -gt 0) { exit 1 }
 exit 0
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+# Async dispatch flag. The launcher re-runs the staged copy through a scheduled
+# task, which now sets this environment variable instead of passing -RunAsPayload,
+# because the switch no longer exists at script scope.
+$RunAsPayload = $false
+if ($env:RunAsPayload) {
+    try   { $RunAsPayload = [System.Convert]::ToBoolean($env:RunAsPayload) }
+    catch { $RunAsPayload = $false }
+}
+
+Invoke-AutoRemediateOrphanedCcmSetup -RunAsPayload:$RunAsPayload
+Exit 0

@@ -70,7 +70,7 @@ function Write-Log {
     if ($QuietMode -and $Level -eq 'INFO') { return }
     $ts     = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $colors = @{ ERROR = 'Red'; WARNING = 'Yellow'; DEBUG = 'Gray'; INFO = 'White' }
-    Write-Host "[$ts] [$Level] $Message" -ForegroundColor $colors[$Level]
+    Write-Output "[$ts] [$Level] $Message"
 }
 
 # 
@@ -268,7 +268,7 @@ foreach ($stepDef in $activeSteps) {
 
     # --- User feedback progress line ---
     if (-not $QuietMode -and $stepDef.UserFeedback) {
-        Write-Host "  >>  $($stepDef.UserFeedback)" -ForegroundColor Cyan
+        Write-Output "  >>  $($stepDef.UserFeedback)"
     }
 
     Write-Log "Executing: $($stepDef.Name)"
@@ -284,7 +284,7 @@ foreach ($stepDef in $activeSteps) {
         } catch {
             $errMsg = [string]($_.Exception.Message)
             $stepResult = @{ Status = 'Failed'; Message = "Exception: $errMsg" }
-            Write-Host "  [ERROR] Exception in '$($stepDef.Name)': $errMsg" -ForegroundColor Red
+            Write-Output "  [ERROR] Exception in '$($stepDef.Name)': $errMsg"
         }
     }
 
@@ -939,5 +939,5 @@ try {
     $window.ShowDialog() | Out-Null
 
 } catch {
-    Write-Host "UI Error: $_" -ForegroundColor Red
+    Write-Output "UI Error: $_"
 }

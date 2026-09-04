@@ -563,7 +563,7 @@ if ($Environment -eq 'Physical') {
 
 Unregister-DexTestResume -State $state
 
-Write-Host ''
+Write-Output ''
 Write-DexStep -Status $(switch ($state.Overall) { 'Passed' { 'Passed' } 'BreakOnly' { 'Info' } default { 'Failed' } }) `
               -Name 'Overall' -Message $state.Overall
 

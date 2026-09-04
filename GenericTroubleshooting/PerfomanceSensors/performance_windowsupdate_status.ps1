@@ -54,8 +54,8 @@ try {
         $status = 'Idle'
     }
 
-    Write-Host $status
+    Write-Output $status
 }
 catch {
-    Write-Host 'Idle'
+    Write-Output 'Idle'
 }

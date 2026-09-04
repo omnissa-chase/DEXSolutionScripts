@@ -48,10 +48,10 @@ $services = @("wuauserv","bits","cryptsvc","msiserver")
 # Generate a random 4-digit ID to correlate all log lines from this run
 $RunEventId = ([Random]::new()).Next(1000, 9999)
 
-Write-Host "`n[$RunEventId] Invoke-WindowsUpdateServices v$SCRIPT_VERSION  Started @ $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
+Write-Output "`r`n[$RunEventId] Invoke-WindowsUpdateServices v$SCRIPT_VERSION  Started @ $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))"
 
 # $HEAD prefix is prepended to every log line for easy grep/correlation
-$HEAD = "`n[$RunEventId]"
+$HEAD = "`r`n[$RunEventId]"
 
 $ServiceTotal   = 0
 $ServiceStarted = 0
@@ -96,5 +96,5 @@ if ($ServiceStarted -lt $ServiceTotal) {
     Exit 1
 }
 
-Write-Host "$HEAD SUCCESS. $ServiceStarted of $ServiceTotal service(s) running."
+Write-Output "$HEAD SUCCESS. $ServiceStarted of $ServiceTotal service(s) running."
 Exit 0

@@ -41,7 +41,7 @@ $SignoffDevice = {
     param([switch]$CurrentUser)
     
     if(-not ($CurrentUser.IsPresent)){
-        Write-Host "Signing off all active user sessions.`r`n"
+        Write-Output "Signing off all active user sessions.`r`n"
         # query session lists all sessions; filter for Active/Disc states and
         # extract the numeric session ID from column 3, then logoff each one.
         $allSessions = query session 2>&1 |
@@ -64,7 +64,7 @@ $SignoffDevice = {
         }
 
         if (-not $allSessions) {
-            Write-Host "No active user sessions found."
+            Write-Output "No active user sessions found."
         } else {
             # Identify the console user's session ID so it can be logged off last
             $consoleUser = (Get-CimInstance Win32_ComputerSystem).UserName.Split('\')[-1]
@@ -84,10 +84,10 @@ $SignoffDevice = {
             foreach ($id in $sorted) {
                 if (-not $WhatIfPreference) {
                     $label = if ($id -eq $consoleSessionId) { " (console user — last)" } else { "" }
-                    Write-Host "Logging off session ID: $id$label"
+                    Write-Output "Logging off session ID: $id$label"
                     logoff $id
                 } else {
-                    Write-Host "WhatIf: logoff $id"
+                    Write-Output "WhatIf: logoff $id"
                 }
             }
         }
@@ -97,7 +97,7 @@ $SignoffDevice = {
         # Retrieve the username of the user currently at the physical console
         # (Win32_ComputerSystem.UserName is in DOMAIN\Username format)
         $console = (Get-CimInstance Win32_ComputerSystem).UserName.Split('\')[-1]
-        Write-Host "Current User: $console`r`n"
+        Write-Output "Current User: $console`r`n"
         
         # Parse the active session ID for the console user from quser output
         $session = (query session | Select-String "$console").ToString().Trim() 
@@ -116,7 +116,7 @@ $SignoffDevice = {
             }
         }
             
-        Write-Host "Session info: $($session | Out-String)`r`n"
+        Write-Output "Session info: $($session | Out-String)`r`n"
 
         if(-not $Session.ID){
             Throw ([Exception]::new("Session not found for current user."))
@@ -127,11 +127,11 @@ $SignoffDevice = {
     # Single-session logoff for the -CurrentUser path
     if (-not $WhatIfPreference) {
         # Terminate the session — equivalent to "Sign out" in the Start menu
-        Write-Host "Executing command, 'logoff $SessionPref'"
+        Write-Output "Executing command, 'logoff $SessionPref'"
         logoff $SessionPref
     }
     Else {
-        Write-Host "WhatIf: executing command, 'logoff $SessionPref'"
+        Write-Output "WhatIf: executing command, 'logoff $SessionPref'"
     }
     
 }
@@ -140,12 +140,12 @@ $SignoffDevice = {
 Try {
     # Invoke the script block and capture any output as a string for logging
     $rslt = Invoke-Command $SignoffDevice | Out-String
-    Write-Host $rslt
+    Write-Output $rslt
     Exit 0  # Success — Workspace ONE marks the command as completed
 }
 Catch {
     # Surface the exception message for Workspace ONE script output logging
     $rslt = "An error has occured $($_.Exception.Message)"
-    Write-Host $rslt
+    Write-Output $rslt
 }
 Exit 1  # Failure — Workspace ONE marks the command as failed

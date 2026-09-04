@@ -54,7 +54,7 @@ function Invoke-TrellixPolicyRefresh {
     )
 
     foreach ($step in $steps) {
-        Write-Host "Running CmdAgent.exe $step"
+        Write-Output "Running CmdAgent.exe $step"
         Start-Process -FilePath $cmdAgent -ArgumentList $step -Wait -WindowStyle Hidden
         Start-Sleep -Seconds 10
     }

@@ -66,7 +66,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-AutoRemediateGenericVPN {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param()
 
@@ -104,7 +104,7 @@ if ($env:WhatIf) {
 
 # -- Run header ----------------------------------------------------------------
 $RunEventId = ([Random]::new()).Next(1000, 9999)
-Write-Host "[$RunEventId] Executing Invoke-AutoRemediateGenericVPN, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'  WhatIf=$WhatIfPreference"
+Write-Output "[$RunEventId] Executing Invoke-AutoRemediateGenericVPN, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'  WhatIf=$WhatIfPreference"
 $HEAD = "`r`n[$RunEventId]"
 
 function Write-Log {
@@ -502,3 +502,13 @@ if ($remErrs -gt 0) {
     exit 1
 }
 exit 0
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-AutoRemediateGenericVPN
+Exit 0

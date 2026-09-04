@@ -43,7 +43,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-AutoRemediateSCOMHealthServiceCache {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param([switch]$RunAsPayload)
 
@@ -68,7 +68,7 @@ function Write-Log {
 }
 
 # -- Launcher (UEM dispatcher) --
-# UEM runs this WITHOUT -RunAsPayload; the launcher stages the script and`n# dispatches a task to re-run it. README section 3.
+# UEM runs this WITHOUT -RunAsPayload; the launcher stages the script and`r`n# dispatches a task to re-run it. README section 3.
 if (-not $RunAsPayload) {
     try {
         # Layer 1 gate -- cheap, mechanism-specific.
@@ -95,7 +95,7 @@ if (-not $RunAsPayload) {
         }
 
         $action    = New-ScheduledTaskAction -Execute 'powershell.exe' `
-                         -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$PayloadPs1`" -RunAsPayload"
+                         -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"`$env:RunAsPayload='true'; & '$PayloadPs1'`""
         $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
         $settings  = New-ScheduledTaskSettingsSet `
                          -ExecutionTimeLimit '00:20:00' `
@@ -148,7 +148,7 @@ if ($env:ConfirmHighImpact) {
     catch { $ConfirmHighImpact = $false }
 }
 
-Write-Host "[$RunEventId] Executing Invoke-AutoRemediateSCOMHealthServiceCache payload, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'  WhatIf=$WhatIfPreference  ConfirmHighImpact=$ConfirmHighImpact"
+Write-Output "[$RunEventId] Executing Invoke-AutoRemediateSCOMHealthServiceCache payload, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'  WhatIf=$WhatIfPreference  ConfirmHighImpact=$ConfirmHighImpact"
 Write-Log "Payload started. WhatIf=$WhatIfPreference ConfirmHighImpact=$ConfirmHighImpact"
 
 # -- Layer 2 concurrency lock --
@@ -548,9 +548,9 @@ try {
 
     $results = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-    Write-Host "`n-- SCOMHealthServiceCacheResolutionWizard ------------------------" -ForegroundColor Cyan
-    Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
-    Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+    Write-Output "`r`n-- SCOMHealthServiceCacheResolutionWizard ------------------------"
+    Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
+    Write-Output '----------------------------------------------------------------'
 
     $stepIndex = 0
     foreach ($step in $activeSteps) {
@@ -594,7 +594,7 @@ try {
                    elseif ($remError) { "  -> Remediation ERROR: $remError" }
                    else               { '' }
 
-        Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+        Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
         Write-Log "[$status] $($step.Name): $message$remNote"
 
         $results.Add([PSCustomObject]@{
@@ -613,9 +613,9 @@ try {
     $failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
     $remCount = @($results | Where-Object { $_.Remediated }).Count
 
-    Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-    Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
-    Write-Host "----------------------------------------------------------------`n" -ForegroundColor Cyan
+    Write-Output "`r`n----------------------------------------------------------------"
+    Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+    Write-Output "----------------------------------------------------------------`r`n"
 
     # -- Persist results for DEX sensors --
     try {
@@ -668,3 +668,22 @@ finally {
     }
     if ($mutex) { $mutex.Dispose() }
 }
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+# Async dispatch flag. The launcher re-runs the staged copy through a scheduled
+# task, which now sets this environment variable instead of passing -RunAsPayload,
+# because the switch no longer exists at script scope.
+$RunAsPayload = $false
+if ($env:RunAsPayload) {
+    try   { $RunAsPayload = [System.Convert]::ToBoolean($env:RunAsPayload) }
+    catch { $RunAsPayload = $false }
+}
+
+Invoke-AutoRemediateSCOMHealthServiceCache -RunAsPayload:$RunAsPayload
+Exit 0

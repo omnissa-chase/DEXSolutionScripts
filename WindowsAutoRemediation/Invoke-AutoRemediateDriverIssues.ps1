@@ -43,6 +43,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
+function Invoke-AutoRemediateDriverIssues {
 param(
     # Regex pattern matched against PnP device names. Required.
     [string]$DriverFilter = $env:DriverFilter,
@@ -131,57 +132,67 @@ function Invoke-DriverEscalation {
 }
 
 # -- Device discovery ----------------------------------------------------------
-Write-Host "`n-- Invoke-AutoRemediateDriverIssues -----------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Filter: $DriverFilter"
-Write-Host "   Actions: $($AllowedActions -join ', ')"
-Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output "`r`n-- Invoke-AutoRemediateDriverIssues -----------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Filter: $DriverFilter"
+Write-Output "   Actions: $($AllowedActions -join ', ')"
+Write-Output '----------------------------------------------------------------'
 
 $matched = Get-WmiObject -Class Win32_PnPEntity -ErrorAction SilentlyContinue |
            Where-Object { $_.Name -match $DriverFilter }
 
 if (-not $matched) {
-    Write-Host "`n  [WARNING] No PnP devices found matching '$DriverFilter'" -ForegroundColor Yellow
-    Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
-    Write-Host ''
+    Write-Output "`r`n  [WARNING] No PnP devices found matching '$DriverFilter'"
+    Write-Output '----------------------------------------------------------------'
+    Write-Output ''
     exit 0
 }
 
-Write-Host "`n  Matched $($matched.Count) device(s):"
+Write-Output "`r`n  Matched $($matched.Count) device(s):"
 $matched | ForEach-Object {
     $errCode = $_.ConfigManagerErrorCode
     $label   = if ($errCode -eq 0) { 'OK  ' } else { "ERR $errCode" }
     $color   = if ($errCode -eq 0) { 'Green' } else { 'Red' }
-    Write-Host "    [$label] $($_.Name)" -ForegroundColor $color
+    Write-Output "    [$label] $($_.Name)"
 }
 
 $errored = $matched | Where-Object { $_.ConfigManagerErrorCode -ne 0 }
 
 if (-not $errored) {
-    Write-Host "`n  All matched device(s) are healthy -- no remediation needed." -ForegroundColor Green
-    Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-    Write-Host ''
+    Write-Output "`r`n  All matched device(s) are healthy -- no remediation needed."
+    Write-Output "`r`n----------------------------------------------------------------"
+    Write-Output ''
     exit 0
 }
 
 # -- Remediation ---------------------------------------------------------------
-Write-Host "`n  Running escalation on $($errored.Count) errored device(s)..." -ForegroundColor Yellow
+Write-Output "`r`n  Running escalation on $($errored.Count) errored device(s)..."
 $result = Invoke-DriverEscalation -InstanceIds ($errored.DeviceID) -AllowedActions $AllowedActions
 
 # -- Summary -------------------------------------------------------------------
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
+Write-Output "`r`n----------------------------------------------------------------"
 
 if ($result.Fixed) {
-    Write-Host "  Fixed   ($($result.Fixed.Count)): $($result.Fixed -join ', ')" -ForegroundColor Green
+    Write-Output "  Fixed   ($($result.Fixed.Count)): $($result.Fixed -join ', ')"
 }
 if ($result.Unfixed) {
-    Write-Host "  Unfixed ($($result.Unfixed.Count)): $($result.Unfixed -join ', ')" -ForegroundColor Red
-    Write-Host "`n  [NOTICE] The following device(s) could not be resolved without a reboot:" -ForegroundColor Yellow
-    $result.Unfixed | ForEach-Object { Write-Host "           $_" -ForegroundColor Yellow }
-    Write-Host '----------------------------------------------------------------' -ForegroundColor Cyan
-    Write-Host ''
+    Write-Output "  Unfixed ($($result.Unfixed.Count)): $($result.Unfixed -join ', ')"
+    Write-Output "`r`n  [NOTICE] The following device(s) could not be resolved without a reboot:"
+    $result.Unfixed | ForEach-Object { Write-Output "           $_" }
+    Write-Output '----------------------------------------------------------------'
+    Write-Output ''
     exit 2
 }
 
-Write-Host "`n----------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host ''
+Write-Output "`r`n----------------------------------------------------------------"
+Write-Output ''
 exit 0
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-AutoRemediateDriverIssues
+Exit 0

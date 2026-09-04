@@ -99,7 +99,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-AutoRemediateProfileBloat {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     # ValidateRange applies to explicit arguments only, so a bad environment variable
@@ -144,7 +144,7 @@ if ($env:WhatIf) {
 
 # -- Run header ----------------------------------------------------------------
 $RunEventId = ([Random]::new()).Next(1000, 9999)
-Write-Host "[$RunEventId] Executing Invoke-AutoRemediateProfileBloat, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'  WhatIf=$WhatIfPreference"
+Write-Output "[$RunEventId] Executing Invoke-AutoRemediateProfileBloat, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'  WhatIf=$WhatIfPreference"
 $HEAD = "`r`n[$RunEventId]"
 
 function Write-Log {
@@ -164,12 +164,12 @@ $UserProfiles = @(
 )
 
 if ($UserProfiles.Count -eq 0) {
-    Write-Host "$HEAD No non-special user profiles found on this device. Nothing to do." -ForegroundColor Yellow
+    Write-Output "$HEAD No non-special user profiles found on this device. Nothing to do."
     Write-Log 'No user profiles in scope. Exiting without changes.'
     exit 0
 }
 
-Write-Host "$HEAD Profiles in scope: $($UserProfiles.Count) ($(($UserProfiles | ForEach-Object { Split-Path $_.LocalPath -Leaf }) -join ', '))"
+Write-Output "$HEAD Profiles in scope: $($UserProfiles.Count) ($(($UserProfiles | ForEach-Object { Split-Path $_.LocalPath -Leaf }) -join ', '))"
 Write-Log "Profiles in scope: $(($UserProfiles.LocalPath) -join ', ')"
 
 $script:TotalBytesReclaimed = 0
@@ -471,9 +471,9 @@ $activeSteps = $Steps |
 
 $results = New-Object 'System.Collections.Generic.List[PSCustomObject]'
 
-Write-Host "`n-- Invoke-AutoRemediateProfileBloat --------------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
-Write-Host '--------------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output "`r`n-- Invoke-AutoRemediateProfileBloat --------------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
+Write-Output '--------------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {
 
@@ -518,7 +518,7 @@ foreach ($step in $activeSteps) {
                elseif ($remError) { "  -> Cleanup ERROR: $remError" }
                else               { '' }
 
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
     Write-Log "$($step.Name): $status - $message$remNote"
 
     $results.Add([PSCustomObject]@{
@@ -539,10 +539,10 @@ $remCount    = ($results | Where-Object { $_.Remediated }).Count
 $remErrs     = ($results | Where-Object { $_.RemError }).Count
 $reclaimedMB = [math]::Round($script:TotalBytesReclaimed / 1MB, 1)
 
-Write-Host "`n--------------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Cleanups applied: $remCount"
-Write-Host "  Reclaimed: $reclaimedMB MB"
-Write-Host "--------------------------------------------------------------------`n" -ForegroundColor Cyan
+Write-Output "`r`n--------------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Cleanups applied: $remCount"
+Write-Output "  Reclaimed: $reclaimedMB MB"
+Write-Output "--------------------------------------------------------------------`r`n"
 Write-Log "Summary: Passed=$passed Warnings=$warnings Failed=$failed CleanupsApplied=$remCount CleanupErrors=$remErrs ReclaimedMB=$reclaimedMB"
 
 # -- Registry Reporting --------------------------------------------------------
@@ -571,3 +571,13 @@ if (-not $WhatIfPreference) {
 }
 
 exit $(if ($remErrs -gt 0) { 1 } else { 0 })
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-AutoRemediateProfileBloat
+Exit 0

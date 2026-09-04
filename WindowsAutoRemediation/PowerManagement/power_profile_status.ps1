@@ -79,7 +79,7 @@ try {
     # just whether the state name appears anywhere in the output.
     $mechanism = 'Unsupported'
     try {
-        $availability = (& powercfg /a 2>&1) -join "`n"
+        $availability = (& powercfg /a 2>&1) -join "`r`n"
         $availableSection = ''
         if ($availability -match '(?s)available on this system:(.*?)(?:not available on this system:|$)') {
             $availableSection = $Matches[1]

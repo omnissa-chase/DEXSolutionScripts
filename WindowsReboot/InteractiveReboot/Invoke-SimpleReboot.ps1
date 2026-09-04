@@ -29,8 +29,8 @@ $CountdownSeconds = 300   # 5 minutes
 $consoleUser = (Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue).UserName
 
 if ($consoleUser) {
-    Write-Host "Console user detected: $consoleUser"
-    Write-Host "Scheduling reboot in $CountdownSeconds seconds..."
+    Write-Output "Console user detected: $consoleUser"
+    Write-Output "Scheduling reboot in $CountdownSeconds seconds..."
 
     # Pass the countdown directly to shutdown.exe so it runs asynchronously.
     # shutdown.exe returns immediately and manages the timer natively --
@@ -38,9 +38,9 @@ if ($consoleUser) {
     shutdown.exe /r /f /t $CountdownSeconds /c "Reboot initiated by IT management policy. Please save your work."
 
 } else {
-    Write-Host "No console user detected. Rebooting immediately."
+    Write-Output "No console user detected. Rebooting immediately."
     shutdown.exe /r /f /t 0 /c "Reboot initiated by IT manueagement policy."
 }
 
-Write-Host "Reboot scheduled. Script exiting."
+Write-Output "Reboot scheduled. Script exiting."
 Exit 0

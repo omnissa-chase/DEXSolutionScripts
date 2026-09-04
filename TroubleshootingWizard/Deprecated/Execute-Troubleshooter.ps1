@@ -24,19 +24,19 @@ $outSub  = Register-ObjectEvent -InputObject $process -EventName OutputDataRecei
     if ($line) {
         # safe to do PowerShell work here in ISE
         # (leave empty if you just want to confirm stability)
-            Write-Host "[PID $($Event.Sender.Id)] OUT: $line"
+            Write-Output "[PID $($Event.Sender.Id)] OUT: $line"
     }
 }
 
 $errSub  = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -Action {
     $line = $Event.SourceEventArgs.Data
     if ($line) {
-            Write-Host "[PID $($Event.Sender.Id)] ERR: $line"
+            Write-Output "[PID $($Event.Sender.Id)] ERR: $line"
     }
 }
 
 $exitSub = Register-ObjectEvent -InputObject $process -EventName Exited -Action {
-    Write-Host "[PID $($Event.Sender.Id)] exited with $($Event.Sender.ExitCode)"
+    Write-Output "[PID $($Event.Sender.Id)] exited with $($Event.Sender.ExitCode)"
 }
 Try{ 
     $process.Start() | Out-Null
@@ -44,6 +44,6 @@ Try{
     $process.BeginOutputReadLine()
     $process.BeginErrorReadLine()
 }Catch{
-    Write-Host "[PID $($Process.Id)] failed with $($_.Exception.Message)"
+    Write-Output "[PID $($Process.Id)] failed with $($_.Exception.Message)"
 }
 Exit 0

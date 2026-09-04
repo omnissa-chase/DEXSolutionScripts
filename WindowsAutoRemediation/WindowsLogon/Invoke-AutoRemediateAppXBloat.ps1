@@ -90,7 +90,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-
+function Invoke-AutoRemediateAppXBloat {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$DenyListExtra = $(
@@ -117,7 +117,7 @@ if ($env:WhatIf) {
 
 # -- Run header ----------------------------------------------------------------
 $RunEventId = ([Random]::new()).Next(1000, 9999)
-Write-Host "[$RunEventId] Executing Invoke-AutoRemediateAppXBloat, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'  WhatIf=$WhatIfPreference  RemoveForExistingUsers=$RemoveForExistingUsers"
+Write-Output "[$RunEventId] Executing Invoke-AutoRemediateAppXBloat, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'  WhatIf=$WhatIfPreference  RemoveForExistingUsers=$RemoveForExistingUsers"
 $HEAD = "`r`n[$RunEventId]"
 
 function Write-Log {
@@ -130,7 +130,7 @@ function Write-Log {
 
 # -- Pre-flight ------------------------------------------------------------------
 if (-not (Get-Command -Name Get-AppxProvisionedPackage -ErrorAction SilentlyContinue)) {
-    Write-Host "$HEAD AppX provisioning cmdlets are not available on this device (Server SKU, or Appx feature removed). Nothing to do." -ForegroundColor Yellow
+    Write-Output "$HEAD AppX provisioning cmdlets are not available on this device (Server SKU, or Appx feature removed). Nothing to do."
     Write-Log 'Appx cmdlets unavailable. Exiting without changes.'
     exit 0
 }
@@ -293,9 +293,9 @@ $activeSteps = $Steps |
 
 $results = New-Object 'System.Collections.Generic.List[PSCustomObject]'
 
-Write-Host "`n-- Invoke-AutoRemediateAppXBloat --------------------------------" -ForegroundColor Cyan
-Write-Host "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
-Write-Host '--------------------------------------------------------------------' -ForegroundColor Cyan
+Write-Output "`r`n-- Invoke-AutoRemediateAppXBloat --------------------------------"
+Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
+Write-Output '--------------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {
 
@@ -341,7 +341,7 @@ foreach ($step in $activeSteps) {
                elseif ($remError) { "  -> Removal ERROR: $remError" }
                else               { '' }
 
-    Write-Host "`n  [$($status.PadRight(7))] $($step.Name): $message$remNote" -ForegroundColor $color
+    Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
     Write-Log "$($step.Name): $status - $message$remNote"
 
     $results.Add([PSCustomObject]@{
@@ -361,9 +361,9 @@ $failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = ($results | Where-Object { $_.Remediated }).Count
 $remErrs  = ($results | Where-Object { $_.RemError }).Count
 
-Write-Host "`n--------------------------------------------------------------------" -ForegroundColor Cyan
-Write-Host "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations applied: $remCount"
-Write-Host "--------------------------------------------------------------------`n" -ForegroundColor Cyan
+Write-Output "`r`n--------------------------------------------------------------------"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations applied: $remCount"
+Write-Output "--------------------------------------------------------------------`r`n"
 Write-Log "Summary: Passed=$passed Warnings=$warnings Failed=$failed RemediationsApplied=$remCount RemediationErrors=$remErrs"
 
 # -- Registry Reporting --------------------------------------------------------
@@ -391,3 +391,13 @@ if (-not $WhatIfPreference) {
 }
 
 exit $(if ($remErrs -gt 0) { 1 } else { 0 })
+}
+
+# -- entry point ---------------------------------------------------------------
+# The param block sits inside the function deliberately. The Workspace ONE script
+# engine does not recognise a param block at script scope, and $PSCmdlet is $null
+# there, which makes every ShouldProcess call throw. Inputs arrive as environment
+# variables and are bound to the function's parameters below.
+
+Invoke-AutoRemediateAppXBloat
+Exit 0

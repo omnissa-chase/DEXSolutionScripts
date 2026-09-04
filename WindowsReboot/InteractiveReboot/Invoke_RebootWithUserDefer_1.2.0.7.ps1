@@ -227,10 +227,10 @@ function Ensure-UrlProtocol {
         if (-not (Test-Path $cmdKey)) { New-Item -Path $cmdKey -Force | Out-Null }
         New-ItemProperty -Path $cmdKey -Name '(Default)' -Value $Command -Force | Out-Null
     }Else{
-        Write-Host "What if: Performing the operation `"New Property`" on target `"Item: $base Property: (Default)`"."
-        Write-Host "What if: Performing the operation `"New Property`" on target `"Item: $base Property: URL Protocol`"."
-        Write-Host "What if: Performing the operation `"New Item`" on target `"$cmdKey`"."
-        Write-Host "What if: Performing the operation `"New Property`" on target `"Item: $cmdKey Property: (Default)`"."
+        Write-Output "What if: Performing the operation `"New Property`" on target `"Item: $base Property: (Default)`"."
+        Write-Output "What if: Performing the operation `"New Property`" on target `"Item: $base Property: URL Protocol`"."
+        Write-Output "What if: Performing the operation `"New Item`" on target `"$cmdKey`"."
+        Write-Output "What if: Performing the operation `"New Property`" on target `"Item: $cmdKey Property: (Default)`"."
     }
 }
 
@@ -259,7 +259,7 @@ If($mandatory){
     if(-not $WhatIfPreference){ 
         Start-Process -FilePath $shutdown -ArgumentList "/r /t $RebootCountdownSeconds /f" -WindowStyle Hidden
     }else{
-        Write-Host "What if: Performing the operation `"Start Process`" on target `"$shutdown /r /t $RebootCountdownSeconds /f`"."
+        Write-Output "What if: Performing the operation `"Start Process`" on target `"$shutdown /r /t $RebootCountdownSeconds /f`"."
     }
 $mins = [Math]::Round($RebootCountdownSeconds/60)
 
