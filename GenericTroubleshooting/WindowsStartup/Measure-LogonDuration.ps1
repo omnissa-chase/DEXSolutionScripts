@@ -61,6 +61,11 @@
 .NOTES
     PowerShell 5.1 compatible.
 
+    Every run ends by printing the contents of the registry key, re-read from the
+    registry rather than echoed from memory, so an admin testing a deployment sees what
+    a sensor will actually find. A write that failed shows as a stale or absent value
+    instead of being masked by the in-memory copy.
+
     Numeric and timestamp registry values are written using InvariantCulture. A device in
     a comma-decimal locale would otherwise record "42,5" and a Buddhist-calendar locale
     would record year 2569, either of which silently breaks every sensor that parses them.
@@ -134,6 +139,66 @@ function Format-Stamp {
     param($Value)
     if ($null -eq $Value) { return 'Unknown' }
     return $Value.ToString('yyyy-MM-dd HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture)
+}
+#endregion
+
+#region --- Registry readback ---
+# Registry enumeration order is not insertion order, so without a declared order the
+# dump reshuffles between runs. Values print in the order they are written above.
+$script:RecordValueOrder = @(
+    'Username', 'LogonTime', 'ShellReadyTime', 'TotalLogonDurationSec',
+    'GPStartTime', 'GPDurationSec', 'GPScriptsDurationSec', 'FolderRedirDurationSec',
+    'ProfileLoadDurationSec', 'FSLogixAttachDurationSec', 'ActiveSetupDurationSec',
+    'AppXLoadDurationSec', 'PrintersMappedCount', 'PrinterMappingDurationSec',
+    'LogonTaskCount', 'LogonTaskTotalDurationSec', 'DataCollectedAt', 'CollectorVersion',
+    'AuditLogsConfiguredAt'
+)
+
+# The provider's own properties, which are not values an admin wrote or a sensor reads.
+$script:RegistryMetaNames = @('PSPath', 'PSParentPath', 'PSChildName', 'PSDrive', 'PSProvider')
+
+# Everything this script wrote, re-read from the registry. Re-reading rather than
+# echoing the in-memory record is the point: a write that silently failed shows up here
+# as a stale or absent value, which is exactly what an admin verifying a deployment
+# needs to see.
+function Show-RegistryState {
+    Write-Output ''
+    Write-Output '-- Registry readback ------------------------------------------------'
+    Write-Output "   [$($script:RegPath)]"
+
+    if (-not (Test-Path $script:RegPath)) {
+        Write-Output '     (key does not exist)'
+        Write-Output '---------------------------------------------------------------------'
+        return
+    }
+
+    $item = Get-ItemProperty -Path $script:RegPath -ErrorAction SilentlyContinue
+    if ($null -eq $item) {
+        Write-Output '     (key could not be read)'
+        Write-Output '---------------------------------------------------------------------'
+        return
+    }
+
+    $names = @($item.PSObject.Properties |
+        Where-Object { $script:RegistryMetaNames -notcontains $_.Name } |
+        ForEach-Object { $_.Name })
+
+    if ($names.Count -eq 0) {
+        Write-Output '     (no values)'
+    }
+    else {
+        $ordered = @($names | Sort-Object {
+            $index = $script:RecordValueOrder.IndexOf($_)
+            if ($index -lt 0) { [int]::MaxValue } else { $index }
+        }, { $_ })
+
+        $width = ($ordered | Measure-Object -Property Length -Maximum).Maximum
+        foreach ($name in $ordered) {
+            Write-Output ("     {0} : {1}" -f $name.PadRight($width), [string]$item.$name)
+        }
+    }
+
+    Write-Output '---------------------------------------------------------------------'
 }
 #endregion
 
@@ -624,8 +689,20 @@ function Install-LogonDurationTask {
         -Settings    $settings `
         -Description 'Captures logon duration metrics to HKLM registry at each user logon. Deployed by WorkspaceONE.' | Out-Null
 
+    # Registering a SYSTEM principal needs elevation, and $ErrorActionPreference is
+    # SilentlyContinue, so a refused registration returns quietly. Announcing success
+    # on the strength of having called the cmdlet would leave an operator believing
+    # captures are scheduled when nothing is. Confirm it exists.
+    $registered = Get-ScheduledTask -TaskName $script:TaskName -TaskPath '\DEXTools\' -ErrorAction SilentlyContinue
+    if (-not $registered) {
+        Write-Warning "Scheduled task '\DEXTools\$($script:TaskName)' was NOT registered. Registering a SYSTEM task requires elevation -- run this as SYSTEM or from an elevated session."
+        Write-Output "Worker script was still copied to: $destScript"
+        return
+    }
+
     Write-Output "Scheduled task '\DEXTools\$($script:TaskName)' registered."
     Write-Output "Worker script saved to: $destScript"
+    Write-Output "Runs as: $($registered.Principal.UserId)"
 }
 #endregion
 
@@ -725,6 +802,13 @@ switch ($DeployMode) {
         Enable-DEXAuditLogs -Force
     }
 }
+
+# Printed for every mode, not just a capture: after DeployScheduledTask it shows what
+# the sensors will read until the first task run, and after ConfigureLogging it
+# confirms the marker landed. Unconditional, because the readback is the cheapest
+# answer to "did this actually do anything" and a logon-time run writing it to the
+# task's output costs nothing.
+Show-RegistryState
 
 exit 0
 #endregion
