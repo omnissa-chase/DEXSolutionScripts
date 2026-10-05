@@ -80,6 +80,19 @@
                  plus any earlier record still marked provisional. This is the right
                  choice for a session host and the default the scheduled task deploys
                  with.
+      AllUsers   Every logon inside LookbackHours, ignoring the high-water mark. Use
+                 this when looking at a host by hand: AllSince deliberately skips what
+                 it has already measured, so a second interactive run of it reports
+                 nothing to do, which reads like a fault rather than a design.
+                 One row per user per session, so someone who logged on to three
+                 sessions appears three times. MaxSessions still caps the total.
+
+.PARAMETER AllUsers
+    Shorthand for -SessionScope AllUsers, for the common case of an admin wanting every
+    user on the box rather than just the newest logon. Defaults to $env:AllUsers being
+    true / 1 / yes / y.
+
+    Overrides SessionScope when both are given, and says so.
 
 .PARAMETER LookbackHours
     How far back to read logon events. Defaults to $env:LookbackHours, then 24.
@@ -111,6 +124,18 @@
     Repeating interval for the task registered by DeployScheduledTask. Defaults to
     $env:RepeatMinutes, then 15.
 
+.PARAMETER NoExit
+    Suppress the terminating 'exit' at the end of the run, returning instead. Defaults
+    to $env:NoExit being true / 1 / yes / y.
+
+    Intended for an admin testing locally. A script-scope 'exit' terminates the host
+    session, not just the script, when the file is dot-sourced, pasted into a console,
+    or run from the VS Code integrated terminal -- so an admin iterating on this loses
+    their session and their variables every run. Off by default, because Workspace ONE
+    reads the exit code to decide whether the deployment succeeded.
+
+    The exit code the run would have used is reported instead, so nothing is hidden.
+
 .PARAMETER ConfigureLoggingFirst
     Enable the optional event logs before running the requested DeployMode. True when
     $env:ConfigureLoggingFirst is true / 1 / yes / y. Anything unrecognised is false --
@@ -122,6 +147,12 @@
 
     The intended session-host deployment: enable the optional logs, then install a
     sweeping task.
+
+.EXAMPLE
+    .\Measure-LogonDurationMultiSession.ps1 -AllUsers -NoExit
+
+    How an admin looks at a session host by hand: every user in the lookback window,
+    and no 'exit' to take the console down with it.
 
 .EXAMPLE
     .\Measure-LogonDurationMultiSession.ps1 -SessionScope AllActive
@@ -188,9 +219,15 @@ param(
         if ([string]::IsNullOrWhiteSpace($env:DeployMode)) { 'RunNow' } else { $env:DeployMode.Trim() }
     ),
 
-    [ValidateSet('LastLogon', 'AllActive', 'AllSince')]
+    [ValidateSet('LastLogon', 'AllActive', 'AllSince', 'AllUsers')]
     [string]$SessionScope = $(
         if ([string]::IsNullOrWhiteSpace($env:SessionScope)) { 'LastLogon' } else { $env:SessionScope.Trim() }
+    ),
+
+    # A switch rather than a [bool] so an admin can simply type -AllUsers, with the
+    # environment variable kept as the UEM-settable path.
+    [switch]$AllUsers = [bool](
+        $env:AllUsers -and $env:AllUsers.Trim() -in @('true', '1', 'yes', 'y')
     ),
 
     # ValidateRange applies to explicit arguments only, so a bad environment variable
@@ -235,6 +272,10 @@ param(
 
     [bool]$ConfigureLoggingFirst = $(
         $env:ConfigureLoggingFirst -and $env:ConfigureLoggingFirst.Trim() -in @('true', '1', 'yes', 'y')
+    ),
+
+    [switch]$NoExit = [bool](
+        $env:NoExit -and $env:NoExit.Trim() -in @('true', '1', 'yes', 'y')
     )
 )
 
@@ -250,7 +291,12 @@ $script:SessionsRoot = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDurat
 $script:AggRoot      = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration\Aggregate'
 $script:Version      = '2.0.0'
 $script:ValidModes   = @('RunNow', 'DeployScheduledTask', 'ConfigureLogging')
-$script:ValidScopes  = @('LastLogon', 'AllActive', 'AllSince')
+$script:ValidScopes  = @('LastLogon', 'AllActive', 'AllSince', 'AllUsers')
+
+# Exit code the run will finish with. Script scope so the trailing entry-point block can
+# read it after the function returns, which is how -NoExit reports what it suppressed.
+$script:ExitCode     = 0
+$script:SuppressExit = [bool]$NoExit
 
 # How long after a logon a phase's events may still appear. Phase windows are clamped
 # to this, which also bounds how much of the event log is read per run.
@@ -288,6 +334,16 @@ if (-not $PSBoundParameters.ContainsKey('SessionScope')) {
         Write-Warning "Unrecognised `$env:SessionScope '$SessionScope'. Using 'LastLogon'. Valid values: $($script:ValidScopes -join ', ')"
         $SessionScope = 'LastLogon'
     }
+}
+
+# -AllUsers is shorthand for the broadest scope. It wins over SessionScope, because
+# someone who typed both wants all users and the shorthand is the more specific intent
+# -- but a contradiction is worth saying out loud rather than resolving silently.
+if ($AllUsers) {
+    if ($SessionScope -ne 'LastLogon' -and $SessionScope -ne 'AllUsers') {
+        Write-Warning "-AllUsers overrides -SessionScope '$SessionScope'. Measuring every logon in the lookback window."
+    }
+    $SessionScope = 'AllUsers'
 }
 #endregion
 
@@ -702,6 +758,11 @@ function Select-SessionsInScope {
                     $_.LogonTime -gt $mark -or (Test-SessionNeedsRemeasure -Session $_)
                 })
             }
+        }
+        'AllUsers' {
+            # Deliberately ignores the high-water mark. This is the scope an admin runs
+            # by hand, and it has to produce the same answer every time rather than
+            # going quiet once the sweep has caught up.
         }
     }
 
@@ -1898,6 +1959,14 @@ switch ($DeployMode) {
 # answer to "did this actually do anything" and a logon-time run writing it to the
 # task's output costs nothing.
 Show-RegistryState
+
+if ($NoExit) {
+    Write-Output ''
+    Write-Output "NoExit: suppressed 'exit $($script:ExitCode)' so the calling session survives."
+}
+else {
+    exit $script:ExitCode
+}
 #endregion
 }
 
@@ -1914,4 +1983,6 @@ Show-RegistryState
 # correctly and do nothing.
 
 Measure-LogonDurationMultiSession @args
-Exit 0
+
+# Only reached when -NoExit suppressed the exit inside the function.
+if (-not $script:SuppressExit) { Exit $script:ExitCode }

@@ -37,6 +37,18 @@
     UEM console degrades to a measurement instead of failing the deployment. An
     unrecognised -DeployMode argument throws, because a caller who typed it should know.
 
+.PARAMETER NoExit
+    Suppress the terminating 'exit' at the end of the run, returning instead. Defaults
+    to $env:NoExit being true / 1 / yes / y.
+
+    Intended for an admin testing locally. A script-scope 'exit' terminates the host
+    session, not just the script, when the file is dot-sourced, pasted into a console,
+    or run from the VS Code integrated terminal -- so an admin iterating on this loses
+    their session and their variables every run. Off by default, because Workspace ONE
+    reads the exit code to decide whether the deployment succeeded.
+
+    The exit code the run would have used is reported instead, so nothing is hidden.
+
 .PARAMETER ConfigureLoggingFirst
     Defaults to $true when $env:ConfigureLoggingFirst is true / 1 / yes / y, otherwise
     $false. Enables the optional event logs before running the requested DeployMode, so
@@ -57,6 +69,14 @@
     .\Measure-LogonDuration.ps1
 
     How UEM invokes the script: configuration arrives as an environment variable.
+
+.EXAMPLE
+    .\Measure-LogonDuration.ps1 -NoExit
+
+    Measure and print without the terminating 'exit', so testing from a console or the
+    VS Code terminal does not end the session. For every user on a multi-session host,
+    use Measure-LogonDurationMultiSession.ps1 -AllUsers instead -- this script only
+    ever measures the console user.
 
 .NOTES
     PowerShell 5.1 compatible.
@@ -93,6 +113,12 @@ param(
 
     [bool]$ConfigureLoggingFirst = $(
         $env:ConfigureLoggingFirst -and $env:ConfigureLoggingFirst.Trim() -in @('true', '1', 'yes', 'y')
+    ),
+
+    # A switch rather than a [bool] so an admin can simply type -NoExit, with the
+    # environment variable kept as the UEM-settable path.
+    [switch]$NoExit = [bool](
+        $env:NoExit -and $env:NoExit.Trim() -in @('true', '1', 'yes', 'y')
     )
 )
 
@@ -106,6 +132,11 @@ $script:TaskName   = 'DEXTools_MeasureLogonDuration'
 $script:RegPath    = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration'
 $script:Version    = '1.1.0'
 $script:ValidModes = @('RunNow', 'DeployScheduledTask', 'ConfigureLogging')
+
+# Exit code the run will finish with. Script scope so the trailing entry-point block can
+# read it after the function returns, which is how -NoExit reports what it suppressed.
+$script:ExitCode     = 0
+$script:SuppressExit = [bool]$NoExit
 #endregion
 
 #region --- Configuration normalisation ---
@@ -212,8 +243,12 @@ function Invoke-LogonDurationCapture {
 $loggedOnUser = (Get-CimInstance -ClassName Win32_ComputerSystem).UserName
 
 if ([string]::IsNullOrEmpty($loggedOnUser)) {
-    Write-Warning 'No interactive user detected. Exiting.'
-    exit 1
+    # Returns rather than exits: this sits inside a nested function, so 'exit' here
+    # would terminate the whole process -- taking the caller's session with it under
+    # -NoExit, and skipping the registry readback that tells an admin what is stored.
+    Write-Warning 'No interactive user detected. Nothing to measure.'
+    $script:ExitCode = 1
+    return
 }
 
 $username = $loggedOnUser.Split('\')[-1]
@@ -810,7 +845,13 @@ switch ($DeployMode) {
 # task's output costs nothing.
 Show-RegistryState
 
-exit 0
+if ($NoExit) {
+    Write-Output ''
+    Write-Output "NoExit: suppressed 'exit $($script:ExitCode)' so the calling session survives."
+}
+else {
+    exit $script:ExitCode
+}
 #endregion
 }
 
@@ -819,6 +860,13 @@ exit 0
 # engine does not recognise a param block at script scope, and $PSCmdlet is $null
 # there, which makes every ShouldProcess call throw. Inputs arrive as environment
 # variables and are bound to the function's parameters below.
+#
+# $args is splatted so the script is also callable with ordinary named parameters.
+# Without the splat a script with no script-scope param block silently discards every
+# argument it is given, leaving only the environment-variable path working -- which is
+# how every -Parameter example in the help above would read correctly and do nothing.
 
-Measure-LogonDuration
-Exit 0
+Measure-LogonDuration @args
+
+# Only reached when -NoExit suppressed the exit inside the function.
+if (-not $script:SuppressExit) { Exit $script:ExitCode }
