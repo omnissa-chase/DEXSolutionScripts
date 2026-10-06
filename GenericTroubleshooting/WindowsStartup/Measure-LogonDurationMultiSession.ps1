@@ -613,9 +613,9 @@ function Get-EventSet {
                     Sort-Object TimeCreated)
 
     if ($spec.NeedsData) {
-        foreach ($event in $events) {
-            Add-Member -InputObject $event -NotePropertyName 'DataMap' `
-                -NotePropertyValue (Get-EventDataMap -Event $event) -Force
+        foreach ($evt in $events) {
+            Add-Member -InputObject $evt -NotePropertyName 'DataMap' `
+                -NotePropertyValue (Get-EventDataMap -Event $evt) -Force
         }
     }
 
@@ -678,19 +678,19 @@ function Get-SessionInventory {
     $live     = Get-LiveSessionIds
     $sessions = @()
 
-    foreach ($event in $events) {
-        if ($event.Properties.Count -lt 2) { continue }
+    foreach ($evt in $events) {
+        if ($evt.Properties.Count -lt 2) { continue }
 
-        $account = [string]$event.Properties[0].Value
+        $account = [string]$evt.Properties[0].Value
         if ([string]::IsNullOrWhiteSpace($account)) { continue }
         if ($account -match $script:SystemAccountPattern) { continue }
 
         $sessionId = 0
-        if (-not [int]::TryParse([string]$event.Properties[1].Value, [ref]$sessionId)) { continue }
+        if (-not [int]::TryParse([string]$evt.Properties[1].Value, [ref]$sessionId)) { continue }
 
         $source = 'LOCAL'
-        if ($event.Properties.Count -ge 3 -and -not [string]::IsNullOrWhiteSpace([string]$event.Properties[2].Value)) {
-            $source = [string]$event.Properties[2].Value
+        if ($evt.Properties.Count -ge 3 -and -not [string]::IsNullOrWhiteSpace([string]$evt.Properties[2].Value)) {
+            $source = [string]$evt.Properties[2].Value
         }
 
         $sessions += [PSCustomObject]@{
@@ -698,8 +698,8 @@ function Get-SessionInventory {
             Username    = $account.Split('\')[-1]
             Sid         = Resolve-UserSid -Account $account
             SessionId   = $sessionId
-            LogonTime   = $event.TimeCreated
-            IsReconnect = ($event.Id -eq 25)
+            LogonTime   = $evt.TimeCreated
+            IsReconnect = ($evt.Id -eq 25)
             Source      = $source
             SessionType = if ($source -eq 'LOCAL') { 'Console' } else { 'Remote' }
             IsLive      = $live.ContainsKey($sessionId)
