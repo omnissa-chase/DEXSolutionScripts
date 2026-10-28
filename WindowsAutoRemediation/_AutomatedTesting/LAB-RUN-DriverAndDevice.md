@@ -150,3 +150,12 @@ next lab run should start from the same baseline as this one.
   5.1 when exactly one object matches. A single failed step printed a blank count and
   exited 0. Wrapped in `@()`.
 - Added the non-destructive unit-test layer under `_AutomatedTesting\Unit`.
+- The first real lab run (13:26 on 2026-10-28) died inside the harness before applying any
+  break: `Get-DexRandomSubset` in `DEXTestFramework.psm1` returned a one-element array, which
+  PowerShell unwraps to the bare hashtable, so `(...)[0]` yielded `$null` and `& $null` threw.
+  Every break with a single `Methods` entry, in all six harnesses, hit this. Fixed with a
+  `,@()` return. `Unit\Invoke-DriverHarnessDryRun.ps1` now runs both driver harnesses end to
+  end against stubbed hardware and the orchestrator refuses to break the VM if it fails.
+- The orchestrator's own first-run bugs are fixed too: `@($list)` over a generic List throws
+  "Argument types do not match" in 5.1 (now `.ToArray()`), and `Tee-Object` wrote UTF-16 logs
+  (now UTF-8).

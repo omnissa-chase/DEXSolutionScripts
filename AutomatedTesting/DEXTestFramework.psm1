@@ -18,11 +18,11 @@
 
 .NOTES
     Script Name  : DEXTestFramework.psm1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : Administrator (elevated)
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-07
+    Last Modified: 2026-10-28
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -284,7 +284,13 @@ function Get-DexRandomSubset {
     }
 
     if ($Count -gt $pool.Count) { $Count = $pool.Count }
-    return @($pool[0..($Count - 1)])
+    # The leading comma matters. A plain `return @(x)` with one element is unwrapped by the
+    # pipeline into the bare element, so a caller doing `(Get-DexRandomSubset ...)[0]` on a
+    # single-method break indexed a hashtable with key 0, got $null, and `& $null` failed with
+    # "The expression after '&' in a pipeline element produced an object that was not valid".
+    # Every break with exactly one Method hit this. Wrapping in a one-element outer array
+    # makes the function always hand back the subset as a single array object.
+    return ,@($pool[0..($Count - 1)])
 }
 
 # ==============================================================================

@@ -121,6 +121,7 @@ $RepoRoot      = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $FrameworkPath = Join-Path $RepoRoot 'AutomatedTesting\DEXTestFramework.psm1'
 $AnalysisPath  = Join-Path $RepoRoot 'AutomatedTesting\Invoke-FixReportAnalysis.ps1'
 $UnitRunner    = Join-Path $PSScriptRoot 'Unit\Invoke-DriverUnitTests.ps1'
+$HarnessDryRun = Join-Path $PSScriptRoot 'Unit\Invoke-DriverHarnessDryRun.ps1'
 $InventoryCsv  = Join-Path $RepoRoot 'SCRIPT-INVENTORY-CSV.csv'
 $LatestPointer = Join-Path $LabRunRoot 'latest.txt'
 
@@ -133,6 +134,11 @@ function Write-Banner { param([string]$Title, [string]$Detail = '')
 }
 function Write-Step { param([string]$Status, [string]$Name, [string]$Message = '')
     Write-Output "  [$($Status.PadRight(7))] $Name$(if ($Message) { ": $Message" })"
+}
+# Tee-Object in PowerShell 5.1 writes UTF-16 with no way to change it; keep logs UTF-8 so
+# grep, Select-String and git all read them.
+function Write-TeeLog { param([string]$Path)
+    process { Add-Content -LiteralPath $Path -Value ([string]$_) -Encoding UTF8; $_ }
 }
 
 # -- Plan ----------------------------------------------------------------------
@@ -274,7 +280,7 @@ function Write-InventoryStatus { param([object[]]$Rows)
 function Invoke-Analysis { param([string]$RunDir)
     Write-Banner -Title 'Phase 3: Analysis' -Detail $FixReportPath
     $log = Join-Path $RunDir 'analysis.log'
-    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $AnalysisPath -Path $FixReportPath 2>&1 | Tee-Object -FilePath $log
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $AnalysisPath -Path $FixReportPath 2>&1 | Write-TeeLog -Path $log
     Write-Step 'Info' 'Analysis' "exit $LASTEXITCODE (1 = at least one run needs attention)"
 }
 
@@ -287,6 +293,7 @@ if ($PlanOnly) {
     Write-Output ''
     Write-Output "  0. Preflight (elevation, PS 5.1, marker at $FixReportPath\.dex-test-machine, >= $MinFreeGB GB free, console session)"
     Write-Output "  1. Unit tests:  powershell.exe -File `"$UnitRunner`"   (abort on any failure)"
+    Write-Output "     Dry run:     powershell.exe -File `"$HarnessDryRun`"   (harnesses vs stubs; abort on mismatch)"
     $n = 2
     foreach ($s in $Plan) {
         Write-Output ''
@@ -364,7 +371,7 @@ if (-not $Force) {
     exit 1
 }
 
-foreach ($p in @($FrameworkPath, $AnalysisPath, $UnitRunner)) {
+foreach ($p in @($FrameworkPath, $AnalysisPath, $UnitRunner, $HarnessDryRun)) {
     if (-not (Test-Path -LiteralPath $p)) { Write-Step 'Failed' 'Files' "missing: $p"; exit 1 }
 }
 foreach ($s in $Plan) {
@@ -420,7 +427,7 @@ if ($SkipUnitTests) {
 } else {
     $unitLog = Join-Path $runDir 'unit-tests.log'
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $UnitRunner 2>&1 |
-        Tee-Object -FilePath $unitLog | Where-Object { $_ -match '^\s*\[-\]|Passed:|ASSERT|Exception' }
+        Write-TeeLog -Path $unitLog | Where-Object { $_ -match '^\s*\[-\]|Passed:|ASSERT|Exception' }
     $unitRc = $LASTEXITCODE
     if ($unitRc -ne 0) {
         Write-Step 'Failed' 'UnitTests' "$unitRc test(s) failed (see $unitLog). Fix the logic before breaking the VM."
@@ -428,6 +435,19 @@ if ($SkipUnitTests) {
         exit 1
     }
     Write-Step 'Passed' 'UnitTests' "all green ($unitLog)"
+
+    # Harness dry run: the break-test harnesses themselves, end to end, against stubbed
+    # hardware. Catches harness bugs before they cost a destructive run.
+    $dryLog = Join-Path $runDir 'harness-dryrun.log'
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $HarnessDryRun 2>&1 |
+        Write-TeeLog -Path $dryLog | Where-Object { $_ -match '^\s*\[(Passed|Failed)|scenarios matched|Exception' }
+    $dryRc = $LASTEXITCODE
+    if ($dryRc -ne 0) {
+        Write-Step 'Failed' 'HarnessDryRun' "$dryRc scenario(s) mismatched (see $dryLog). Fix the harness before breaking the VM."
+        $manifest.CompletedAt = (Get-Date).ToString('o'); Save-Manifest
+        exit 1
+    }
+    Write-Step 'Passed' 'HarnessDryRun' "both driver harnesses run clean against stubs ($dryLog)"
 }
 
 # ==============================================================================
@@ -452,13 +472,17 @@ foreach ($step in $Plan) {
     $sw  = [System.Diagnostics.Stopwatch]::StartNew()
 
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $cmd 2>&1 |
-        Tee-Object -FilePath $log | ForEach-Object { "       $_" }
+        Write-TeeLog -Path $log | ForEach-Object { "       $_" }
     $rc = $LASTEXITCODE
     $sw.Stop()
 
     $res = Read-HarnessResult -LogPath $log
     $overall = if ($res) { $res.Overall } else { '' }
     $verdict = Get-Verdict -Overall $overall -Expected $step.Expected
+    if ($res -and -not $res.Breaks -and $overall -ne 'Passed') {
+        # The harness wrote a result but never applied a break: it threw before Apply.
+        $verdict = 'HARNESS ERROR before any break (see log)'
+    }
 
     $row = [pscustomobject]@{
         Step        = $step.Id
@@ -474,7 +498,7 @@ foreach ($step in $Plan) {
         Log         = $log
     }
     $rows.Add($row)
-    $manifest.Results = @($rows)
+    $manifest.Results = $rows.ToArray()
     Save-Manifest
 
     Write-Step $(if ($verdict -eq 'OK') { 'Passed' } else { 'Failed' }) $step.Id "Overall=$(if ($overall) { $overall } else { 'none' })  expected=$($step.Expected)  -> $verdict  ($($row.DurationSec)s)"
@@ -499,12 +523,12 @@ foreach ($step in $Plan) {
 Invoke-Analysis -RunDir $runDir
 
 Write-Banner -Title 'Lab run verdicts' -Detail $runDir
-Write-SummaryTable -Rows @($rows)
+Write-SummaryTable -Rows $rows.ToArray()
 $rows | Export-Csv -LiteralPath (Join-Path $runDir 'LabRunSummary.csv') -NoTypeInformation -Encoding UTF8
 $bad = @($rows | Where-Object { $_.Verdict -ne 'OK' }).Count
 Write-Step $(if ($bad -eq 0) { 'Passed' } else { 'Failed' }) 'Verdicts' "$($rows.Count - $bad) OK, $bad need attention. Evidence: $FixReportPath\Summary.csv and $runDir"
 
-if ($UpdateInventory -and -not $stopped) { Write-InventoryStatus -Rows @($rows) }
+if ($UpdateInventory -and -not $stopped) { Write-InventoryStatus -Rows $rows.ToArray() }
 
 # ==============================================================================
 # Phase 4: reboot-requiring break (last, optional)
@@ -518,13 +542,13 @@ if ($rebootStep -and -not $stopped) {
         Overall = ''; Expected = $rebootStep.Expected; Verdict = 'PENDING (reboot)'; HarnessExit = $null
         DurationSec = $null; ResultPath = ''; Log = (Join-Path $runDir "$($rebootStep.Id).log")
     })
-    $manifest.Results = @($rows); $manifest.CompletedAt = (Get-Date).ToString('o'); Save-Manifest
+    $manifest.Results = $rows.ToArray(); $manifest.CompletedAt = (Get-Date).ToString('o'); Save-Manifest
     Write-Step 'Warning' 'Reboot' 'the VM will restart in about 15 seconds once the break is applied. When it is back, run:'
     Write-Output "           & '$PSCommandPath' -AnalyzeOnly$(if ($UpdateInventory) { ' -UpdateInventory' })"
     Write-Output ''
     $cmd = Get-StepCommand $rebootStep
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $cmd 2>&1 |
-        Tee-Object -FilePath (Join-Path $runDir "$($rebootStep.Id).log") | ForEach-Object { "       $_" }
+        Write-TeeLog -Path (Join-Path $runDir "$($rebootStep.Id).log") | ForEach-Object { "       $_" }
     $rebootLaunched = $true
 } elseif ($rebootStep -and $stopped) {
     Write-Step 'Warning' 'Reboot' 'reboot-requiring break skipped because the run stopped early'
