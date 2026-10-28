@@ -45,11 +45,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateCcmCache.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-07-29
+    Last Modified: 2026-10-28
     Timeout      : ~5 seconds (launcher exits immediately; payload runs via scheduled task up to 300 seconds)
 
 .DISCLAIMER
@@ -365,10 +365,12 @@ foreach ($step in $activeSteps) {
 }
 
 # -- Summary -------------------------------------------------------------------
-$passed   = ($results | Where-Object { $_.Status -eq 'Passed'  }).Count
-$warnings = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
-$remCount = ($results | Where-Object { $_.Remediated }).Count
+# @() guards: in Windows PowerShell 5.1 a single PSCustomObject has no .Count, so a
+# lone Failed step would otherwise yield $null here and the script would exit 0.
+$passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
+$warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
+$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+$remCount = @($results | Where-Object { $_.Remediated }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"
 Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"

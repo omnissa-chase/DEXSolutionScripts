@@ -37,15 +37,14 @@
         Update Date (step 8) -- ResolutionScript = $null on all three by design
         (informational only; reboot scheduling, GPO, and update installation
         all require a human or a separate maintenance window).
-      Disk Space for Updates (step 7) -- remediation runs the REAL
-        `cleanmgr.exe /sagerun:1`, a system-wide cleanup tool whose effect
-        depends on whatever Disk Cleanup profile #1 is configured to delete on
-        this machine. It can permanently remove real files unrelated to the
-        break test's own filler data, so it is excluded rather than gated --
-        there is no filler-file break that reliably undoes itself once
-        cleanmgr has run. (Unlike DataStoreBloated, there's no way to redirect
-        cleanmgr onto a disposable fake target -- it operates on the real C:
-        drive by design.)
+      Disk Space for Updates (step 7) -- the remediation is now a deterministic
+        inline cleanup (aged temp, dumps, app caches, then package/browser
+        caches and Recycle Bins below 5 GB, then real `cleanmgr` in the
+        background as a last resort), but it only fires when C: genuinely has
+        under 10 GB free. That trigger cannot be simulated: a sparse filler
+        file does not consume space, and a real one would have to fill the
+        tester's own disk. Once it fires it deletes real files across every
+        profile that no break can reliably restore. Excluded rather than gated.
 
     VERIFY-THE-BREAK
     Every break is followed by a probe proving the component is genuinely

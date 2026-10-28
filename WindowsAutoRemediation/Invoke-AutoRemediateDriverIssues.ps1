@@ -30,11 +30,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateDriverIssues.ps1
-    Version      : 3.0.0
+    Version      : 3.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-07-28
+    Last Modified: 2026-10-28
     Timeout      : 60 seconds
 
 .DISCLAIMER
@@ -147,7 +147,8 @@ if (-not $matched) {
     exit 0
 }
 
-Write-Output "`r`n  Matched $($matched.Count) device(s):"
+# @() guards: a single WMI object has no .Count in Windows PowerShell 5.1.
+Write-Output "`r`n  Matched $(@($matched).Count) device(s):"
 $matched | ForEach-Object {
     $errCode = $_.ConfigManagerErrorCode
     $label   = if ($errCode -eq 0) { 'OK  ' } else { "ERR $errCode" }
@@ -165,7 +166,7 @@ if (-not $errored) {
 }
 
 # -- Remediation ---------------------------------------------------------------
-Write-Output "`r`n  Running escalation on $($errored.Count) errored device(s)..."
+Write-Output "`r`n  Running escalation on $(@($errored).Count) errored device(s)..."
 $result = Invoke-DriverEscalation -InstanceIds ($errored.DeviceID) -AllowedActions $AllowedActions
 
 # -- Summary -------------------------------------------------------------------
@@ -193,6 +194,11 @@ exit 0
 # engine does not recognise a param block at script scope, and $PSCmdlet is $null
 # there, which makes every ShouldProcess call throw. Inputs arrive as environment
 # variables and are bound to the function's parameters below.
+#
+# @args forwards any command-line arguments (for example -DriverFilter and
+# -AllowedActions from the break-test harness or a local console run) to the function
+# as named parameters. Under UEM $args is empty, so the environment-variable defaults
+# apply unchanged.
 
-Invoke-AutoRemediateDriverIssues
+Invoke-AutoRemediateDriverIssues @args
 Exit 0

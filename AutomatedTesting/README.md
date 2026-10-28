@@ -35,6 +35,26 @@ Current catalog:
 | `Invoke-AutoRemediateAudioBluetooth.ps1` | `Invoke-AutoRemediateAudioBluetooth_BreakTest.ps1` | 5 of 8 steps; 3 user-interaction-only steps excluded; `AudioDriverDisabled` needs real/virtual audio hardware |
 | `Invoke-AutoRemediateWindowsUpdates.ps1` | `Invoke-AutoRemediateWindowsUpdates_BreakTest.ps1` | 4 of 8 steps (`WuauservStopped`, `BitsDisabled`, `CryptSvcStopped`, `DataStoreBloated`); Disk Space/informational steps excluded — their remediations touch real user files/the C: drive and can't be safely redirected to a disposable target |
 
+## Non-destructive unit tests
+
+`WindowsAutoRemediation\_AutomatedTesting\Unit\` holds Pester tests for the two driver
+remediation scripts. They run the script under test as a file in a child PowerShell 5.1
+process (the same way UEM does) with `Get-WmiObject`, `pnputil` and `Start-Sleep`
+stubbed, so they need no elevation, no snapshot and no hardware. They cover
+classification, the escalation chain, filter handling, argument forwarding, summary
+counts and exit codes. Run them before any break test:
+
+```powershell
+.\WindowsAutoRemediation\_AutomatedTesting\Unit\Invoke-DriverUnitTests.ps1
+```
+
+Works with the in-box Pester 3.4 and with Pester 5. A step-by-step lab procedure for the
+six device/driver break tests is in
+`WindowsAutoRemediation\_AutomatedTesting\LAB-RUN-DriverAndDevice.md`, and
+`WindowsAutoRemediation\_AutomatedTesting\Invoke-DriverDeviceLabRun.ps1` runs that whole
+procedure (preflight, unit tests, every applicable break, analysis, verdict table, optional
+inventory update) with one command.
+
 ## Safety interlock
 
 Every break test calls `Assert-DexTestHost`, which refuses to run unless **all** of:

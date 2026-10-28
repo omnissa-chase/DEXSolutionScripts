@@ -50,11 +50,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateAllDriverIssues.ps1
-    Version      : 3.0.0
+    Version      : 3.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-07-28
+    Last Modified: 2026-10-28
     Timeout      : 120 seconds
 
 .DISCLAIMER
@@ -74,11 +74,12 @@ param(
 )
 
 # Test-DriverMatch: returns $true when no filter is set, or when the device
-# name matches the filter regex.
+# name matches the filter regex. $DriverFilter resolves via dynamic scoping to
+# the enclosing function's parameter (there is no script-scope copy of it).
 function Test-DriverMatch {
     param([string]$Name)
-    if (-not $script:DriverFilter) { return $true }
-    return $Name -match $script:DriverFilter
+    if (-not $DriverFilter) { return $true }
+    return $Name -match $DriverFilter
 }
 
 function Invoke-DriverEscalation {
@@ -262,7 +263,7 @@ $Steps.Add(@{
         if ($LASTEXITCODE -ne 0) {
             return @{ Status = 'Failed'; Message = "pnputil /enum-drivers failed (exit $LASTEXITCODE)" }
         }
-        $count = ($out | Select-String 'Published Name').Count
+        $count = @($out | Select-String 'Published Name').Count
         return @{ Status = 'Passed'; Message = "$count OEM driver package(s) in driver store" }
     }
     ResolutionScript = {
@@ -272,24 +273,29 @@ $Steps.Add(@{
 })
 
 # Steps 2-N: Per-class driver health (generated from $DriverClasses) ----------
-# GetNewClosure() binds $c at scriptblock creation time so each loop iteration
-# captures its own class definition rather than sharing a single reference.
+# Each class definition is stored on the step (Class) and handed to the
+# scriptblocks as a parameter by the execution engine. Do NOT use
+# GetNewClosure() here: a closure runs inside a new dynamic module whose scope
+# cannot see functions defined in this function (Test-DriverMatch,
+# Invoke-DriverEscalation) when the script is run as a file, e.g. by the
+# Workspace ONE script engine.
 $classOrder = 2
 foreach ($class in $DriverClasses | Where-Object { $_.Enabled }) {
-    $c = $class
     $Steps.Add(@{
-        Name             = "$($c.Name) Driver Health"
+        Name             = "$($class.Name) Driver Health"
         Order            = $classOrder
         Enabled          = $true
         ResolveOnWarning = $false
+        Class            = $class
         DetectionScript  = {
+            param([hashtable]$c)
             $all = Get-WmiObject -Class Win32_PnPEntity -ErrorAction SilentlyContinue |
                    Where-Object { $_.Name -match $c.Pattern }
             if ($c.ExcludePattern) { $all = $all | Where-Object { $_.Name -notmatch $c.ExcludePattern } }
             $devices = $all | Where-Object { Test-DriverMatch $_.Name }
             if (-not $devices) {
-                if ($all -and $script:DriverFilter) {
-                    return @{ Status = 'Passed'; Message = "No $($c.Name) devices match filter '$($script:DriverFilter)' -- step skipped" }
+                if ($all -and $DriverFilter) {
+                    return @{ Status = 'Passed'; Message = "No $($c.Name) devices match filter '$DriverFilter' -- step skipped" }
                 }
                 return @{ Status = $c.AbsentStatus; Message = $c.AbsentMessage }
             }
@@ -299,18 +305,19 @@ foreach ($class in $DriverClasses | Where-Object { $_.Enabled }) {
                 return @{ Status = 'Failed'; Message = "Driver error on: $names" }
             }
             return @{ Status = 'Passed'; Message = "Healthy $($c.Name) driver(s): $(($devices.Name) -join ', ')" }
-        }.GetNewClosure()
-        ResolutionScript = if ($c.Remediate) {
+        }
+        ResolutionScript = if ($class.Remediate) {
             {
+                param([hashtable]$c)
                 $errored = Get-WmiObject -Class Win32_PnPEntity -ErrorAction SilentlyContinue |
                            Where-Object { $_.Name -match $c.Pattern -and $_.ConfigManagerErrorCode -ne 0 }
                 if ($c.ExcludePattern) { $errored = $errored | Where-Object { $_.Name -notmatch $c.ExcludePattern } }
                 $errored = $errored | Where-Object { Test-DriverMatch $_.Name }
                 if ($errored) {
-                    $r = Invoke-DriverEscalation -InstanceIds ($errored.DeviceID) -AllowedActions $script:AllowedActions
-                    if ($r.Unfixed) { $script:UnfixedDevices += $r.Unfixed }
+                    $r = Invoke-DriverEscalation -InstanceIds ($errored.DeviceID) -AllowedActions $AllowedActions
+                    if ($r.Unfixed) { $UnfixedDevices.AddRange([string[]]$r.Unfixed) }
                 }
-            }.GetNewClosure()
+            }
         } else { $null }
     })
     $classOrder++
@@ -334,7 +341,7 @@ $Steps.Add(@{
             return @{ Status = 'Warning'; Message = "Errored device(s) outside covered classes: $names" }
         }
         return @{ Status = 'Passed'; Message = 'No uncovered device driver errors detected' }
-    }.GetNewClosure()
+    }
     ResolutionScript = $null   # Flag only -- class is unknown so escalation is not safe
 })
 $classOrder++
@@ -366,7 +373,7 @@ $activeSteps = $Steps |
     Where-Object { $_.Enabled } |
     Sort-Object   { [int]$_.Order }
 
-$script:UnfixedDevices = @()
+$UnfixedDevices = [System.Collections.Generic.List[string]]::new()
 $results = New-Object 'System.Collections.Generic.List[PSCustomObject]'
 
 $scopeLine   = if ($DriverFilter) { "Within-class filter: $DriverFilter" } else { 'All devices' }
@@ -386,7 +393,7 @@ foreach ($step in $activeSteps) {
 
     # -- Detection ------------------------------------------------------------
     try {
-        $result  = & $step.DetectionScript
+        $result  = & $step.DetectionScript $step.Class
         $status  = $result.Status
         $message = $result.Message
     } catch {
@@ -400,7 +407,7 @@ foreach ($step in $activeSteps) {
 
     if ($shouldRemediate -and $step.ResolutionScript) {
         try {
-            & $step.ResolutionScript | Out-Null
+            & $step.ResolutionScript $step.Class | Out-Null
             $remediated = $true
         } catch {
             $remError = $_.Exception.Message
@@ -431,15 +438,17 @@ foreach ($step in $activeSteps) {
 }
 
 # -- Summary ------------------------------------------------------------------
-$passed   = ($results | Where-Object { $_.Status -eq 'Passed'  }).Count
-$warnings = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
-$remCount = ($results | Where-Object { $_.Remediated }).Count
+# @() guards: in Windows PowerShell 5.1 a single PSCustomObject has no .Count, so a
+# lone Failed step would otherwise yield $null here and the script would exit 0.
+$passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
+$warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
+$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+$remCount = @($results | Where-Object { $_.Remediated }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"
 Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
 
-$allUnfixed = $script:UnfixedDevices | Where-Object { $_ }
+$allUnfixed = $UnfixedDevices | Where-Object { $_ }
 
 if ($allUnfixed) {
     Write-Output "`r`n  [NOTICE] The following device(s) could not be resolved without a reboot:"
@@ -461,6 +470,10 @@ exit 0
 # engine does not recognise a param block at script scope, and $PSCmdlet is $null
 # there, which makes every ShouldProcess call throw. Inputs arrive as environment
 # variables and are bound to the function's parameters below.
+#
+# @args forwards any command-line arguments (for example -AllowedActions from the
+# break-test harness or a local console run) to the function as named parameters.
+# Under UEM $args is empty, so the environment-variable defaults apply unchanged.
 
-Invoke-AutoRemediateAllDriverIssues
+Invoke-AutoRemediateAllDriverIssues @args
 Exit 0

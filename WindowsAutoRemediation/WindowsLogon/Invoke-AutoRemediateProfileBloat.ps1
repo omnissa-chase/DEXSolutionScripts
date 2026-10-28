@@ -73,11 +73,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateProfileBloat.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-05
+    Last Modified: 2026-10-28
     Timeout      : 300 seconds
 
     Environment variables:
@@ -532,11 +532,13 @@ foreach ($step in $activeSteps) {
 }
 
 # -- Summary -----------------------------------------------------------------
-$passed      = ($results | Where-Object { $_.Status -eq 'Passed'  }).Count
-$warnings    = ($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed      = ($results | Where-Object { $_.Status -eq 'Failed'  }).Count
-$remCount    = ($results | Where-Object { $_.Remediated }).Count
-$remErrs     = ($results | Where-Object { $_.RemError }).Count
+# @() guards: in Windows PowerShell 5.1 a single PSCustomObject has no .Count, so a
+# lone Failed step would otherwise yield $null here and the script would exit 0.
+$passed      = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
+$warnings    = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
+$failed      = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+$remCount    = @($results | Where-Object { $_.Remediated }).Count
+$remErrs     = @($results | Where-Object { $_.RemError }).Count
 $reclaimedMB = [math]::Round($script:TotalBytesReclaimed / 1MB, 1)
 
 Write-Output "`r`n--------------------------------------------------------------------"
