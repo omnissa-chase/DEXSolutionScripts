@@ -211,11 +211,28 @@ function Get-StepCommand { param($Step)
 }
 
 # -- Result helpers ------------------------------------------------------------
-function Read-HarnessResult { param([string]$LogPath)
+function Read-HarnessResult { param([string]$LogPath, [string]$Script, [datetime]$StartedAt)
+    # The harnesses pipe Write-DexTestResult to Out-Null, which also swallows its
+    # "[Result] <path>" line, so that line is only a bonus. The reliable key is the TestId the
+    # harness prints in its Context line: the result file is <FixReport>\<Script>\<TestId>.json.
+    # Last resort: the newest JSON for that script written after the step started.
+    $jsonPath = $null
     $m = Select-String -LiteralPath $LogPath -Pattern '\[Result\]\s+(.+\.json)\s*$' | Select-Object -Last 1
-    if (-not $m) { return $null }
-    $jsonPath = $m.Matches[0].Groups[1].Value.Trim()
-    if (-not (Test-Path -LiteralPath $jsonPath)) { return $null }
+    if ($m) { $jsonPath = $m.Matches[0].Groups[1].Value.Trim() }
+
+    $scriptDir = Join-Path $FixReportPath $Script
+    if (-not ($jsonPath -and (Test-Path -LiteralPath $jsonPath))) {
+        $id = Select-String -LiteralPath $LogPath -Pattern 'Context:\s+TestId\s+([0-9a-f]{12})' | Select-Object -Last 1
+        if ($id) { $jsonPath = Join-Path $scriptDir ($id.Matches[0].Groups[1].Value + '.json') }
+    }
+    if (-not ($jsonPath -and (Test-Path -LiteralPath $jsonPath))) {
+        $newest = Get-ChildItem -LiteralPath $scriptDir -Filter '*.json' -ErrorAction SilentlyContinue |
+                  Where-Object { $StartedAt -and $_.LastWriteTime -ge $StartedAt } |
+                  Sort-Object LastWriteTime | Select-Object -Last 1
+        if ($newest) { $jsonPath = $newest.FullName }
+    }
+    if (-not ($jsonPath -and (Test-Path -LiteralPath $jsonPath))) { return $null }
+
     $r = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
     @{
         Path    = $jsonPath
@@ -469,6 +486,7 @@ foreach ($step in $Plan) {
     Write-Output "     $($step.Note)"
     $cmd = Get-StepCommand $step
     $log = Join-Path $runDir "$($step.Id).log"
+    $stepStart = (Get-Date).AddSeconds(-2)   # small skew allowance for file timestamps
     $sw  = [System.Diagnostics.Stopwatch]::StartNew()
 
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $cmd 2>&1 |
@@ -476,7 +494,7 @@ foreach ($step in $Plan) {
     $rc = $LASTEXITCODE
     $sw.Stop()
 
-    $res = Read-HarnessResult -LogPath $log
+    $res = Read-HarnessResult -LogPath $log -Script $step.Script -StartedAt $stepStart
     $overall = if ($res) { $res.Overall } else { '' }
     $verdict = Get-Verdict -Overall $overall -Expected $step.Expected
     if ($res -and -not $res.Breaks -and $overall -ne 'Passed') {

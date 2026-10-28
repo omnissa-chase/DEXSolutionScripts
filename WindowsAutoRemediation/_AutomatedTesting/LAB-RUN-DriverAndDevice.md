@@ -159,3 +159,8 @@ next lab run should start from the same baseline as this one.
 - The orchestrator's own first-run bugs are fixed too: `@($list)` over a generic List throws
   "Argument types do not match" in 5.1 (now `.ToArray()`), and `Tee-Object` wrote UTF-16 logs
   (now UTF-8).
+- The 14:14 and 14:15 runs each passed their first real break test
+  (`Invoke-AutoRemediateAllDriverIssues` reinstalled a genuinely disabled USB host controller)
+  but the orchestrator reported NO RESULT and stopped: it looked for the harness's
+  `[Result] <path>` line, which the harnesses pipe to `Out-Null`. It now locates the result
+  JSON by the TestId in the harness's Context line, with a newest-file fallback.
