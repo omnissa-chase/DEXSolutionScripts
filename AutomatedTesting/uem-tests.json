@@ -1,0 +1,53 @@
+{
+  "_comment": "Per-item overrides for Invoke-WsoContentTest.ps1 (see UEM-API-TESTING-SPEC.md). Keyed by the inventory Name column. Anything not listed here is tested with the defaults: a Script is expected to report Completed (exit 0) on every test device, a Sensor is expected to report a value that parses as its declared Data Type. Keys: skip (reason string: never tested), expect (Completed | Failed), variables (name -> value for $env:-backed parameters), match (regex the sensor value must satisfy), min / max (numeric bounds for Integer sensors), allowEmpty (true when an empty String value is acceptable), timeoutMinutes (per-item override of the wait for a result), note (free text carried into the result file).",
+
+  "Invoke-SimpleReboot.ps1": {
+    "skip": "Reboots the test device mid-run. Validate by hand with the reboot break test."
+  },
+  "Invoke_RebootWithUserDefer_1.2.0.7.ps1": {
+    "skip": "Reboots the test device after the deferral window."
+  },
+  "DEX_Invoke-SignoffWindows.ps1": {
+    "skip": "Signs the console user off the test device."
+  },
+  "DEX_Start-LockDeviceSoft.ps1": {
+    "skip": "Locks the console session of the test device."
+  },
+  "DEX_LockDevice-BitlockEncryptionActivated.ps1": {
+    "skip": "Locks the console session of the test device."
+  },
+  "Start-UserProfileCleanup.ps1": {
+    "skip": "Deletes user profiles. No dry-run mode; validate by hand per General-Testing-Guide.md section 2.2."
+  },
+  "Invoke-AutoRemediateNetworkStack.ps1": {
+    "skip": "Can sever the test device's network connection (adapter reset, Winsock reset). Covered by its break test."
+  },
+
+  "Restart-WinService.ps1": {
+    "variables": { "ServiceName": "Spooler", "WhatIf": "" },
+    "note": "Print Spooler exists on every Windows build and restarts cleanly."
+  },
+  "Restart-WinProcess.ps1": {
+    "skip": "Needs a running target process on the test device. Set variables (FileDescription, StartService) and remove this skip to test."
+  },
+  "Restart-WinProcessGraceful.ps1": {
+    "skip": "Needs a running target process and an interactive user on the test device. Set variables (FileDescription, Mode, Restart) and remove this skip to test."
+  },
+  "Invoke-AutoRemediateDriverIssues.ps1": {
+    "variables": { "DriverFilter": "VMware" },
+    "note": "Filter matches the VMware devices on the lab VM. Scan/Restart only by default; the escalation chain is covered by the unit tests and break tests."
+  },
+  "Invoke-AutoRemediateAllDriverIssues.ps1": {
+    "variables": { "DriverFilter": "" }
+  },
+  "Invoke-AutoRemediateSCOMHealthServiceCache.ps1": {
+    "skip": "SCOM agent is not installed on the lab VM. Expected to exit non-zero there, which proves nothing."
+  },
+  "Invoke-AutoRemediateSCOMClonedIdentity.ps1": {
+    "skip": "SCOM agent is not installed on the lab VM."
+  },
+
+  "device_is_virtual.ps1": {
+    "match": "^(True|False)$"
+  }
+}

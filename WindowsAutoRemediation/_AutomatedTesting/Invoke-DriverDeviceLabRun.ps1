@@ -169,7 +169,10 @@ $Plan = @(
         -Note 'All four catalog breaks; DataStoreBloated uses a sparse file.'
     ConvertTo-PlanStep -Id 'Printer-NonReboot' -Harness 'Invoke-AutoRemediatePrinter_BreakTest.ps1' -Script 'Invoke-AutoRemediatePrinter' `
         -Arguments @{ BreakCount = 3; RemediationTest = $true } -Expected 'Passed' `
-        -Note 'SpoolerService, PrinterOffline, NetworkPrinterUnreachable (the last is report-only).'
+        -Note 'PrinterOffline and NetworkPrinterUnreachable (report-only). The harness drops SpoolerService from a multi-break run because the other breaks need the spooler to verify.'
+    ConvertTo-PlanStep -Id 'Printer-Spooler' -Harness 'Invoke-AutoRemediatePrinter_BreakTest.ps1' -Script 'Invoke-AutoRemediatePrinter' `
+        -Arguments @{ BreakName = 'SpoolerService'; RemediationTest = $true } -Expected 'Passed' `
+        -Note 'SpoolerService on its own: stop (or disable and stop) the spooler, expect the script to bring it back.'
 )
 
 if ($IncludeDriverPackageBreak) {
@@ -418,6 +421,18 @@ if ($cbs -or $pfro) { Write-Step 'Warning' 'Reboot' 'a reboot is already pending
 else { Write-Step 'Passed' 'Reboot' 'no pending reboot' }
 
 if ($Plan.Count -eq 0) { Write-Step 'Failed' 'Plan' "no steps match -Include '$Include'"; exit 1 }
+
+# Baseline sanity: a previous run that failed to restore leaves services in a state that makes
+# the next run's results meaningless (and, for the Spooler, makes the Printer fixture unbuildable).
+$spoolerSvc = Get-Service -Name Spooler -ErrorAction SilentlyContinue
+if ($spoolerSvc -and $spoolerSvc.Status -ne 'Running' -and ($Plan | Where-Object { $_.Script -eq 'Invoke-AutoRemediatePrinter' })) {
+    Write-Step 'Failed' 'Baseline' "Spooler is $($spoolerSvc.Status)/$($spoolerSvc.StartType); the Printer harness needs it running. Repair:  Set-Service Spooler -StartupType Automatic; Start-Service Spooler"
+    exit 1
+}
+$bitsSvc = Get-Service -Name BITS -ErrorAction SilentlyContinue
+if ($bitsSvc -and $bitsSvc.StartType -eq 'Disabled') {
+    Write-Step 'Warning' 'Baseline' 'BITS start type is Disabled (Windows default is Manual). A previous run may not have restored it:  Set-Service BITS -StartupType Manual'
+}
 
 # -- Run directory --------------------------------------------------------------
 $runDir = Join-Path $LabRunRoot ("LabRun_" + (Get-Date -Format 'yyyyMMdd_HHmmss'))

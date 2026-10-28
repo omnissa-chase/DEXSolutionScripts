@@ -27,7 +27,7 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateAudioBluetooth.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
@@ -108,9 +108,17 @@ $Steps = @(
                     $_.ConfigManagerErrorCode -ne 0
                 }
             foreach ($dev in $audioDevices) {
-                # Disable then re-enable device via devcon-equivalent PnP restart
                 $devId = $dev.DeviceID
-                pnputil /restart-device "$devId" 2>&1 | Out-Null
+                if ($dev.ConfigManagerErrorCode -eq 22) {
+                    # Code 22 = device disabled (CM_PROB_DISABLED). A restart cannot clear it;
+                    # only enabling can, and a disabled endpoint is the most common "no audio"
+                    # cause a technician fixes by hand. pnputil /enable-device needs Win10 2004+.
+                    pnputil /enable-device "$devId" 2>&1 | Out-Null
+                    Start-Sleep -Seconds 2
+                } else {
+                    # Any other driver error: in-place refresh via a PnP restart
+                    pnputil /restart-device "$devId" 2>&1 | Out-Null
+                }
             }
         }
     },
@@ -141,7 +149,7 @@ $Steps = @(
         Name             = 'Volume & Mute State'
         Order            = 4
         Enabled          = $true
-        # Volume at 0% returns Warning -- auto-unmute via WScript.Shell SendKeys as a best-effort fix
+        # Volume at 0% returns Warning -- auto-raised to 50% via waveOutSetVolume
         ResolveOnWarning = $true
         DetectionScript  = {
             try {
@@ -166,9 +174,23 @@ public class AudioUtils {
             }
         }
         ResolutionScript = {
-            # Send the mute toggle key via WScript.Shell as a best-effort unmute
-            $wsh = New-Object -ComObject WScript.Shell -ErrorAction SilentlyContinue
-            if ($wsh) { $wsh.SendKeys([char]0xAD) }   # VK_VOLUME_MUTE
+            # Raise the master waveOut volume to 50% when detection found it at 0%.
+            # waveOutSetVolume on device 0 is system-wide (verified on 2026-10-28: a separate
+            # process sees the change), works from a non-interactive SYSTEM context and is
+            # idempotent. The previous approach sent VK_VOLUME_MUTE through SendKeys, which does
+            # nothing without an interactive desktop and, on a device at 0% that is not muted,
+            # would have muted it.
+            try {
+                Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public class AudioUtilsSet {
+    [DllImport("winmm.dll")] public static extern int waveOutSetVolume(System.IntPtr h, uint vol);
+}
+'@ -ErrorAction SilentlyContinue
+                [void][AudioUtilsSet]::waveOutSetVolume([System.IntPtr]::Zero, [uint32]0x7FFF7FFF)
+            } catch {
+                Write-Output "  [Volume] Unable to set volume: $($_.Exception.Message)"
+            }
         }
     },
 

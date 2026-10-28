@@ -55,6 +55,14 @@ six device/driver break tests is in
 procedure (preflight, unit tests, every applicable break, analysis, verdict table, optional
 inventory update) with one command.
 
+## Testing through UEM
+
+The harness above runs scripts directly on a test host. `UEM-API-TESTING-SPEC.md` describes
+the second layer: pushing a throwaway copy of each inventory item to a test smart group,
+running it under Hub the way production does, and pulling the per-device result back over
+the API. `uem-tests.json` holds the per-item expectations (skips, variables, sensor value
+checks). The tool itself, `Invoke-WsoContentTest.ps1`, lives in the UEM script connector
+next to the publisher because it shares that folder's configuration and credentials.
 ## Safety interlock
 
 Every break test calls `Assert-DexTestHost`, which refuses to run unless **all** of:

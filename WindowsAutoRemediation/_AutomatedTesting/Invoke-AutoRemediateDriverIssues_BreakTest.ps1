@@ -90,11 +90,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateDriverIssues_BreakTest.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : Administrator (elevated)
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-12
+    Last Modified: 2026-10-28
     Reporting    : C:\Temp\FixReport\Invoke-AutoRemediateDriverIssues\
 
 .DISCLAIMER
@@ -463,6 +463,9 @@ try {
                 OriginalState   = $original
             }
             Write-DexStep -Status 'Info' -Name "Break $($def.Name)" -Message "method '$($method.Name)' applied"
+            # Commit at once so Restore can undo this break even if a later Capture/Apply throws.
+            $state.Breaks = $applied
+            Save-DexTestState -State $state
         }
 
         $state.Breaks = $applied
@@ -583,7 +586,11 @@ try {
 # Snapshot environments revert on the host, so restoring here would only add risk.
 if ($Environment -eq 'Physical') {
     $restoreFailed = $false
-    foreach ($b in @($state.Breaks)) {
+    # Restore newest-first. A later break's Capture can record state an earlier break had
+    # already changed (e.g. DataStoreBloated capturing the BITS start type after BitsDisabled
+    # ran); undoing in reverse order lets the oldest capture, the true baseline, win.
+    $toRestore = @($state.Breaks); [array]::Reverse($toRestore)
+    foreach ($b in $toRestore) {
         $def = Get-BreakDefinition -Name $b.Name
         if (-not $def) { continue }
         try {

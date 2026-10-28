@@ -62,11 +62,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediatePrinter_BreakTest.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : Administrator (elevated)
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-07
+    Last Modified: 2026-10-28
     Reporting    : C:\Temp\FixReport\Invoke-AutoRemediatePrinter\
 
 .DISCLAIMER
@@ -403,6 +403,14 @@ try {
             Get-DexRandomSubset -InputObject $candidates -Random $state.Random -Count $BreakCount
         }
 
+        # SpoolerService cannot share a run with the printer-object breaks: once the spooler is
+        # down, their Capture, Verify and Validate (Win32_Printer, Get-Printer) all throw. It is
+        # tested on its own with -BreakName SpoolerService.
+        if (@($selected).Count -gt 1 -and ($selected | Where-Object { $_.Name -eq 'SpoolerService' })) {
+            $selected = @($selected | Where-Object { $_.Name -ne 'SpoolerService' })
+            Write-DexStep -Status 'Info' -Name 'Selection' -Message 'SpoolerService dropped from a multi-break run; test it alone with -BreakName SpoolerService'
+        }
+
         $applied = @()
         foreach ($def in $selected) {
             $method = (Get-DexRandomSubset -InputObject $def.Methods -Random $state.Random -Count 1)[0]
@@ -422,6 +430,11 @@ try {
                 OriginalState   = $original
             }
             Write-DexStep -Status 'Info' -Name "Break $($def.Name)" -Message "method '$($method.Name)' applied"
+            # Commit at once so Restore can undo this break even if a later Capture/Apply throws.
+            # On 2026-10-28 a disabled Spooler was left behind because the next break's Capture
+            # threw and the applied list had not been committed yet.
+            $state.Breaks = $applied
+            Save-DexTestState -State $state
         }
 
         $state.Breaks = $applied
@@ -540,7 +553,10 @@ try {
 # Snapshot environments revert on the host, so restoring here would only add risk.
 if ($Environment -eq 'Physical') {
     $restoreFailed = $false
-    foreach ($b in @($state.Breaks)) {
+    # Restore newest-first. A later break's Capture can record state an earlier break had
+    # already changed; undoing in reverse order lets the oldest capture, the true baseline, win.
+    $toRestore = @($state.Breaks); [array]::Reverse($toRestore)
+    foreach ($b in $toRestore) {
         $def = Get-BreakDefinition -Name $b.Name
         if (-not $def) { continue }
         try {

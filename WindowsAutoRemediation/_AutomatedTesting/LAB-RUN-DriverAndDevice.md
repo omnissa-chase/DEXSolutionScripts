@@ -164,3 +164,25 @@ next lab run should start from the same baseline as this one.
   but the orchestrator reported NO RESULT and stopped: it looked for the harness's
   `[Result] <path>` line, which the harnesses pipe to `Out-Null`. It now locates the result
   JSON by the TestId in the harness's Context line, with a newest-file fallback.
+- The 14:30 run reached every step. Drivers, network and Windows Update passed on real
+  hardware; the boundary probe failed as intended. Two harness defects and two script defects
+  surfaced:
+  - **Harnesses committed the applied-break list only after the apply loop.** When the
+    Printer harness's second Capture threw (the Spooler was already down), Restore had nothing
+    to undo and left the Spooler Disabled. Every harness now commits each break as soon as it
+    is applied.
+  - **Harnesses restored in application order.** The Windows Update harness's
+    `DataStoreBloated` captures the BITS start type, which `BitsDisabled` had already set to
+    Disabled, and restored that. Every harness now restores newest-first so the oldest
+    capture, the true baseline, wins. The orchestrator preflight now refuses to start the
+    Printer step with the Spooler down and warns if BITS is Disabled.
+  - **SpoolerService cannot share a run** with the printer-object breaks (their Capture,
+    Verify and Validate need the spooler). The harness drops it from multi-break runs and the
+    orchestrator tests it on its own (`Printer-Spooler` step).
+  - **`Invoke-AutoRemediateAudioBluetooth.ps1`**: a disabled audio device (CM error 22) was
+    only restarted, which cannot clear a disable; it is now re-enabled with
+    `pnputil /enable-device`. Volume at 0% was "fixed" by sending VK_VOLUME_MUTE through
+    SendKeys, which does nothing non-interactively and would mute an unmuted device; it now
+    sets the master waveOut volume to 50% (verified system-wide across processes).
+  - Repairing a VM left by the pre-fix harnesses (elevated):
+    `Set-Service Spooler -StartupType Automatic; Start-Service Spooler; Set-Service BITS -StartupType Manual; Get-Printer | Where-Object Name -like 'DEXTest*' | Remove-Printer`
