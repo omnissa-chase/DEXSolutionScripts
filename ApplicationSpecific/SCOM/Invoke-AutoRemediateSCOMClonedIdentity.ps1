@@ -37,11 +37,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateSCOMClonedIdentity.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : x64
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-22
+    Last Modified: 2026-10-28
     Timeout      : ~5 seconds (launcher exits immediately; payload runs via scheduled task, self-capped at 15 minutes)
 
     Environment variables:
@@ -63,7 +63,7 @@ function Invoke-AutoRemediateSCOMClonedIdentity {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param([switch]$RunAsPayload)
 
-$SCRIPT_VERSION = '1.0.0'
+$SCRIPT_VERSION = '1.0.1'
 
 # -- Dispatch constants (shared by launcher and payload) --
 $TaskName   = 'WS1_SCOMClonedIdentity'
@@ -106,8 +106,14 @@ if (-not $RunAsPayload) {
             Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
         }
 
+        # Task Scheduler does not inherit this environment: forward whitelisted values only.
+        $fwd = "`$env:RunAsPayload='true';"
+        foreach ($n in 'ConfirmHighImpact', 'WhatIf') {
+            $v = ([string][Environment]::GetEnvironmentVariable($n)).Trim().ToLower()
+            if ($v -match '^(true|false|1|0|yes|no)$') { $fwd += " `$env:$n='$v';" }
+        }
         $action    = New-ScheduledTaskAction -Execute 'powershell.exe' `
-                         -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"`$env:RunAsPayload='true'; & '$PayloadPs1'`""
+                         -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"$fwd & '$PayloadPs1'`""
         $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
         $settings  = New-ScheduledTaskSettingsSet `
                          -ExecutionTimeLimit '00:20:00' `
@@ -381,10 +387,11 @@ try {
                 if ((Get-Date) -gt $Deadline) {
                     Write-Log 'Deadline exceeded before the reset began - aborting.' -Level 'ERROR'
                     Set-ItemProperty -Path $RegPath -Name 'Status' -Value 'TimedOut' -Type String -ErrorAction Stop -WhatIf:$false
+                    $Script:BlockReason = 'TimedOut'
                     return
                 }
 
-                if (-not $PSCmdlet.ShouldProcess($StateDir, 'Stop HealthService and reset agent identity')) { return }
+                if (-not $PSCmdlet.ShouldProcess($StateDir, 'Stop HealthService and reset agent identity')) { $Script:BlockReason = 'WhatIf'; return }
 
                 $svc = Get-Service -Name 'HealthService' -ErrorAction SilentlyContinue
                 if ($svc -and $svc.Status -ne 'Stopped') {
@@ -558,7 +565,9 @@ try {
     # -- Summary --
     $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
     $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-    $failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+    # The action step returns 'Failed' by design to trigger its ResolutionScript; once
+    # that ran, the step is not a failure. Verification carries the real verdict.
+    $failed   = @($results | Where-Object { $_.Status -eq 'Failed' -and -not $_.Remediated }).Count
     $remCount = @($results | Where-Object { $_.Remediated }).Count
 
     Write-Output "`r`n----------------------------------------------------------------"

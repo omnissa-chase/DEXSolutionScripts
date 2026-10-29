@@ -9,28 +9,24 @@
 
     Six steps: 1 Admin Confirmation Gate, 2 Agent and Install Guard, 3 Management
     Server Reachability, 4 Flush Signal Confirmation, 5 Health Service State Flush,
-    6 Post-Flush Verification. Steps 1-4 are all abort gates and ALL must pass.
+    6 Post-Flush Verification. Steps 1-4 are abort gates and ALL must pass. Step 3 is
+    not optional: a flushed agent that cannot reach its management server has no
+    configuration and no way to get one. Step 4 needs a real signal (stale config,
+    ESENT corruption, oversized folder) -- age alone is not a reason. The state folder
+    is RENAMED, not deleted, restored if the agent fails to come back, and removed only
+    after step 6 confirms recovery. A cooldown marker prevents repeat flushes.
 
-    Step 3 is not optional: an agent that cannot reach its management server at the
-    moment of the flush is left with no configuration and no way to obtain one. Step 4
-    requires a real signal (stale config, ESENT corruption, oversized folder) -- age
-    alone is not a reason. The state folder is RENAMED, not deleted, and restored
-    automatically if the agent fails to come back; deletion happens only after step 6
-    confirms recovery. A cooldown marker prevents repeat flushes on one device.
-
-    >> Everything else -- why this is never run fleet-wide, the management-group load
-       cost, the permanently-discarded unsent data, the shared-folder interaction with
-       the Log Analytics side of a multi-homed MMA, the AV/EDR exclusion this launcher
-       requires, rollout guidance and tunables -- is in
-       ApplicationSpecific/SCOM/README.md sections 3, 6.1 and 10. Read before deploying.
+    >> Rationale, management-group load cost, discarded unsent data, the multi-homed
+       MMA caveat, the AV/EDR exclusion this launcher requires, rollout guidance and
+       tunables: ApplicationSpecific/SCOM/README.md sections 3, 6.1 and 10.
 
 .NOTES
     Script Name  : Invoke-AutoRemediateSCOMHealthServiceCache.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : x64
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-25
+    Last Modified: 2026-10-28
     Timeout      : ~5 seconds (launcher exits immediately; payload runs via scheduled task, self-capped at 15 minutes)
 
     Environment variables:
@@ -47,7 +43,7 @@ function Invoke-AutoRemediateSCOMHealthServiceCache {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param([switch]$RunAsPayload)
 
-$SCRIPT_VERSION = '1.0.0'
+$SCRIPT_VERSION = '1.0.1'
 
 # -- Dispatch constants (launcher + payload) --
 $TaskName   = 'WS1_SCOMHealthServiceCache'
@@ -67,11 +63,9 @@ function Write-Log {
         Out-File -FilePath $LogPath -Append -Encoding UTF8 -WhatIf:$false -ErrorAction SilentlyContinue
 }
 
-# -- Launcher (UEM dispatcher) --
-# UEM runs this WITHOUT -RunAsPayload; the launcher stages the script and`r`n# dispatches a task to re-run it. README section 3.
+# -- Launcher (UEM dispatcher) -- README section 3.
 if (-not $RunAsPayload) {
     try {
-        # Layer 1 gate -- cheap, mechanism-specific.
         $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         if ($existing -and $existing.State -eq 'Running') {
             Write-Output "$HEAD Payload already running. Skipping dispatch."
@@ -82,10 +76,8 @@ if (-not $RunAsPayload) {
             New-Item -ItemType Directory -Path $BaseDir -Force -ErrorAction Stop -WhatIf:$false | Out-Null
         }
 
-        # UEM deletes its temp copy; stage one for the task.
         Copy-Item -Path $PSCommandPath -Destination $PayloadPs1 -Force -ErrorAction Stop -WhatIf:$false
 
-        # Stamp 'Dispatched' so sensors have a value early.
         if (-not (Test-Path $RegPath)) { New-Item -Path $RegPath -Force -ErrorAction Stop -WhatIf:$false | Out-Null }
         Set-ItemProperty -Path $RegPath -Name 'Status'           -Value 'Dispatched'           -Type String -ErrorAction Stop -WhatIf:$false
         Set-ItemProperty -Path $RegPath -Name 'LastDispatchTime' -Value (Get-Date -Format 'o')  -Type String -ErrorAction Stop -WhatIf:$false
@@ -94,8 +86,14 @@ if (-not $RunAsPayload) {
             Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
         }
 
+        # Task Scheduler does not inherit this environment: forward whitelisted values only.
+        $fwd = "`$env:RunAsPayload='true';"
+        foreach ($n in 'ConfirmHighImpact', 'WhatIf') {
+            $v = ([string][Environment]::GetEnvironmentVariable($n)).Trim().ToLower()
+            if ($v -match '^(true|false|1|0|yes|no)$') { $fwd += " `$env:$n='$v';" }
+        }
         $action    = New-ScheduledTaskAction -Execute 'powershell.exe' `
-                         -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"`$env:RunAsPayload='true'; & '$PayloadPs1'`""
+                         -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"$fwd & '$PayloadPs1'`""
         $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
         $settings  = New-ScheduledTaskSettingsSet `
                          -ExecutionTimeLimit '00:20:00' `
@@ -117,16 +115,15 @@ if (-not $RunAsPayload) {
         exit 1
     }
 }
-#  Payload runs below, in the scheduled task context.
-# -- Tunables --
+# -- Tunables (payload) --
 # Hard-coded -- fork the script object per ring. See README section 10.
 $ConfigStaleHours     = 24     # Config cache untouched this long is a signal
 $StateFolderWarnMB    = 1536   # State folder above this counts as a signal
 $MinIntervalDays      = 7      # Cooldown between flushes on one device
-$ServiceStopTimeoutS  = 60     # How long to wait for HealthService to stop
-$ServiceStartTimeoutS = 60     # How long to wait for HealthService to start
+$ServiceStopTimeoutS  = 60
+$ServiceStartTimeoutS = 60
 $ConfigWaitSeconds    = 300    # Wait for configuration re-download
-$ConfigPollSeconds    = 15     # Poll interval while waiting for configuration
+$ConfigPollSeconds    = 15
 $BackupRetentionHours = 24     # Leftover backups older than this are cleaned up
 $MaxRuntimeMinutes    = 15     # Self-enforced deadline
 $NetTimeoutMs         = 5000   # Socket timeout for the management server probe
@@ -151,8 +148,7 @@ if ($env:ConfirmHighImpact) {
 Write-Output "[$RunEventId] Executing Invoke-AutoRemediateSCOMHealthServiceCache payload, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'  WhatIf=$WhatIfPreference  ConfirmHighImpact=$ConfirmHighImpact"
 Write-Log "Payload started. WhatIf=$WhatIfPreference ConfirmHighImpact=$ConfirmHighImpact"
 
-# -- Layer 2 concurrency lock --
-# Kernel-managed: released on process death; no stale-lock mode.
+# -- Concurrency lock (kernel mutex; released on process death) --
 $mutex = $null
 $owned = $false
 
@@ -182,15 +178,14 @@ try {
         Write-Log "Could not write the Running marker to $RegPath -- $($_.Exception.Message)" -Level 'WARN'
     }
 
-    # -- Cooldown gate --
-    # Mutex = "another copy running?"; this = "did it run recently?".
-    $last = (Get-ItemProperty -Path $RegPath -Name 'LastRunTime' -ErrorAction SilentlyContinue).LastRunTime
+    # -- Cooldown gate -- keyed on the last actual flush, not the last run.
+    $last = (Get-ItemProperty -Path $RegPath -Name 'LastFlushTime' -ErrorAction SilentlyContinue).LastFlushTime
     if ($last) {
         $parsed = [datetime]::MinValue
         if ([datetime]::TryParse($last, [ref]$parsed)) {
             if ((Get-Date) -lt $parsed.AddDays($MinIntervalDays)) {
                 Write-Output "$HEAD Flushed at $parsed, within the ${MinIntervalDays}-day cooldown. Skipping."
-                Write-Log "Within cooldown (last run $parsed). Skipping."
+                Write-Log "Within cooldown (last flush $parsed). Skipping."
                 Set-ItemProperty -Path $RegPath -Name 'Status' -Value 'SkippedCooldown' -Type String -ErrorAction Stop -WhatIf:$false
                 exit 0
             }
@@ -249,12 +244,9 @@ try {
         return $sizeMB
     }
 
-# Result constructor -- see Invoke-AutoRemediateSCOMAgent.ps1.
+    # Result constructor -- see Invoke-AutoRemediateSCOMAgent.ps1.
     function Res { param([string]$S, [string]$M) return @{ Status = $S; Message = $M } }
-        # -- Step Definitions --
-    # Fields: Name, DetectionScript, ResolutionScript (where it acts).
-    # Optional: Enabled = $false, ResolveOnWarning = $true.
-    # Execution order is array order.
+    # -- Step Definitions -- (order is array order; optional Enabled, ResolveOnWarning)
     $Steps = @(
 
         @{
@@ -263,7 +255,6 @@ try {
                 if (-not $ConfirmHighImpact) {
                     $Script:AbortFlush  = $true
                     $Script:BlockReason = 'NotConfirmed'
-                    # Detection still runs and reports -- that is how an admin decides.
                     return Res Warning "Not confirmed -- set ConfirmHighImpact to 'true' on the script object to allow the flush. Detection below is for review; nothing will be changed."
                 }
                 return Res Passed 'High-impact action confirmed by the administrator'
@@ -284,8 +275,7 @@ try {
                     return Res Warning "Health Service State folder not present at '$StateDir' -- nothing to flush"
                 }
 
-                # Flushing under a running install or upgrade produces a
-                # half-configured agent that neither process can recover.
+                # Flushing under a running install leaves a half-configured agent.
                 $blockers = @()
                 foreach ($p in 'MOMAgentInstaller', 'ccmsetup', 'TrustedInstaller') {
                     if (Get-Process -Name $p -ErrorAction SilentlyContinue) { $blockers += "$p.exe" }
@@ -330,9 +320,8 @@ try {
                     return Res Warning 'Aborting -- no parent management server assigned. A flushed agent with nowhere to fetch configuration stops monitoring permanently.'
                 }
 
-                # WaitOne() alone is not sufficient: it also returns true when the
-                # connect completed with a refusal. EndConnect() throws in that case,
-                # which is what actually distinguishes reachable from refused.
+                # WaitOne() also returns true on a refused connect; EndConnect() throws
+                # in that case, which is what distinguishes reachable from refused.
                 $reachable = $false
                 $tcp = New-Object System.Net.Sockets.TcpClient
                 try {
@@ -380,9 +369,8 @@ try {
                     $signals += 'configuration cache folder missing'
                 }
 
-                # Signal 2: eSENT corruption against the agent's own store. Own
-                # try/catch -- ProviderName + Id + StartTime in one filter hashtable
-                # can throw a terminating error when the provider is unregistered.
+                # Signal 2: ESENT corruption against the agent's own store. Own
+                # try/catch -- the filter can throw terminating if the provider is absent.
                 try {
                     $esent = @(Get-WinEvent -FilterHashtable @{
                         LogName      = 'Application'
@@ -424,13 +412,13 @@ try {
                 if ((Get-Date) -gt $Deadline) {
                     Write-Log 'Deadline exceeded before the flush began - aborting.' -Level 'ERROR'
                     Set-ItemProperty -Path $RegPath -Name 'Status' -Value 'TimedOut' -Type String -ErrorAction Stop -WhatIf:$false
+                    $Script:BlockReason = 'TimedOut'
                     return
                 }
 
-                if (-not $PSCmdlet.ShouldProcess($StateDir, 'Stop HealthService and rename the state folder')) { return }
+                if (-not $PSCmdlet.ShouldProcess($StateDir, 'Stop HealthService and rename the state folder')) { $Script:BlockReason = 'WhatIf'; return }
 
-                # Stop first. Renaming a folder the service holds open fails, and a
-                # partial rename is worse than no rename.
+                # Stop first: renaming a folder the service holds open fails.
                 $svc = Get-Service -Name 'HealthService' -ErrorAction SilentlyContinue
                 if ($svc -and $svc.Status -ne 'Stopped') {
                     Stop-Service -Name 'HealthService' -Force -ErrorAction SilentlyContinue
@@ -445,8 +433,7 @@ try {
                     }
                 }
 
-                # Rename rather than delete. If the agent does not come back, step 6
-                # restores this folder and the device is no worse off.
+                # Rename, not delete: step 6 restores it if the agent does not come back.
                 $Script:BackupPath = Join-Path $installDir ("Health Service State.dexbak-{0}" -f (Get-Date -Format 'yyyyMMddHHmmss'))
                 try {
                     Rename-Item -LiteralPath $StateDir -NewName (Split-Path $Script:BackupPath -Leaf) -ErrorAction Stop
@@ -474,7 +461,6 @@ try {
                     return Res Passed 'No flush performed -- nothing to verify'
                 }
 
-                # Wait for the service to come up.
                 $svc     = Get-Service -Name 'HealthService' -ErrorAction SilentlyContinue
                 $started = $false
                 if ($svc) {
@@ -490,8 +476,7 @@ try {
                     return Res Failed "HealthService did not start within ${ServiceStartTimeoutS}s after the flush -- state folder $(if ($Script:Restored) { 'restored' } else { 'NOT restored, escalate now' })"
                 }
 
-                # Wait for the agent to pull configuration back down. Until this
-                # happens the agent is running but monitoring nothing.
+                # Until configuration returns the agent is running but monitoring nothing.
                 $configBack = $false
                 $waitUntil  = (Get-Date).AddSeconds($ConfigWaitSeconds)
                 while ((Get-Date) -lt $waitUntil -and (Get-Date) -lt $Deadline) {
@@ -610,7 +595,9 @@ try {
     # -- Summary --
     $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
     $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-    $failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+    # The action step's designed 'Failed' only triggers its ResolutionScript; once that
+    # ran it is not a failure. Verification carries the verdict.
+    $failed   = @($results | Where-Object { $_.Status -eq 'Failed' -and -not $_.Remediated }).Count
     $remCount = @($results | Where-Object { $_.Remediated }).Count
 
     Write-Output "`r`n----------------------------------------------------------------"
@@ -636,6 +623,10 @@ try {
         Set-ItemProperty -Path $RegPath -Name 'Passed'          -Value ([string]$passed)           -Type String -ErrorAction Stop -WhatIf:$false
         Set-ItemProperty -Path $RegPath -Name 'Warnings'        -Value ([string]$warnings)         -Type String -ErrorAction Stop -WhatIf:$false
         Set-ItemProperty -Path $RegPath -Name 'Failed'          -Value ([string]$failed)           -Type String -ErrorAction Stop -WhatIf:$false
+
+        if ($Script:Flushed) {
+            Set-ItemProperty -Path $RegPath -Name 'LastFlushTime' -Value (Get-Date -Format 'o') -Type String -ErrorAction Stop -WhatIf:$false
+        }
     }
     catch {
         Write-Log "Failed to cache results: $($_.Exception.Message)" -Level 'ERROR'
@@ -658,8 +649,7 @@ catch {
     exit 1
 }
 finally {
-    # Self-cleanup, only from the instance that held the lock.
-    # Unregistering from a lock-loser would kill the winner's task.
+    # Self-cleanup from the lock holder only; a lock-loser would kill the winner's task.
     if ($owned) {
         if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
             Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
@@ -671,14 +661,10 @@ finally {
 }
 
 # -- entry point ---------------------------------------------------------------
-# The param block sits inside the function deliberately. The Workspace ONE script
-# engine does not recognise a param block at script scope, and $PSCmdlet is $null
-# there, which makes every ShouldProcess call throw. Inputs arrive as environment
-# variables and are bound to the function's parameters below.
-
-# Async dispatch flag. The launcher re-runs the staged copy through a scheduled
-# task, which now sets this environment variable instead of passing -RunAsPayload,
-# because the switch no longer exists at script scope.
+# The param block sits inside the function deliberately: the Workspace ONE script
+# engine does not recognise one at script scope, and $PSCmdlet is $null there, so
+# ShouldProcess would throw. Inputs arrive as environment variables; the scheduled
+# task sets RunAsPayload the same way because the switch is not at script scope.
 $RunAsPayload = $false
 if ($env:RunAsPayload) {
     try   { $RunAsPayload = [System.Convert]::ToBoolean($env:RunAsPayload) }

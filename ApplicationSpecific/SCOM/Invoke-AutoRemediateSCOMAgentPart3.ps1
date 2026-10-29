@@ -31,7 +31,7 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateSCOMAgentPart3.ps1
-    Version      : 1.1.0
+    Version      : 1.1.1 (2026-10-28: Get-Cached accepts the decimal metric strings Part 2 writes; previously they read as -1 and their deductions never applied)
     Architecture : x64
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
@@ -51,7 +51,7 @@ function Invoke-AutoRemediateSCOMAgentPart3 {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param()
 
-$SCRIPT_VERSION = '1.0.0'
+$SCRIPT_VERSION = '1.1.1'
 $RegPath        = 'HKLM:\Software\AirWatch\Extensions\SCOM'
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateSCOMAgentPart3.log"
 
@@ -406,8 +406,15 @@ function Get-Cached {
     try {
         $v = (Get-ItemProperty -Path $RegPath -Name $Name -ErrorAction SilentlyContinue).$Name
         if ($null -eq $v) { return $Default }
-        $n = 0
-        if ([int]::TryParse([string]$v, [ref]$n)) { return $n }
+        # Part 2 writes some metrics with one decimal place (e.g. StateFolderMB '1700.2',
+        # RuntimeCpuPercent '3.4'), and [int]::TryParse rejects those, so they used to read
+        # back as -1 and their deductions never applied. Parse as a culture-invariant double
+        # and round to the integer the thresholds expect.
+        $d = 0.0
+        if ([double]::TryParse([string]$v, [System.Globalization.NumberStyles]::Float,
+                [System.Globalization.CultureInfo]::InvariantCulture, [ref]$d)) {
+            return [int][math]::Round($d)
+        }
     }
     catch { }
     return $Default

@@ -45,7 +45,7 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
     $lastBoot = $(Get-CimInstance Win32_OperatingSystem).LastBootUpTime
     $firstRunAt = (Get-ItemProperty -Path $MachineKey -ErrorAction SilentlyContinue | Select-Object "FirstRunAt" -ExpandProperty "FirstRunAt" -ErrorAction SilentlyContinue)
     If($firstRunAt){
-        $dtFirstRunAt = [datetime]::Parse($firstRunAt) 
+        $dtFirstRunAt = [datetime]::Parse($firstRunAt, [cultureinfo]::InvariantCulture, 'RoundtripKind')
         $dtDiff=$dtFirstRunAt.Subtract($lastBoot)
         $lastBootOld=$dtDiff.TotalHours -gt $MaxHours
     }
@@ -83,8 +83,8 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
     }
 
     if (-not (Get-ItemProperty -Path $MachineKey -Name FirstRunAt -ErrorAction SilentlyContinue)) {
-        New-ItemProperty -Path $MachineKey -Name FirstRunAt -Value (Get-Date).ToString('o') -Force | Out-Null 
-        New-ItemProperty -Path $MachineKey -Name Deadline -Value (Get-Date).AddHours($MaxHours) }
+        New-ItemProperty -Path $MachineKey -Name FirstRunAt -Value (Get-Date).ToString('o') -Force | Out-Null
+        New-ItemProperty -Path $MachineKey -Name Deadline -Value (Get-Date).AddHours($MaxHours).ToString('o') -Force | Out-Null }
 
     If(-not (Test-Path $BasePath)){  New-Item -ItemType Directory -Path $BasePath -Force | Out-Null }
     # Write helper files from the code blocks
@@ -116,7 +116,7 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
 
         $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest -LogonType ServiceAccount
         # $tStart,$tLogon
-        $def = New-ScheduledTask -Action $action -Principal $principal -Settings $settings -Trigger @($tRepeat) -Description (Get-Date).ToString("yyyy:MM:dd hh:mm:ss")
+        $def = New-ScheduledTask -Action $action -Principal $principal -Settings $settings -Trigger @($tRepeat) -Description (Get-Date).ToString('o')
         Register-ScheduledTask -InputObject $def -TaskPath $TaskPath -TaskName $TaskName -Force | Out-Null
 
         #Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName | Out-Null
@@ -234,8 +234,11 @@ function Ensure-UrlProtocol {
     }
 }
 
+# Explicit path to shutdown.exe ensures correct version is used
+$shutdown="$env:WINDIR\System32\shutdown.exe"
+
 # Start countdown + show confirm toast (hidden)
-$rebootCmd = "$shutdown=`"$env:WINDIR\System32\shutdown.exe`" /r /t 10 /f"
+$rebootCmd = "`"$shutdown`" /r /t 10 /f"
 Ensure-UrlProtocol -Scheme 'rebootcountdown' -Command $rebootCmd
 
 # Cancel pending shutdown (hidden)
@@ -252,9 +255,6 @@ $ToastMessage=@"
 "@
 
 If($mandatory){
-    # Explicit path to shutdown.exe ensures corret version is used
-    $shutdown="$env:WINDIR\System32\shutdown.exe"
-
     # Starts the reboot countdown (force-close all apps) with given delay
     if(-not $WhatIfPreference){ 
         Start-Process -FilePath $shutdown -ArgumentList "/r /t $RebootCountdownSeconds /f" -WindowStyle Hidden
@@ -327,11 +327,18 @@ Function Invoke-MainThread{
     $MachineKey = 'HKLM:\Software\AirWatch\Extensions\AdvancedReboot'
     $MainTaskPath = '\WorkspaceOneEx\'
     $MainTaskName = 'RebootPrompt-Orchestrator'
-        
+
+    function Write-Log([string]$Message) {
+        $line = "$((Get-Date).ToString('o')) $Message"
+        Write-Verbose $line
+        try { Add-Content -Path (Join-Path $BasePath 'RebootPrompt.log') -Value $line -ErrorAction Stop } catch { }
+    }
+
     $lastBoot = $(Get-CimInstance Win32_OperatingSystem).LastBootUpTime
     $firstRunAt = (Get-ItemProperty -Path $MachineKey -ErrorAction SilentlyContinue | Select-Object "FirstRunAt" -ExpandProperty "FirstRunAt" -ErrorAction SilentlyContinue)
     $deadline = (Get-ItemProperty -Path $MachineKey -ErrorAction SilentlyContinue | Select-Object "Deadline" -ExpandProperty "Deadline" -ErrorAction SilentlyContinue)
     
+    # Both values are written as ISO 8601 round-trip ('o') strings; -as [DateTime] parses that form (invariant culture) and yields $null on failure
     if($firstRunAt){ $dtFirstRunAt = $firstRunAt -as [DateTime] }
     if($deadline){ $dtDeadline = $deadline -as [DateTime] }
 
@@ -341,7 +348,7 @@ Function Invoke-MainThread{
 
     if (-not (Get-ItemProperty -Path $MachineKey -Name FirstRunAt -ErrorAction SilentlyContinue)) {
         New-ItemProperty -Path $MachineKey -Name FirstRunAt -Value (Get-Date).ToString('o') -Force | Out-Null 
-        New-ItemProperty -Path $MachineKey -Name Deadline -Value (Get-Date).AddHours($MaxHours) | Out-Null }
+        New-ItemProperty -Path $MachineKey -Name Deadline -Value (Get-Date).AddHours($MaxHours).ToString('o') -Force | Out-Null }
 
     
     # This section ensures that if the machine has rebooted after the request date/time that the 
@@ -377,7 +384,7 @@ Function Invoke-MainThread{
     $quser = quser 2>$null
     if (-not $quser) { 
         Write-Verbose "quser returned no output."
-        if($mandatoryReboot=$true){ $SystemReboot = $true } else { return; }
+        if($mandatoryReboot){ $SystemReboot = $true } else { return; }
     }
 
     $rows = $quser | Select-Object -Skip 1 |

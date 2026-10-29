@@ -841,7 +841,7 @@ Check `Status` under `HKLM:\Software\AirWatch\Extensions\SCOM\<ScriptName>`:
 | Status | Meaning |
 |---|---|
 | `Dispatched` and never advances | The scheduled task never ran the payload — **almost always the missing AV/EDR exclusion** (section 3) |
-| `SkippedCooldown` | The cooldown has not elapsed. Check `LastRunTime` / `LastRecycleTime` / `LastResetTime` |
+| `SkippedCooldown` | The cooldown has not elapsed. Check `LastFlushTime` (HealthServiceCache) / `LastRecycleTime` (MonitoringHost) / `LastResetTime` (ClonedIdentity). `LastRunTime` is written on every payload run and does not drive the cooldown. |
 | `Skipped:NotConfirmed` | `ConfirmHighImpact` was absent or unparseable. Note that `banana` is treated as "no" |
 | `Skipped:<other>` | A gate blocked it. `BlockReason` names which one |
 | `RolledBack` | It acted, the service failed to restart, and the original state was restored |

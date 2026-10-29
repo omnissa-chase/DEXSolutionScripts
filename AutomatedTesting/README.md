@@ -55,6 +55,15 @@ six device/driver break tests is in
 procedure (preflight, unit tests, every applicable break, analysis, verdict table, optional
 inventory update) with one command.
 
+## Validation status for every resolution script
+
+`TEST-VALIDATION.md` is the per-script test plan and status board for all 66 resolution
+scripts: purpose, inputs, prerequisites, how to create the broken state on the lab VM, the
+run command, expected output and exit code, verification, restore, automated coverage, and
+a status (`PASS - LAB`, `TESTED - MANUAL`, `NEEDS TEST`, `NEEDS TEST - PRODUCT VM`,
+`MANUAL ONLY`, `FIX FIRST`) with the lab evidence behind it. Update it when a script
+passes or when a break test is added.
+
 ## Testing through UEM
 
 The harness above runs scripts directly on a test host. `UEM-API-TESTING-SPEC.md` describes

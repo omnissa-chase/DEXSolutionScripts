@@ -7,13 +7,28 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
+<#
+.NOTES
+    Script Name  : Restart-WinProcessGracefulEx.ps1
+    Version      : 0.9.1 (prototype, retained for reference; Restart-WinProcessGraceful.ps1 supersedes it)
+    Context      : System
+    Last Modified: 2026-10-28
+
+    Inputs: FileDescription (required), Restart (true/false, default true),
+            GracefulTimeoutSec (default 15), WhatIf (true to simulate the force-kill only).
+
+    0.9.1: removed the hard-coded FileDescription="Chrome" that ignored the input; defined
+    GracefulTimeoutSec (previously undefined, so the wait loop never ran and nothing was
+    ever escalated); counters are now updated; the relaunch waits until every matched
+    process has exited; the --restore-last-session argument is only passed to chrome.exe.
+#>
 function Restart-WinProcessGracefulEx {
 [CmdletBinding(SupportsShouldProcess=$true)]
 param(
     [string]$FileDescription    = $env:FileDescription,
-    [bool]  $Restart                  = $(if ($env:Restart)                  { [System.Convert]::ToBoolean($env:Restart) }                   else { $true })
+    [bool]  $Restart            = $(if ($env:Restart) { [System.Convert]::ToBoolean($env:Restart) } else { $true }),
+    [int]   $GracefulTimeoutSec = $(if ($env:GracefulTimeoutSec) { [int]$env:GracefulTimeoutSec } else { 15 })
 )
-$FileDescription="Chrome"
 if ([string]::IsNullOrEmpty($FileDescription)) {
     Write-Error 'FileDescription is required. Pass it as a parameter or set $env:FileDescription.'
     exit 1
@@ -134,6 +149,26 @@ foreach ($proc in $procs) {
         try { $proc.Refresh(); $exited = $proc.HasExited } catch { $exited = $true }
     }
 
+    # -- Step 3: Record the outcome, force-kill if still running ----------------
+    if ($exited) {
+        $gracefulCount++
+        Write-Output '  Closed gracefully.'
+    } else {
+        $why = if ($notResponding) { 'not responding' } else { "still running after ${GracefulTimeoutSec}s" }
+        if ($PSCmdlet.ShouldProcess("$($proc.Name) (PID $($proc.Id))", "Force-kill ($why)")) {
+            try {
+                Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+                $forceKilledCount++
+                Write-Output "  Force-killed ($why)."
+            } catch {
+                $errorCount++
+                Write-Output "  [ERR] Force-kill failed: $($_.Exception.Message)"
+            }
+        } else {
+            Write-Output "  WhatIf: would force-kill ($why)."
+        }
+    }
+
     Write-Output ''
 }
 
@@ -143,10 +178,21 @@ Write-Output "Summary: $gracefulCount graceful, $forceKilledCount force-killed, 
 # -- Optional restart ----------------------------------------------------------
 if ($Restart) {
     if ($restartPath) {
+        # Wait (bounded) for every matched process to be gone so the relaunch does not
+        # collide with an instance that is still shutting down.
+        $gone = [DateTime]::UtcNow.AddSeconds(15)
+        while ([DateTime]::UtcNow -lt $gone) {
+            $still = @(Get-Process -Id ($procs | ForEach-Object { $_.Id }) -ErrorAction SilentlyContinue)
+            if ($still.Count -eq 0) { break }
+            Start-Sleep -Milliseconds 500
+        }
         Write-Output "Restarting: $restartPath"
-        Start-Sleep -Seconds 2
         try {
-            Start-Process -FilePath $restartPath -ArgumentList "--restore-last-session" -ErrorAction Stop
+            if ($restartPath -like '*\chrome.exe') {
+                Start-Process -FilePath $restartPath -ArgumentList "--restore-last-session" -ErrorAction Stop
+            } else {
+                Start-Process -FilePath $restartPath -ErrorAction Stop
+            }
             Write-Output 'Process restarted.'
         } catch {
             Write-Output "[ERR] Restart failed: $($_.Exception.Message)"

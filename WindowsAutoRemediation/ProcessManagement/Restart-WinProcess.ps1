@@ -1,13 +1,35 @@
 ﻿<#
+.SYNOPSIS
+    Force-stops every process whose file description contains the given text, and
+    optionally relaunches it from its original executable path.
+
+.DESCRIPTION
+    Blunt restart with no graceful phase. Use Restart-WinProcessGraceful.ps1 when the
+    target may have unsaved user work. Matching is a case-insensitive substring match
+    on the process Description (the FileDescription field of the executable).
+
 .NOTES
     Script Name  : Restart-WinProcess.ps1
-    Data Type    : String 
-    Version      : 1.0.0
+    Data Type    : String
+    Version      : 1.1.0
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-07-10
+    Last Modified: 2026-10-28
     Timeout      : 30 seconds
+
+    Inputs (UEM script variables / environment):
+        FileDescription  Required. Substring of the process Description to match.
+        StartService     Optional. true/false. Relaunch each stopped process from its
+                         original path after a 5 second pause. Default false.
+
+    Exit codes: 0 all matched processes stopped (or none were running); 1 missing input
+    or at least one process could not be stopped.
+
+    1.1.0: the previous version referenced an undefined $ProcessName variable, so every
+    match ended in exit 1 without stopping anything. Processes are now stopped by Id,
+    relaunch uses the recorded executable path, and StartService is parsed as a boolean
+    string instead of a raw [bool] cast (which treated 'false' as $true).
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -18,28 +40,48 @@
 function Restart-WinProcess {
 param(
     [Parameter(Mandatory=$true)]
-    [string]$FileDescription=$env:FileDescription,
-    [bool]$StartService=$env:StartService
+    [string]$FileDescription,
+    [bool]$StartService = $false
 )
 
-$proc = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Description -like "*$FileDescription*" }
+$procs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Description -like "*$FileDescription*" })
 
-if ($proc) {
-    Write-Output "Stopping process '$ProcessName' (PID: $($proc.Id))..."
-    Try{
-        Stop-Process -Name $ProcessName -Force 
-    }Catch{
-        Write-Output "Failed to stop process '$ProcessName' (PID: $($proc.Id)). Exception: $_"
-        Exit 1
-    }
-    Start-Sleep -Seconds 5
-    if($StartService){
-        Write-Output "Starting process '$ProcessName'..."
-        Start-Process $ProcessName -ErrorAction SilentlyContinue
-    }
-} else {
-    Write-Output "Process '$ProcessName' not currently running."
+if ($procs.Count -eq 0) {
+    Write-Output "No running process matches description '*$FileDescription*'. Nothing to do."
+    Exit 0
 }
+
+$failures  = 0
+$toRestart = @()
+foreach ($proc in $procs) {
+    $name = $proc.ProcessName
+    $path = $null
+    try { $path = $proc.Path } catch { }
+
+    Write-Output "Stopping process '$name' (PID: $($proc.Id))..."
+    Try {
+        Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+        if ($path -and ($toRestart -notcontains $path)) { $toRestart += $path }
+    } Catch {
+        $failures++
+        Write-Output "Failed to stop process '$name' (PID: $($proc.Id)). Exception: $($_.Exception.Message)"
+    }
+}
+
+if ($StartService -and $toRestart.Count -gt 0) {
+    Start-Sleep -Seconds 5
+    foreach ($path in $toRestart) {
+        Write-Output "Starting process '$path'..."
+        Try {
+            Start-Process -FilePath $path -ErrorAction Stop
+        } Catch {
+            $failures++
+            Write-Output "Failed to start '$path'. Exception: $($_.Exception.Message)"
+        }
+    }
+}
+
+if ($failures -gt 0) { Exit 1 }
 Exit 0
 }
 
@@ -54,5 +96,11 @@ if ([string]::IsNullOrEmpty($env:FileDescription)) {
     Exit 1
 }
 
-Restart-WinProcess -FileDescription $env:FileDescription
+$startService = $false
+if (-not [string]::IsNullOrEmpty($env:StartService)) {
+    try { $startService = [System.Convert]::ToBoolean($env:StartService) }
+    catch { $startService = ($env:StartService -match '^(1|y|yes)$') }
+}
+
+Restart-WinProcess -FileDescription $env:FileDescription -StartService $startService
 Exit 0

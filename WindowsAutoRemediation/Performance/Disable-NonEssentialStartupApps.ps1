@@ -4,12 +4,20 @@
 
 .NOTES
     Script Name  : Disable-NonEssentialStartupApps.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
-    Context      : System
+    Context      : System or User. Under SYSTEM the script resolves the console user and
+                   works on that user's HKU hive and Startup folder; under a user context
+                   it works on HKCU and the current Startup folder.
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-10-28
     Timeout      : 30 seconds
+
+    1.0.2: previously declared Context System while reading HKCU: and GetFolderPath('Startup'),
+    which under SYSTEM are the SYSTEM account's own hive and profile, so no real user's
+    startup entries were ever seen. The per-user paths are now resolved from the logged-on
+    console user when running as SYSTEM. If no user is logged on the script reports that
+    and exits 0.
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -108,10 +116,40 @@ function Get-MatchingRunValues {
     return $found
 }
 
-# -- Step Definitions ----------------------------------------------------------
+# -- Resolve the user whose startup entries we are cleaning ---------------------
+# Under SYSTEM, HKCU: is the SYSTEM hive and GetFolderPath('Startup') is SYSTEM's own
+# profile, so target the console user's hive and profile instead.
 $hkcuRunPath   = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $hklmRunPath   = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
 $startupFolder = [System.Environment]::GetFolderPath('Startup')
+$targetUser    = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+
+if ([System.Security.Principal.WindowsIdentity]::GetCurrent().IsSystem) {
+    $consoleUser = (Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue).UserName
+    if ([string]::IsNullOrEmpty($consoleUser)) {
+        Write-Output "-- Disable-NonEssentialStartupApps ------------------------------"
+        Write-Output "  No interactive user is logged on. Per-user startup entries cannot be evaluated from SYSTEM without a console session. Nothing to do."
+        exit 0
+    }
+    try {
+        $sid = (New-Object System.Security.Principal.NTAccount($consoleUser)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+    } catch {
+        Write-Output "-- Disable-NonEssentialStartupApps ------------------------------"
+        Write-Output "  Could not resolve the SID for console user '$consoleUser': $($_.Exception.Message)"
+        exit 1
+    }
+    $profilePath = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid" -ErrorAction SilentlyContinue).ProfileImagePath
+    if (-not (Test-Path "Registry::HKEY_USERS\$sid") -or [string]::IsNullOrEmpty($profilePath)) {
+        Write-Output "-- Disable-NonEssentialStartupApps ------------------------------"
+        Write-Output "  Console user '$consoleUser' hive or profile path is not available (hive not loaded). Nothing to do."
+        exit 0
+    }
+    $hkcuRunPath   = "Registry::HKEY_USERS\$sid\Software\Microsoft\Windows\CurrentVersion\Run"
+    $startupFolder = Join-Path $profilePath 'AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup'
+    $targetUser    = $consoleUser
+}
+
+# -- Step Definitions ----------------------------------------------------------
 
 $Steps = @(
 
@@ -241,6 +279,7 @@ $results = New-Object 'System.Collections.Generic.List[PSCustomObject]'
 
 Write-Output "`r`n-- Disable-NonEssentialStartupApps -----------------------------"
 Write-Output "   $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')   Steps: $($activeSteps.Count)"
+Write-Output "   Target user: $targetUser"
 Write-Output '----------------------------------------------------------------'
 
 foreach ($step in $activeSteps) {

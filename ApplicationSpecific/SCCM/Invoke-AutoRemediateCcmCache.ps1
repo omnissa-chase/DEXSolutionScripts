@@ -45,7 +45,7 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateCcmCache.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2 (2026-10-28: MBFreed is now computed from a real post-purge re-read)
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
@@ -387,7 +387,12 @@ try {
     Set-ItemProperty -Path $RegPath -Name 'Failed'          -Value $failed   -Type DWord
     Set-ItemProperty -Path $RegPath -Name 'RemediationsRun' -Value $remCount -Type DWord
     Set-ItemProperty -Path $RegPath -Name 'ElementsRemoved' -Value ($Script:DeletedCount) -Type DWord
-    Set-ItemProperty -Path $RegPath -Name 'MBFreed'         -Value ([math]::Round([math]::Max(0, $Script:CacheBeforeMB - ((($null = Get-CimInstance -Namespace 'root\ccm\SoftMgmtAgent' -ClassName 'CacheInfoEx' -ErrorAction SilentlyContinue | Measure-Object -Property ContentSize -Sum).Sum) / 1024)))) -Type DWord
+    # Re-read the cache after the purge. The previous version discarded this query with
+    # `$null =`, so MBFreed always equalled the whole pre-purge usage.
+    $afterKB = (Get-CimInstance -Namespace 'root\ccm\SoftMgmtAgent' -ClassName 'CacheInfoEx' -ErrorAction SilentlyContinue |
+        Measure-Object -Property ContentSize -Sum).Sum
+    $afterMB = if ($null -ne $afterKB) { $afterKB / 1024 } else { $Script:CacheBeforeMB }
+    Set-ItemProperty -Path $RegPath -Name 'MBFreed'         -Value ([int][math]::Round([math]::Max(0, $Script:CacheBeforeMB - $afterMB))) -Type DWord
 } catch { }
 
 # -- Self-cleanup: unregister the scheduled task ------------------------------

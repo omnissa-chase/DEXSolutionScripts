@@ -5,17 +5,32 @@
 .DESCRIPTION
     Calculates a hardware performance score from BIOS generation date, logical processor
     count, and system disk type (HDD/SSD/NVMe), then maps the score to one of four
-    Defender CPU profiles (VeryLow / Low / Medium / High) and applies the corresponding
+    Defender CPU profiles (VeryLow / Low / Mid / High) and applies the corresponding
     ScanAvgCPULoadFactor and EnableLowCpuPriority settings via Set-MpPreference.
     The score and active profile are persisted under the AirWatch HealthDetection registry
-    key so subsequent runs can skip recalculation.
+    key (PerformanceScore, CurrentProfile) so subsequent runs can skip recalculation and
+    only re-apply settings when the profile changes.
+
+    Profiles:
+        VeryLow  score <  0   ScanAvgCPULoadFactor 20, EnableLowCpuPriority on
+        Low      score <= 2   ScanAvgCPULoadFactor 40
+        Mid      score <= 6   ScanAvgCPULoadFactor 50
+        High     score >  6   ScanAvgCPULoadFactor 75
 
 .NOTES
     Script Name  : Invoke-DefenderDynamicPerformance.ps1
+    Version      : 1.1.0
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-07-20
+    Last Modified: 2026-10-28
+
+    1.1.0: the cached score was written as 'PeformanceScore' but read as 'PerformanceProfile',
+    so it was recomputed every run and CurrentProfile was never written, so settings were
+    re-applied every run. Scores 7 and 8 fell through to no profile. The trailing
+    System.Windows.Forms reference threw under a strict host. ConfigDefender is now imported
+    on PowerShell 7 like the other Defender scripts. Output lines and exit codes added so the
+    caller can tell what happened (0 applied or already current, 1 Defender unavailable).
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -24,106 +39,93 @@
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
 
-$healthDetectionPath =  "HKLM:\SOFTWARE\AIRWATCH\Extensions\HealthDetection"
+$SCRIPT_VERSION = "1.1.0"
+$RunEventId = ([Random]::new()).Next(1000,9999)
+Write-Output "[$RunEventId] Executing script, $SCRIPT_VERSION.  Started @ '$((Get-Date).ToString("yyyy-MM-dd HH:mm:ss"))'"
+$HEAD="`r`n[$RunEventId]"
+
+if ($PSVersionTable.PSVersion.Major -ge 7) {
+    Import-Module -Name ConfigDefender -SkipEditionCheck -ErrorAction SilentlyContinue
+}
+if (-not (Get-Command Set-MpPreference -ErrorAction SilentlyContinue)) {
+    Write-Output "$HEAD Microsoft Defender cmdlets are not available on this device. Nothing to do."
+    Exit 1
+}
+
+$healthDetectionPath = "HKLM:\SOFTWARE\AIRWATCH\Extensions\HealthDetection"
 if(-not (Test-Path $healthDetectionPath)){ New-Item -Path $healthDetectionPath -Force | Out-Null }
 
-$PerformanceProfiles=@(
-    New-Object -Type PSCustomObject -Property @{'Name'='VeryLow';
-      'MaxScore'=0;
-      'DisableCpuThrottleOnIdleScans'=$false;
-      'EnableLowCpuPriority'=$true;
-      'ScanAvgCPULoadFactor'=25};
-    New-Object -Type PSCustomObject -Property @{'Name'='Low';
-      'MinScore'=0;
-      'MaxScore'=2;
-      'DisableCpuThrottleOnIdleScans'=$false;
-      'EnableLowCpuPriority'=$false;
-      'ScanAvgCPULoadFactor'=50};
-    New-Object -Type PSCustomObject -Property @{'Name'='Medium';
-      'MinScore'=3;
-      'MaxScore'=6;
-      'DisableCpuThrottleOnIdleScans'=$false;
-      'EnableLowCpuPriority'=$false;
-      'ScanAvgCPULoadFactor'=60};
-    New-Object -Type PSCustomObject -Property @{'Name'='High';
-      'MinScore'=7;
-      'DisableCpuThrottleOnIdleScans'=$false;
-      'EnableLowCpuPriority'=$false;
-      'ScanAvgCPULoadFactor'=75};
-)
+$cached = Get-ItemProperty -Path $healthDetectionPath -ErrorAction SilentlyContinue
+$PerformanceScore = $null
+if ($cached -and $null -ne $cached.PerformanceScore) {
+    $parsed = 0
+    if ([int]::TryParse([string]$cached.PerformanceScore, [ref]$parsed)) { $PerformanceScore = $parsed }
+}
+$CurrentProfile = if ($cached) { [string]$cached.CurrentProfile } else { '' }
 
-$PerformanceScore = Get-ItemProperty $healthDetectionPath -ErrorAction SilentlyContinue | Select-Object -Property PerformanceProfile -ExpandProperty PerformanceProfile -ErrorAction SilentlyContinue
-$CurrentProfile = Get-ItemProperty $healthDetectionPath -ErrorAction SilentlyContinue | Select-Object -Property CurrentProfile -ExpandProperty CurrentProfile -ErrorAction SilentlyContinue
-
-if($PerformanceScore -eq $null){
+if($null -eq $PerformanceScore){
     $PerformanceScore=0
-    
-    # +1 FOR EVERY 2 YEARS AFTER 2020
-    # -1 FOR EVERY 2 YEARS BEFORE 2020
-    $biosQuery = Get-CimInstance Win32_BIOS
-    $biosDate = ($biosQuery.ReleaseDate -as [DateTime])
+
+    # +1 for every 2 years after 2020, -1 for every 2 years before 2020
+    $biosDate = (Get-CimInstance Win32_BIOS -ErrorAction SilentlyContinue).ReleaseDate -as [DateTime]
     if($biosDate){
         $cutoff = Get-Date "2020-01-01"
-        $GenerationCalc = [Math]::Round((($biosDate.Subtract($cutoff)).TotalDays / 365)/2)
-        $PerformanceScore += $GenerationCalc
+        $PerformanceScore += [int][Math]::Round((($biosDate.Subtract($cutoff)).TotalDays / 365)/2)
     }
-    
-    # Get # of logical processors
-    # -1 for every core under 4
-    # +1 for every core above 4
+
+    # -1 for every logical processor under 4, +1 for every one above 4
     $CPUPerf0=[Environment]::ProcessorCount
     If($CPUPerf0){
         $PerformanceScore += ($CPUPerf0 - 4)
     }
 
-    # Get performance of System drive
+    # System drive media and bus type
     if(-not ([string]::IsNullOrEmpty($env:SystemDrive))){
-        $SystemDrive = $env:SystemDrive.Substring(0,1)
-        $DiskNumber = (Get-Partition -DriveLetter $SystemDrive).DiskNumber
-        $SystemDisk = Get-PhysicalDisk | Where DeviceId -eq $DiskNumber
-        $PerfScores=@{"HDD"=-2;"SSD"=2;"NVMe"=2}
-        $HDDPerf0=$SystemDisk.MediaType
-        $HDDPerf1=$SystemDisk.BusType
-        If($PerfScores.ContainsKey($HDDPerf0)){
-            $PerformanceScore+=$PerfScores[$HDDPerf0]
+        try {
+            $SystemDrive = $env:SystemDrive.Substring(0,1)
+            $DiskNumber = (Get-Partition -DriveLetter $SystemDrive -ErrorAction Stop).DiskNumber
+            $SystemDisk = Get-PhysicalDisk -ErrorAction Stop | Where-Object { [string]$_.DeviceId -eq [string]$DiskNumber }
+            $PerfScores=@{"HDD"=-2;"SSD"=2;"NVMe"=2}
+            $HDDPerf0=[string]$SystemDisk.MediaType
+            $HDDPerf1=[string]$SystemDisk.BusType
+            If($PerfScores.ContainsKey($HDDPerf0)){ $PerformanceScore+=$PerfScores[$HDDPerf0] }
+            If($PerfScores.ContainsKey($HDDPerf1)){ $PerformanceScore+=$PerfScores[$HDDPerf1] }
+        } catch {
+            Write-Output "$HEAD Could not determine system disk type: $($_.Exception.Message). Disk contributes 0."
         }
-        If($PerfScores.ContainsKey($HDDPerf1)){
-            $PerformanceScore+=$PerfScores[$HDDPerf1]
-        } 
     }
-    New-ItemProperty $healthDetectionPath -Name PeformanceScore -Value $PerformanceScore -Force | Out-Null
+    New-ItemProperty -Path $healthDetectionPath -Name PerformanceScore -Value $PerformanceScore -PropertyType String -Force | Out-Null
+    Write-Output "$HEAD Computed performance score $PerformanceScore (BIOS, CPU count, disk type) and cached it."
+} else {
+    Write-Output "$HEAD Using cached performance score $PerformanceScore."
 }
 
-function Get-CurrentDefProfile(){
-    $pref=Get-MpPreference
-    $CPUThrottle=$pref.DisableCpuThrottleOnIdleScans
-    $CPULoad=$pref.ScanAvgCPULoadFactor
+# Map the score to a profile. Every score lands in exactly one bucket.
+if     ($PerformanceScore -lt 0) { $TargetProfile = 'VeryLow' }
+elseif ($PerformanceScore -le 2) { $TargetProfile = 'Low' }
+elseif ($PerformanceScore -le 6) { $TargetProfile = 'Mid' }
+else                             { $TargetProfile = 'High' }
 
-
-}
-
-
-If($PerformanceScore -ne $CurrentProfile){ 
-    #Default configurations
+If($TargetProfile -ne $CurrentProfile){
+    Write-Output "$HEAD Applying Defender CPU profile '$TargetProfile' (was '$CurrentProfile')."
+    # Defaults, then the per-profile overrides.
     Set-MpPreference -DisableCpuThrottleOnIdleScans $false
     Set-MpPreference -EnableLowCpuPriority $false
     Set-MpPreference -ScanAvgCPULoadFactor (50 -as [byte])
-    If($PerformanceScore -lt 0){
-        #Performance score - Very Low
-        Set-MpPreference -ScanAvgCPULoadFactor (20 -as [byte])
-        Set-MpPreference -EnableLowCpuPriority $true
-    }ElseIf($PerformanceScore -le 2){
-        #Performance score - Low
-        Set-MpPreference -ScanAvgCPULoadFactor (40 -as [byte])
-    }ElseIf($PerformanceScore -le 6){
-        #Performance score - Mid
-        Set-MpPreference -ScanAvgCPULoadFactor (50 -as [byte])
-    }ElseIf($PerformanceScore -gt 8){
-        #Performance score - High
-        Set-MpPreference -ScanAvgCPULoadFactor (75 -as [byte])
+    switch ($TargetProfile) {
+        'VeryLow' {
+            Set-MpPreference -ScanAvgCPULoadFactor (20 -as [byte])
+            Set-MpPreference -EnableLowCpuPriority $true
+        }
+        'Low'  { Set-MpPreference -ScanAvgCPULoadFactor (40 -as [byte]) }
+        'Mid'  { Set-MpPreference -ScanAvgCPULoadFactor (50 -as [byte]) }
+        'High' { Set-MpPreference -ScanAvgCPULoadFactor (75 -as [byte]) }
     }
+    New-ItemProperty -Path $healthDetectionPath -Name CurrentProfile -Value $TargetProfile -PropertyType String -Force | Out-Null
+} else {
+    Write-Output "$HEAD Defender CPU profile '$TargetProfile' is already applied. No changes made."
 }
 
-
-
-$PowerProfile=[System.Windows.Forms.SystemInformation]::PowerStatus
+$pref = Get-MpPreference
+Write-Output "$HEAD ScanAvgCPULoadFactor=$($pref.ScanAvgCPULoadFactor) EnableLowCpuPriority=$($pref.EnableLowCpuPriority) DisableCpuThrottleOnIdleScans=$($pref.DisableCpuThrottleOnIdleScans)"
+Exit 0
