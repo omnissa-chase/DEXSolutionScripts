@@ -5,11 +5,14 @@
 
 .NOTES
     Script Name  : Invoke-SimpleReboot.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-07-10
+    Last Modified: 2026-10-30 (1.0.1: the no-console-user branch now uses a 10-second
+                   delay instead of /t 0 so Hub records the result before the reboot;
+                   message typo fixed.)
+                   2026-07-10 (1.0.0)
     Timeout      : 10 seconds (script exits immediately after scheduling reboot)
 
 .DISCLAIMER
@@ -38,8 +41,10 @@ if ($consoleUser) {
     shutdown.exe /r /f /t $CountdownSeconds /c "Reboot initiated by IT management policy. Please save your work."
 
 } else {
-    Write-Output "No console user detected. Rebooting immediately."
-    shutdown.exe /r /f /t 0 /c "Reboot initiated by IT manueagement policy."
+    Write-Output "No console user detected. Rebooting in 10 seconds."
+    # A short delay (not /t 0) so this script exits and Hub records the result
+    # before the OS tears the process down.
+    shutdown.exe /r /f /t 10 /c "Reboot initiated by IT management policy."
 }
 
 Write-Output "Reboot scheduled. Script exiting."

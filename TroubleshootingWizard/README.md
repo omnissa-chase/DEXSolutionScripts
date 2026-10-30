@@ -1,181 +1,183 @@
-# TroubleshootWizard — Published Deployment Package
+# TroubleshootWizard
 
-Modern WPF-based diagnostic troubleshooter with dark/light themes, branding support, and auto-remediation. This folder is the deployment-ready distribution package.
+JSON-driven, WPF-based self-service diagnostics for Windows endpoints. Deployed with Workspace ONE, launched from an `omniwiz:` link (Intelligent Hub, portal, email) or from any Workspace ONE script/sensor, and shown in the logged-on user's session.
+
+This folder is a self-contained project: everything needed to build, sign, deploy and run the wizard lives here.
+
+---
+
+## How a launch works
+
+```
+ user clicks                 runs as the user                 Application log                 scheduled task (runs as the
+ omniwiz://Network   --->    Send-TroubleshootWizardEvent   --->  source TroubleshootingWizard  --->  interactive user, BUILTIN\Users)
+                             validates name -> writes event        event ID 9001                       Invoke-TroubleshootWizardFromEvent
+                                                                                                         reads newest event, validates,
+ WS1 script as SYSTEM  --->  Send-TroubleshootWizardEvent -DiagSteps Network ------------------^        launches TroubleshootWizard.ps1
+```
+
+* The **event** is the only hand-off. Anything that can write to the Application log can pop the wizard for the user, including scripts running as SYSTEM that cannot show UI themselves.
+* The event carries a **name**, never a path or code. The name must match `^[A-Za-z0-9_-]{1,64}$` and must resolve to an existing file in `<install>\DiagSteps`. `Network` and `NetworkDiagSteps` both resolve to `NetworkDiagSteps.json`.
+* The **task command line is fixed** by the installer; no event data is placed on it.
+* The install folder is **ACL-locked** (SYSTEM/Administrators write, Users read), so only an admin can change what the wizard can run.
+
+See [SECURITY-AND-SIGNING.md](SECURITY-AND-SIGNING.md) for the threat model, the compile question and code signing.
 
 ---
 
 ## Contents
 
-| File | Purpose |
+| File / folder | Purpose |
 |---|---|
-| `Troubleshooter-Modular.ps1` | Main troubleshooter engine — PowerShell 5.1 |
-| `Troubleshooter-Modular-Ex.ps1` | Main troubleshooter engine — PowerShell 7+ (extended syntax) |
-| `UI-Modern.xaml` | Dark theme WPF layout |
-| `UI-Modern-Light.xaml` | Light theme WPF layout |
-| `Branding.json` | Customizable logo, accent color, Hub URL |
-| `omnissa.png` | Default company logo |
-| `hub.png` | Intelligent Hub icon |
-| `NetworkDiagSteps.json` | Network diagnostic steps |
-| `AudioBluetoothDiagSteps.json` | Audio/Bluetooth diagnostic steps |
-| `PrinterDiagSteps.json` | Printer diagnostic steps |
-| `VPNDiagSteps.json` | VPN diagnostic steps |
-| `WindowsUpdateDiagSteps.json` | Windows Update diagnostic steps |
-| `Install-TroubleshootWizard.ps1` | Dual-mode installer (SFD + ZIP) |
-| `Create-ZipPackage.ps1` | Builds the Product Provisioning bundle |
-| `Uninstall-TroubleshootWizard.ps1` | Removes the installed files |
+| `TroubleshootWizard.ps1` | Diagnostic engine (PowerShell 5.1+). Runs steps, saves results, shows UI. |
+| `TroubleshootWizard-UI.ps1` | WPF UI library (progress dialog, results window, Fix / Fix All). |
+| `TroubleshootWizard-Common.ps1` | Shared validation/parsing for the launch pipeline. |
+| `Send-TroubleshootWizardEvent.ps1` | URL protocol handler and direct trigger. Writes event 9001. |
+| `Invoke-TroubleshootWizardFromEvent.ps1` | Scheduled-task action. Reads event 9001, launches the engine. |
+| `UI-Modern.xaml` / `UI-Modern-Light.xaml` | Dark / light layouts. |
+| `Branding.json` | Logo, accent colour, default theme, Hub link, support text. |
+| `DiagSteps\*.json` | Diagnostic step definitions (Network, Printer, VPN, Windows Update, Audio/Bluetooth). |
+| `Resources\` | Logo images referenced by `Branding.json`. |
+| `Install-TroubleshootWizard.ps1` | Installer: files, ACL, event source, URL protocol, scheduled task, detection key. |
+| `Uninstall-TroubleshootWizard.ps1` | Removes everything the installer created. |
+| `Create-ZipPackage.ps1` | Builds the SFD and Product Provisioning artifacts into `Releases\v<version>\`. |
+| `Sign-Package.ps1` | Authenticode-signs / verifies all scripts. |
 
 **Install destination:** `C:\ProgramData\AirWatch\Extensions\TroubleshootWizard`
 
 ---
 
-## Deployment Methods
+## Build
 
-### Method 1 — Workspace ONE SFD (Software Distribution)
-
-All payload files are delivered alongside the installer via SFD. The installer detects and copies them to the destination folder.
-
-**Steps:**
-1. Upload all files in this folder to your WS1 SFD application.
-2. Set the install command to:
-   ```
-   powershell.exe -ExecutionPolicy Bypass -File Install-TroubleshootWizard.ps1
-   ```
-3. Set the uninstall command to:
-   ```
-   powershell.exe -ExecutionPolicy Bypass -File Uninstall-TroubleshootWizard.ps1
-   ```
-4. Set a detection rule (registry value exists):
-   ```
-   Key:   HKLM\SOFTWARE\AirWatch\Extensions\TroubleshootWizard
-   Value: Version
-   ```
-
-**How it works:** The installer finds `Troubleshooter-Modular.ps1` next to itself, recognizes SFD mode, and copies all 11 payload files to the destination.
-
----
-
-### Method 2 — Workspace ONE Product Provisioning (Registered Mode)
-
-All payload files are bundled into a single ZIP archive. Only two files need to be uploaded to Product Provisioning.
-
-**Step 1 — Build the package** (run once on your workstation from this folder):
 ```powershell
-.\Create-ZipPackage.ps1
+.\Create-ZipPackage.ps1                                   # unsigned
+.\Create-ZipPackage.ps1 -CertificateThumbprint <thumb>    # scripts signed before zipping
 ```
 
-This creates a `ProductProvisioning\` folder alongside `Published\` containing:
-- `TroubleshootWizard.zip` — all 11 payload files
-- `Install-TroubleshootWizard.ps1` — the installer
+Output (version read from `$AppVersion` in the installer):
 
-**Step 2 — Upload to WS1 Product Provisioning:**
-- Upload both files: `Install-TroubleshootWizard.ps1` and `TroubleshootWizard.zip`
-- Set the install command to:
-  ```
-  powershell.exe -ExecutionPolicy Bypass -File Install-TroubleshootWizard.ps1
-  ```
-
-**How it works:** The installer finds `TroubleshootWizard.zip` next to itself, extracts it to a temp folder, validates all files, copies them to the destination, then cleans up.
+```
+Releases\v1.1.0\SFD\TroubleshootWizard_v1.1.0.zip          one zip: payload + installer + uninstaller
+Releases\v1.1.0\ProductProvisioning\
+    Install-TroubleshootWizard.ps1
+    Uninstall-TroubleshootWizard.ps1
+    TroubleshootWizard.zip                                  payload only
+```
 
 ---
 
-## Installer Details
+## Deploy with Workspace ONE
 
-`Install-TroubleshootWizard.ps1` auto-detects the deployment mode based on what it finds next to itself:
+The installer **must run as SYSTEM** (or an administrator). It refuses otherwise.
 
-| Found next to installer | Mode selected |
+### Software Distribution (SFD)
+
+1. Upload `Releases\v<ver>\SFD\TroubleshootWizard_v<ver>.zip` as the application file.
+2. Install command: `powershell.exe -ExecutionPolicy Bypass -File Install-TroubleshootWizard.ps1`
+3. Uninstall command: `powershell.exe -ExecutionPolicy Bypass -File Uninstall-TroubleshootWizard.ps1`
+4. Detection: registry value exists, `HKLM\SOFTWARE\AirWatch\Extensions\TroubleshootWizard`, value `Version` (compare to the release version).
+5. Install context: Device.
+
+### Product Provisioning (Files/Actions)
+
+1. Upload the three files from `Releases\v<ver>\ProductProvisioning\`.
+2. Manifest install action: `powershell.exe -ExecutionPolicy Bypass -File Install-TroubleshootWizard.ps1`
+3. The installer finds `TroubleshootWizard.zip` next to itself and switches to ZIP mode.
+
+### What the installer does
+
+| Step | Detail |
 |---|---|
-| `TroubleshootWizard.zip` | ZIP (Product Provisioning) |
-| `Troubleshooter-Modular.ps1` | SFD (flat files) |
-| Neither | Error — exits `1` |
+| Files | Copies payload, removes files from the old flat layout, clears Mark-of-the-Web. |
+| ACL | Removes inheritance. SYSTEM + Administrators: Full. Users: Read & Execute. Owner: Administrators. Verified after applying. |
+| Event source | `TroubleshootingWizard` in the Application log. |
+| URL protocol | `HKLM\SOFTWARE\Classes\omniwiz` -> `conhost.exe --headless powershell.exe ... -File Send-TroubleshootWizardEvent.ps1 -Url "%1"` |
+| Scheduled task | `\Omnissa\TroubleshootWizard\TroubleshootWizard-OnEvent`. Event trigger (Application, source TroubleshootingWizard, ID 9001). Principal BUILTIN\Users. Run level HighestAvailable. IgnoreNew, 1 h limit, not stopped on battery. |
+| Registry | `Version`, `InstallPath`, `InstallDate`, `UrlScheme`, `TaskName`, `EventSource`. |
 
-You can also force a mode explicitly:
-```powershell
-.\Install-TroubleshootWizard.ps1 -Mode SFD
-.\Install-TroubleshootWizard.ps1 -Mode ZIP
-```
+### Installer parameters
 
-**Parameters:**
-
-| Parameter | Default | Description |
+| Parameter | Default | Notes |
 |---|---|---|
-| `-Mode` | `Auto` | `Auto`, `SFD`, or `ZIP` |
-| `-Destination` | `C:\ProgramData\AirWatch\Extensions\TroubleshootWizard` | Override install path |
-| `-ZipName` | `TroubleshootWizard.zip` | ZIP archive filename to look for |
+| `-Mode` | `Auto` | `SFD`, `ZIP`. |
+| `-Destination` | `C:\ProgramData\AirWatch\Extensions\TroubleshootWizard` | |
+| `-ScriptExecutionPolicy` | `Bypass` | Baked into the task and protocol-handler command lines. Use `AllSigned` once the package is signed and the publisher is trusted. |
+| `-TaskRunLevel` | `Highest` | `Highest`: admins get an elevated wizard without a UAC prompt (service/firewall fixes work). Standard users are never elevated. `Limited`: never elevate. |
+| `-UrlScheme` | `omniwiz` | |
+| `-SkipUrlProtocol` / `-SkipScheduledTask` | off | Files only. |
 
-**Exit codes:**
-
-| Code | Meaning |
-|---|---|
-| `0` | Success |
-| `1` | Fatal error (missing files, extraction failed, etc.) |
-| `2` | Partial failure (some files failed to copy) |
-
-**Log file:** `%TEMP%\TroubleshootWizard_Install.log`
-
-**Registry values written on install:**
-
-| Key path | Value name | Example data |
-|---|---|---|
-| `HKLM:\SOFTWARE\AirWatch\Extensions\TroubleshootWizard` | `Version` | `1.0.0` |
-| `HKLM:\SOFTWARE\AirWatch\Extensions\TroubleshootWizard` | `InstallPath` | `C:\ProgramData\AirWatch\Extensions\TroubleshootWizard` |
-| `HKLM:\SOFTWARE\AirWatch\Extensions\TroubleshootWizard` | `InstallDate` | `2026-04-28` |
+Exit codes: `0` success, `1` fatal, `2` completed with errors. Log: `%TEMP%\TroubleshootWizard_Install.log` (`C:\Windows\Temp` when run as SYSTEM).
 
 ---
 
-## Running the Troubleshooter
+## Launching
 
-After installation, launch from the destination folder:
+### From a link (Hub custom tab, portal, email, shortcut)
 
-```powershell
-# Network diagnostics — dark theme
-# PS5 - Network diagnostics - dark theme
-powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\AirWatch\Extensions\TroubleshootWizard\Troubleshooter-Modular.ps1" -StepsJson ".\NetworkDiagSteps.json" -XamlFile ".\UI-Modern.xaml"
-
-# PS5 - Network diagnostics - light theme
-powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\AirWatch\Extensions\TroubleshootWizard\Troubleshooter-Modular.ps1" -StepsJson ".\NetworkDiagSteps.json" -XamlFile ".\UI-Modern-Light.xaml"
-
-# PS5 - Quiet / headless mode (no UI - for scheduled tasks or SYSTEM context)
-powershell.exe -ExecutionPolicy Bypass -File "C:\ProgramData\AirWatch\Extensions\TroubleshootWizard\Troubleshooter-Modular.ps1" -StepsJson ".\NetworkDiagSteps.json" -SkipUI
-
-# PS7+ extended version
-pwsh.exe -ExecutionPolicy Bypass -File "C:\ProgramData\AirWatch\Extensions\TroubleshootWizard\Troubleshooter-Modular-Ex.ps1" -StepsJson ".\NetworkDiagSteps.json" -XamlFile ".\UI-Modern.xaml"
+```
+omniwiz://Network
+omniwiz://Printer
+omniwiz://run?diagsteps=VPN&theme=Dark&title=VPN%20Health
 ```
 
-**Available `-StepsJson` values:**
-
-| File | Scenario |
+| Query key | Values |
 |---|---|
-| `NetworkDiagSteps.json` | DNS, gateway, proxy, internet connectivity |
-| `AudioBluetoothDiagSteps.json` | Audio devices, Bluetooth pairing |
-| `PrinterDiagSteps.json` | Print spooler, driver, queue |
-| `VPNDiagSteps.json` | VPN client, tunnel, split-tunnel |
-| `WindowsUpdateDiagSteps.json` | WU service, WSUS, pending updates |
+| `diagsteps` (or `steps`) | Steps-file name with or without the `DiagSteps` suffix / `.json`. |
+| `theme` | `Dark`, `Light`. Default: `Theme` in `Branding.json`, else Light. |
+| `title` | Window title. Letters, digits, space, `. _ ( ) & / -`, max 60. Default is derived from the file name ("Network Diagnostics"). |
+
+Browsers (Edge/Chrome) ask "Open omniwiz?" the first time. For links hosted on a known portal, push the `AutoLaunchProtocolsFromOrigins` browser policy to suppress the prompt.
+
+### From a Workspace ONE script or sensor (SYSTEM)
+
+```powershell
+& 'C:\ProgramData\AirWatch\Extensions\TroubleshootWizard\Send-TroubleshootWizardEvent.ps1' -DiagSteps Network -Theme Light
+```
+
+Exit `0` event written, `2` request rejected, `1` event log error. The wizard appears in the interactive user's session.
+
+### Direct (testing)
+
+```powershell
+cd 'C:\ProgramData\AirWatch\Extensions\TroubleshootWizard'
+.\TroubleshootWizard.ps1 -StepsJson .\DiagSteps\NetworkDiagSteps.json -XamlFile UI-Modern.xaml
+.\TroubleshootWizard.ps1 -StepsJson .\DiagSteps\NetworkDiagSteps.json -SkipUI      # headless
+.\Invoke-TroubleshootWizardFromEvent.ps1 -SkipUI                                     # what the task runs
+```
+
+### Logs
+
+| Component | Location |
+|---|---|
+| Engine, protocol handler, task action | `%LOCALAPPDATA%\TroubleshootWizard\*.log` (per user; the install folder is read-only) |
+| Results | `HKCU\Software\Diagnostics\<StepsName>\LastResults` (JSON) |
+| Installer / uninstaller | `%TEMP%\TroubleshootWizard_Install.log`, `_Uninstall.log` |
 
 ---
 
-## Branding Customization
+## Adding a diagnostic
 
-Edit `Branding.json` before deploying to customize the UI appearance:
+1. Copy an existing `DiagSteps\*DiagSteps.json`, name it `<Thing>DiagSteps.json`.
+2. Each step: `Name`, `Description`, `Enabled`, `Order`, `UserFeedback`, `DetectionScript` (returns `@{ Status = 'Passed'|'Failed'|'Warning'; Message = '...' }`), optional `ResolutionScript`, `ResolutionText`, `TestResultText`.
+3. Rebuild and redeploy. The name is then addressable as `omniwiz://<Thing>`.
+
+Steps files are code. They run with the user's rights (elevated for admins). Review them like scripts.
+
+---
+
+## Branding
 
 ```json
 {
-    "CompanyName":      "Your Company",
-    "LogoFile":         ".\\your-logo.png",
-    "AccentColor":      "#7C6AF7",
-    "HeaderBackground": "#16162A",
-    "HubUrl":           "ws1winhub:",
-    "SupportText":      "Contact IT Support",
-    "SupportUrl":       ""
+    "CompanyName":  "Your Company",
+    "LogoFile":     ".\\Resources\\logo.png",
+    "AccentColor":  "#7C6AF7",
+    "Theme":        "Light",
+    "HubUrl":       "ws1winhub:",
+    "SupportText":  "Contact IT Support",
+    "SupportUrl":   ""
 }
 ```
-
-| Key | Description |
-|---|---|
-| `LogoFile` | Relative path to a PNG logo (displayed top-left). Omit or leave blank to hide. |
-| `AccentColor` | Hex color for the Fix All button, progress bar, and accent stripe. |
-| `HeaderBackground` | Hex color for the title bar (dark theme). |
-| `HubUrl` | URI launched when a user clicks "Open Intelligent Hub" on a warning card. Use `ws1winhub:` to open the Hub app directly. |
-| `SupportText` | Label shown below the Hub button on warning cards. |
 
 ---
 
@@ -183,8 +185,8 @@ Edit `Branding.json` before deploying to customize the UI appearance:
 
 | Requirement | Minimum |
 |---|---|
-| OS | Windows 10 / Windows 11 |
-| PowerShell | 5.1 (Windows PowerShell) |
-| .NET Framework | 4.5+ (WPF required for UI) |
-| Permissions | Administrator (for remediation scripts) |
-| Execution Policy | `RemoteSigned` or `Bypass` |
+| OS | Windows 10 2004+ / Windows 11 (`conhost --headless`, Task Scheduler event triggers) |
+| PowerShell | 5.1 (engine and launchers also run under 7+) |
+| .NET Framework | 4.5+ (WPF) |
+| Install | SYSTEM or administrator |
+| Run | Any interactive user. Admin-only fixes need an admin user (see security doc). |

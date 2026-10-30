@@ -33,8 +33,9 @@ Each script has one block with the same shape:
 | `TESTED - MANUAL` | Inventory says `4) Complete - Tested`. The test was manual and no result artefact is in the repo. Steps below reproduce it |
 | `NEEDS TEST` | Steps written, not yet executed |
 | `NEEDS TEST - PRODUCT VM` | Steps written, but the product is not on the lab VM. Needs a VM with the product installed |
-| `MANUAL ONLY` | Session-ending or destructive to user data. Never run through the harness or the UEM test group. Manual steps given |
+| `MANUAL ONLY` | Session-ending or destructive to user data. Never run through the harness or against a test group that contains the observing machine. Since 2026-10-30 the session-ending ones run through UEM against the single-VM group `Test_JSpencerOnly` (manifest key `onlyInGroup`), which holds only `CHASEWIN11_2`; the connector skips them against any other group. Manual steps given |
 | `FIX FIRST` | A defect found during review makes a test meaningless until the script is corrected |
+| `DEFERRED` | Out of scope for now by decision, not by defect. The previous status is kept in the cell. Currently the SCOM agent remediation set (since 2026-10-30, while the approach is reviewed; an agent upgrade is often the preferred fix) |
 
 ### 1.2 Lab environment
 
@@ -120,7 +121,7 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 1 | `Invoke-AutoRemediateAllDriverIssues.ps1` | Device / driver | Needs Testing | Critical | Break test, 21 unit tests, UEM entry | `PASS - LAB` + UEM `6c8405` |
 | 2 | `Invoke-AutoRemediateDriverIssues.ps1` | Device / driver | Needs Testing | Critical | Break test, 9 unit tests, UEM entry | `PASS - LAB` + UEM `6c8405` |
 | 3 | `Invoke-AutoRemediateAudioBluetooth.ps1` | Device / driver | Needs Testing | Medium | Break test (5 breaks) | `PASS - LAB` + UEM `6c8405` |
-| 4 | `Invoke-AutoRemediateNetworkStack.ps1` | Device / driver | Needs Testing | High | Break test (2 breaks), UEM skip | `PASS - LAB` 2026-10-28 |
+| 4 | `Invoke-AutoRemediateNetworkStack.ps1` | Device / driver | Needs Testing | High | Break test (2 breaks), UEM via `Test_JSpencerOnly` | `PASS - LAB` 2026-10-28 + UEM `e01538` (single-VM group, 2026-10-30) |
 | 5 | `Invoke-AutoRemediateWindowsUpdates.ps1` | Device / driver | Needs Testing | Medium | Break test (4 breaks) | `PASS - LAB` + UEM `6c8405` |
 | 6 | `Invoke-AutoRemediatePrinter.ps1` | Device / driver | Needs Testing | Low | Break test (4 breaks incl. reboot) | `PASS - LAB` + UEM `6c8405` |
 | 7 | `Invoke-AutoRemediateWiFiSignalIssues.ps1` | Windows remediation | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
@@ -131,8 +132,8 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 12 | `Disable-NonEssentialStartupApps.ps1` | Windows remediation | Needs Testing | Medium | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 13 | `Enable-HardwareAcceleratedGPUScheduling.ps1` | Windows remediation | Needs Testing | Medium | none | `PASS - UEM` (exit 1 on the first-enable run `6c8405` as designed; `Completed` on both devices in re-run `0501f4`; break steps still `NEEDS TEST`) |
 | 14 | `Restart-WindowsUpdateServices.ps1` | Windows remediation | Needs Testing | Medium | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
-| 15 | `Restart-WinProcess.ps1` | Windows remediation | Needs Testing | High | UEM skip (needs variables) | `TESTED - MANUAL` (fixed and verified 2026-10-29) |
-| 16 | `Restart-WinProcessGraceful.ps1` | Windows remediation | Needs Testing | High | UEM skip (needs variables) | `NEEDS TEST` |
+| 15 | `Restart-WinProcess.ps1` | Windows remediation | Needs Testing | High | uem-tests.json (Chrome variables) | `TESTED - MANUAL` (fixed and verified 2026-10-29) + UEM `17a0a0` on one device; relaunch lands in session 0 |
+| 16 | `Restart-WinProcessGraceful.ps1` | Windows remediation | Needs Testing | High | uem-tests.json (Chrome variables) | `PASS - UEM` (one device, run `fb2f21`; watchdog closed and restarted Chrome; break steps still `NEEDS TEST`) |
 | 17 | `Restart-WinProcessGracefulEx.ps1` | Windows remediation | NOT IN CSV | - | none | `NEEDS TEST` (fixed 2026-10-29; prototype, not for publication) |
 | 18 | `Restart-WinService.ps1` | Windows remediation | Needs Testing | Medium | UEM entry (Spooler) | `PASS - UEM` (break steps still `NEEDS TEST`) |
 | 19 | `Invoke-AutoRemediateAppXBloat.ps1` | Windows logon | Needs Testing | Medium | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
@@ -161,32 +162,32 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 42 | `Invoke-AutoRemediateOrphanedCcmSetup.ps1` | Application (SCCM) | NOT IN CSV | - | none | `NEEDS TEST - PRODUCT VM` |
 | 43 | `Invoke-AutoRemediateSCCMClient.ps1` | Application (SCCM) | NOT IN CSV | - | none | `NEEDS TEST - PRODUCT VM` |
 | 44 | `Invoke-AutoRemediateWMIRepository.ps1` | Application (SCCM) | NOT IN CSV | - | none | `NEEDS TEST - PRODUCT VM` |
-| 45 | `Invoke-AutoRemediateSCOMAgent.ps1` | Application (SCOM) | Needs Testing | Medium | none | Reference only (48,336 chars, over the UEM limit) |
-| 46 | `Invoke-AutoRemediateSCOMAgentPart1.ps1` | Application (SCOM) | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
-| 47 | `Invoke-AutoRemediateSCOMAgentPart2.ps1` | Application (SCOM) | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
-| 48 | `Invoke-AutoRemediateSCOMAgentPart3.ps1` | Application (SCOM) | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
-| 49 | `Invoke-AutoRemediateSCOMClonedIdentity.ps1` | Application (SCOM) | Needs Testing | High | UEM skip | `NEEDS TEST - PRODUCT VM` (fixed 2026-10-29) |
-| 50 | `Invoke-AutoRemediateSCOMHealthServiceCache.ps1` | Application (SCOM) | Needs Testing | High | UEM skip | `NEEDS TEST - PRODUCT VM` (fixed 2026-10-29) |
-| 51 | `Invoke-AutoRemediateSCOMMonitoringHost.ps1` | Application (SCOM) | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM `6c8405`: `UnknownScriptError`; four launcher defects fixed in 1.0.2; final re-run 2026-10-30 ran the payload to `Skipped:NoAgent` on the lab VM) |
+| 45 | `Invoke-AutoRemediateSCOMAgent.ps1` | Application (SCOM) | Needs Testing | Medium | none | `DEFERRED` (SCOM approach under review since 2026-10-30; was Reference only (48,336 chars, over the UEM limit)) |
+| 46 | `Invoke-AutoRemediateSCOMAgentPart1.ps1` | Application (SCOM) | Needs Testing | Medium | none | `DEFERRED` (SCOM approach under review since 2026-10-30; was `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`)) |
+| 47 | `Invoke-AutoRemediateSCOMAgentPart2.ps1` | Application (SCOM) | Needs Testing | Low | none | `DEFERRED` (SCOM approach under review since 2026-10-30; was `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`)) |
+| 48 | `Invoke-AutoRemediateSCOMAgentPart3.ps1` | Application (SCOM) | Needs Testing | Low | none | `DEFERRED` (SCOM approach under review since 2026-10-30; was `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`)) |
+| 49 | `Invoke-AutoRemediateSCOMClonedIdentity.ps1` | Application (SCOM) | Needs Testing | High | UEM skip | `DEFERRED` (SCOM approach under review since 2026-10-30; was `NEEDS TEST - PRODUCT VM` (fixed 2026-10-29)) |
+| 50 | `Invoke-AutoRemediateSCOMHealthServiceCache.ps1` | Application (SCOM) | Needs Testing | High | UEM skip | `DEFERRED` (SCOM approach under review since 2026-10-30; was `NEEDS TEST - PRODUCT VM` (fixed 2026-10-29)) |
+| 51 | `Invoke-AutoRemediateSCOMMonitoringHost.ps1` | Application (SCOM) | Needs Testing | Medium | none | `DEFERRED` (SCOM approach under review since 2026-10-30; was `NEEDS TEST - PRODUCT VM` (UEM `6c8405`: `UnknownScriptError`; four launcher defects fixed in 1.0.2; final re-run 2026-10-30 ran the payload to `Skipped:NoAgent` on the lab VM)) |
 | 52 | `Start-ClearRecycleBin.ps1` | Disk cleanup | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 53 | `Start-DiskCleanup.ps1` | Disk cleanup | Tested | Low | none | `TESTED - MANUAL` (UEM `6c8405`: `ScriptTimedOut` on one device; fixed in 1.2.1, `Completed` on both in re-run `0501f4`) |
-| 54 | `Start-UserProfileCleanup.ps1` | Disk cleanup | Needs Testing | High | UEM skip | `MANUAL ONLY` |
+| 54 | `Start-UserProfileCleanup.ps1` | Disk cleanup | Needs Testing | High | UEM via `Test_JSpencerOnly` | `PASS - UEM` for the enumerate and no-delete path (single-VM group, run `bbf07f`, 2026-10-30); the delete path still needs manual steps 1 to 5 with a planted old profile |
 | 55 | `Get-AppVolumesMountProbe.ps1` | Generic troubleshooting | NOT IN CSV | - | none | `NEEDS TEST - PRODUCT VM` |
 | 56 | `Enable-LogonAuditLogs.ps1` | Generic troubleshooting | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 57 | `Measure-LogonDuration.ps1` | Generic troubleshooting | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 58 | `Measure-LogonDurationMultiSession.ps1` | Generic troubleshooting | NOT IN CSV | - | none | `NEEDS TEST` |
-| 59 | `DEX_Invoke-SignoffWindows.ps1` | MDM commands | Tested | High | UEM skip | `MANUAL ONLY` |
-| 60 | `DEX_LockDevice-BitlockEncryptionActivated.ps1` | MDM commands | Needs Testing | Critical | UEM skip | `MANUAL ONLY` (intent confirmed by inventory; header and error handling fixed 2026-10-29) |
-| 61 | `DEX_Start-LockDeviceSoft.ps1` | MDM commands | Tested | Low | UEM skip | `MANUAL ONLY` |
+| 59 | `DEX_Invoke-SignoffWindows.ps1` | MDM commands | Tested | High | UEM via `Test_JSpencerOnly` | `PASS - UEM` (single-VM group, run `80650c`, 2026-10-30) |
+| 60 | `DEX_LockDevice-BitlockEncryptionActivated.ps1` | MDM commands | Needs Testing | Critical | UEM via `Test_JSpencerOnly` | `PASS - UEM` for the positive path on v1.3.0 (single-VM group, run `1b5fcb`, 2026-10-30, BitLocker enabled on the VM first): Hub reported `Completed` 13 s after the sync and the device's System log holds event 1074 at 13:45:30 from `shutdown.exe` as SYSTEM carrying the script's own comment, with no 1075 abort; `manage-bde` showed `Protection On` afterwards, which is the default resume after one restart. Earlier the same day: run `c8e0dd` on v1.1.0 shut the unencrypted VM down instead of exiting 1 (guard rewritten around `Get-BitLockerVolume` in v1.2.0), and run `534500` on v1.2.0 could only show no result because the in-process `/t 0` killed the host before Hub reported (power-off deferred 15 s in v1.3.0). The negative path (expect `Failed`, no shutdown on an unprotected device) is still unproven on v1.2.0+ |
+| 61 | `DEX_Start-LockDeviceSoft.ps1` | MDM commands | Tested | Low | UEM via `Test_JSpencerOnly` | `PASS - UEM` (single-VM group, run `496916`, 2026-10-30; console dropped to the lock screen, user signed back in) |
 | 62 | `DEX_Stop-WindowsUpdate.ps1` | MDM commands | Needs Testing | Medium | UEM skip | `NEEDS TEST` (parse-checked and WhatIf dry run on the lab VM 2026-10-29; live run needs an elevated session) |
 | 63 | `DEX_Start-WindowsUpdate.ps1` | MDM commands | Needs Testing | Medium | UEM skip | `NEEDS TEST` (parse-checked, WhatIf dry run and read-only WUA search on the lab VM 2026-10-29; live run needs an elevated session) |
 | 64 | `Invoke-AutoRemediateGenericVPN.ps1` | VPN | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 65 | `Invoke-VpnStateCollection.ps1` | VPN | Needs Testing | Low | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
-| 66 | `Invoke_RebootWithUserDefer_1.2.0.7.ps1` | Reboot | Tested | High | UEM skip | `MANUAL ONLY` (orchestrator and toast defects fixed 2026-10-29; needs one end-to-end re-run) |
-| 67 | `Invoke-SimpleReboot.ps1` | Reboot | Tested | High | UEM skip | `MANUAL ONLY` |
+| 66 | `Invoke_RebootWithUserDefer_1.2.0.7.ps1` | Reboot | Tested | High | UEM via `Test_JSpencerOnly` | `PASS - UEM` for the install (single-VM group, run `ea5217`, 2026-10-30); the deferral prompt and forced reboot still need the manual steps 1 to 4 |
+| 67 | `Invoke-SimpleReboot.ps1` | Reboot | Tested | High | UEM via `Test_JSpencerOnly` | `PASS - UEM` (single-VM group, run `f3996a`, 2026-10-30; device rebooted and came back). 1.0.1 defers the no-user reboot by 10 s, parse-checked, that branch not re-run |
 | 68 | `SmartReboot.ps1` | Reboot | Tested | Low | none | `TESTED - MANUAL` |
 
-Counts after the 2026-10-29 fixes and the first UEM sweeps (run `6c8405`, 44 scripts on two live devices): 6 `PASS - LAB`, 14 `PASS - UEM`, 12 `TESTED - MANUAL`, 0 `FIX FIRST`, 6 `MANUAL ONLY`, 1 reference-only copy, 23 `NEEDS TEST - PRODUCT VM`, 6 `NEEDS TEST` (plus the SYSTEM path of `Disable-NonEssentialStartupApps.ps1`). 8 scripts have no inventory row. `Restart-WinProcessSoft.ps1` (0 bytes) is excluded from the count.
+Counts after the 2026-10-29 fixes, the UEM sweeps, the 2026-10-30 SCOM deferral and the single-VM group runs: 6 `PASS - LAB`, 21 `PASS - UEM`, 12 `TESTED - MANUAL`, 0 `FIX FIRST`, 0 `MANUAL ONLY`, 7 `DEFERRED`, 0 reference-only copy, 17 `NEEDS TEST - PRODUCT VM`, 5 `NEEDS TEST` (plus the SYSTEM path of `Disable-NonEssentialStartupApps.ps1`). 8 scripts have no inventory row. `Restart-WinProcessSoft.ps1` (0 bytes) is excluded from the count.
 
 ---
 
@@ -330,7 +331,7 @@ Lab evidence used below is from the runs at 14:53 and 14:56 on 2026-10-28 (`LabR
 6. Verify: `Get-NetIPConfiguration` shows a gateway, `Get-NetFirewallProfile | Select Name,Enabled` all True, `Resolve-DnsName microsoft.com` succeeds.
 7. Restore: harness renews DHCP and re-enables profiles. Fallback: `ipconfig /renew`, `Set-NetFirewallProfile -All -Enabled True`.
 
-**Status:** `PASS - LAB` for the two safe steps. Evidence: `C:\Temp\FixReport\Invoke-AutoRemediateNetworkStack\89bb2f85208e.json` (Passed, 14:59), four passing runs today. Adapter and Winsock steps remain manually verified only, by design.
+**Status:** `PASS - LAB` for the two safe steps. Evidence: `C:\Temp\FixReport\Invoke-AutoRemediateNetworkStack\89bb2f85208e.json` (Passed, 14:59), four passing runs today. Adapter and Winsock steps remain manually verified only, by design. UEM run `e01538` (2026-10-30, single-VM group `Test_JSpencerOnly`, high-impact gate lifted): `Completed` on `CHASEWIN11_2`, reported after the network returned; result file `test-result-solo-netstack.json` in the connector folder.
 
 **Review notes.** Keep the `uem-tests.json` skip until the UEM test group has a device whose Hub connection survives an adapter bounce. Inventory status can move to `4) Complete - Tested` with the note that two steps are console-verified.
 
@@ -962,9 +963,9 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 3. `Start-Process notepad; $env:StartService = 'true'`. Run. Expect the stop line, `Starting process '<path>\Notepad.exe'...`, exit `0`, exactly one new Notepad instance.
 4. Clear `$env:FileDescription`. Run. Expect `Error: FileDescription is not specified.`, exit `1`.
 
-**Status:** `TESTED - MANUAL` (2026-10-29, v1.1.0, all four steps above passed on the lab VM, non-elevated). Remove the `uem-tests.json` skip once variables are set on the UEM item.
+**Status:** `TESTED - MANUAL` (2026-10-29, v1.1.0, all four steps above passed on the lab VM, non-elevated). UEM run `17a0a0` (2026-10-30, `FileDescription = Google Chrome`, `StartService = true`, high-impact gate lifted): `Completed` on `CBRADLEYSWIN11` and every Chrome PID changed, so the kill and relaunch work under Hub. `CHASEWIN11_2` was offline for the run. The relaunched Chrome processes are all in session 0 (SYSTEM), invisible to the user; see the review note.
 
-**Review notes.** Fixed: `$ProcessName` was never assigned, so every match ended in exit `1` without stopping anything. Processes are now stopped by Id, relaunch uses the recorded executable path, and `StartService` is parsed as a boolean string (`'false'` was previously true). Still a force-kill with no save prompt by design.
+**Review notes.** Confirmed under UEM 2026-10-30: with `StartService = true` the relaunch runs as SYSTEM in session 0, so an interactive application disappears from the user's desktop and SYSTEM-owned copies linger until reboot. Use `StartService` only for background processes, and use `Restart-WinProcessGraceful.ps1` (interactive watchdog task) for user applications. Fixed: `$ProcessName` was never assigned, so every match ended in exit `1` without stopping anything. Processes are now stopped by Id, relaunch uses the recorded executable path, and `StartService` is parsed as a boolean string (`'false'` was previously true). Still a force-kill with no save prompt by design.
 
 ### 5.10 `Restart-WinProcessGraceful.ps1`
 
@@ -987,7 +988,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 5. Verify `Get-ScheduledTask WS1_ProcessGracefulWatchdog` returns nothing after completion; `Get-ItemProperty 'HKLM:\Software\AirWatch\Extension\DEXRecords\ProcessGraceful'` shows `Status = Completed` and counts.
 6. Restore: delete the ProcessGraceful folder and registry key.
 
-**Status:** `NEEDS TEST`.
+**Status:** `PASS - UEM` on one device; the break steps above are still `NEEDS TEST`. UEM run `fb2f21` (2026-10-30, `FileDescription = Google Chrome`, `Restart = true`, `GracefulTimeoutSec = 15`, high-impact gate lifted): `Completed` on `CBRADLEYSWIN11`; the watchdog log in `%ProgramData%\AirWatch\Extensions\ProcessGraceful\state\` shows all 10 Chrome processes closed gracefully (`matched=10 graceful=10 forced=0 userpending=0`), Chrome restarted from its original path in the user session, `result.json` written, task unregistered. `CHASEWIN11_2` was offline for the run.
 
 **Review notes.** In Detached mode exit `0` proves dispatch only. `PID<n>_Result` registry values accumulate forever. Inline mode can exceed the 60-second Hub timeout. With no console user (RDP only) the watchdog runs as SYSTEM, never detects hangs and never force-kills.
 
@@ -1434,7 +1435,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 
 **Test steps.** Use Parts 1 to 3. A synthetic fixture for the monolith is the same as 6.12.
 
-**Status:** Reference only. Not a publication candidate; mark it so in the inventory.
+**Status:** `DEFERRED`. SCOM agent remediation is out of scope since 2026-10-30 while the approach is reviewed (updating the SCOM agent is often the preferred fix). Previous status, kept for the record: Reference only. Not a publication candidate; mark it so in the inventory.
 
 ### 6.12 `Invoke-AutoRemediateSCOMAgentPart1.ps1`
 
@@ -1464,7 +1465,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 5. Verify `Get-ItemProperty HKLM:\Software\AirWatch\Extensions\SCOM` shows a fresh `Part1RunTime`.
 6. Restore: `Remove-Item 'HKLM:\SOFTWARE\Microsoft\Microsoft Operations Manager' -Recurse; Remove-Item C:\Lab\SCOM -Recurse`.
 
-**Status:** `NEEDS TEST - PRODUCT VM` (fixture validates the registry and connectivity logic on the lab VM). Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
+**Status:** `DEFERRED`. SCOM agent remediation is out of scope since 2026-10-30 while the approach is reviewed (updating the SCOM agent is often the preferred fix). Previous status, kept for the record: `NEEDS TEST - PRODUCT VM` (fixture validates the registry and connectivity logic on the lab VM). Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Version constant and header disagree. Step 1 resolution skips if any process named `setup` is running.
 
@@ -1488,7 +1489,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 4. Verify registry `StateFolderMB`, `NotRegistered24h`, `UnloadedWorkflows24h`, `Part2RunTime`.
 5. Restore: `Remove-EventLog -LogName 'Operations Manager'` and the fixture.
 
-**Status:** `NEEDS TEST - PRODUCT VM` (Agent Runtime Footprint needs real processes). Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
+**Status:** `DEFERRED`. SCOM agent remediation is out of scope since 2026-10-30 while the approach is reviewed (updating the SCOM agent is often the preferred fix). Previous status, kept for the record: `NEEDS TEST - PRODUCT VM` (Agent Runtime Footprint needs real processes). Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Most expensive part (90-second budget in the README). Writes decimal strings such as `1700.2` that Part 3 cannot parse (see 6.14).
 
@@ -1511,7 +1512,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 3. Certificate: `Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Microsoft Operations Manager\3.0\Machine Settings' ChannelCertificateSerialNumber ([byte[]](1,2,3,4)) -Type Binary` (create the key first). Expect `[Failed ] Channel Certificate Health: Channel certificate serial 04030201 is configured but no matching certificate exists ...`, exit `1`.
 4. Time: `Stop-Service w32time`, expect `[Warning] Time Synchronisation Skew: Windows Time service did not respond ...`. Restart the service.
 
-**Status:** `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29) reported `Completed` on both lab devices, which proves only the not-installed path (result file `test-result-scripts.json` in the connector folder). Fixed 2026-10-29 (v1.1.1), parse-checked. Re-run the fixture in step 2 and confirm the score drops when `StateFolderMB` is over 1536 and `ConfigAgeHours` over 24.
+**Status:** `DEFERRED`. SCOM agent remediation is out of scope since 2026-10-30 while the approach is reviewed (updating the SCOM agent is often the preferred fix). Previous status, kept for the record: `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29) reported `Completed` on both lab devices, which proves only the not-installed path (result file `test-result-scripts.json` in the connector folder). Fixed 2026-10-29 (v1.1.1), parse-checked. Re-run the fixture in step 2 and confirm the score drops when `StateFolderMB` is over 1536 and `ConfigAgeHours` over 24.
 
 **Review notes.** Fixed: `Get-Cached` now parses culture-invariant doubles and rounds, so the decimal strings Part 2 writes no longer read back as -1 and the `ConfigurationCacheStale`, `HealthServiceStateOversized` and CPU deductions apply. Remaining: exit code does not reflect Part 1 or 2 failures (by design, documented in the README).
 
@@ -1534,7 +1535,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 3. Reset path: `$env:ConfirmHighImpact='true'; $env:RunAsPayload='true'; & .\Invoke-AutoRemediateSCOMClonedIdentity.ps1`. Expect `[Failed ] Identity Reset: Both signals present (image-baked state 730 days old, 3 rejections) -- resetting agent identity -> Remediation ran`, then on the fixture `[Failed ] Post-Reset Verification: HealthService did not start after the reset -- original state folder restored`, `Status = RolledBack`, `RolledBack = 1`, exit `1`, original folder name back.
 4. Product VM success: step 6 `[Passed ] ... Agent re-registered with a new identity and received configuration; old state removed`, `LastResetTime` written, task unregistered.
 
-**Status:** `NEEDS TEST - PRODUCT VM`. Fixed 2026-10-29 (v1.0.1, 32,633 characters), parse-checked. Re-run the fixture via the launcher (not the payload directly) to prove the forwarded `ConfirmHighImpact` reaches the task; expect `Status = RolledBack` on the fixture and `Status = Reset`, exit `0`, on a real agent.
+**Status:** `DEFERRED`. SCOM agent remediation is out of scope since 2026-10-30 while the approach is reviewed (updating the SCOM agent is often the preferred fix). Previous status, kept for the record: `NEEDS TEST - PRODUCT VM`. Fixed 2026-10-29 (v1.0.1, 32,633 characters), parse-checked. Re-run the fixture via the launcher (not the payload directly) to prove the forwarded `ConfirmHighImpact` reaches the task; expect `Status = RolledBack` on the fixture and `Status = Reset`, exit `0`, on a real agent.
 
 **Review notes.** Fixed: the launcher now forwards whitelisted `ConfirmHighImpact` and `WhatIf` values (`true|false|1|0|yes|no` only, lower-cased) into the task command line, so the payload sees them under UEM; the aggregate no longer counts the action step's designed `Failed` once its remediation ran, so a successful reset reports `Reset` and exit `0`; a WhatIf run reports `Skipped:WhatIf` and a deadline abort `Skipped:TimedOut`. Still the highest blast radius in the repo; wrong tool for non-persistent VDI.
 
@@ -1557,7 +1558,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 3. Flush path: `$env:ConfirmHighImpact='true'; $env:RunAsPayload='true'; & .\Invoke-AutoRemediateSCOMHealthServiceCache.ps1`. Expect `[Passed ] Management Server Reachability: Management server localhost:135 reachable ...`, `[Passed ] Flush Signal Confirmation: Flush signal(s) confirmed: configuration 72h stale`, `[Failed ] Health Service State Flush: All gates cleared -- flushing NMB of agent state -> Remediation ran`, `[Failed ] Post-Flush Verification: HealthService did not start within 60s after the flush -- state folder restored`, `Status = RolledBack`, exit `1`, folder restored.
 4. Product VM success: `[Passed ] Post-Flush Verification: Agent recovered: service running and configuration re-downloaded; reclaimed ~NMB`, no `dexbak` folder left.
 
-**Status:** `NEEDS TEST - PRODUCT VM`. Fixed 2026-10-29 (v1.0.1, 32,692 characters), parse-checked. Re-run the gate variants via the launcher, confirm a `Skipped:*` run does not write `LastFlushTime`, and that a real flush reports `Completed`, exit `0`.
+**Status:** `DEFERRED`. SCOM agent remediation is out of scope since 2026-10-30 while the approach is reviewed (updating the SCOM agent is often the preferred fix). Previous status, kept for the record: `NEEDS TEST - PRODUCT VM`. Fixed 2026-10-29 (v1.0.1, 32,692 characters), parse-checked. Re-run the gate variants via the launcher, confirm a `Skipped:*` run does not write `LastFlushTime`, and that a real flush reports `Completed`, exit `0`.
 
 **Review notes.** Fixed: the cooldown gate reads `LastFlushTime`, written only when a flush happened (`LastRunTime` is still written every run for reporting); same forwarding and aggregate fixes as 6.15, so a successful flush reports `Completed`. The file was 33,580 characters on disk before this change, already over the UEM limit despite `DESIGN.md` saying 32,717; comment text was trimmed to bring it to 32,692. Any future edit must re-check the size.
 
@@ -1580,7 +1581,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 3. Second run within 20 hours: `Recycled at <time>, within the 20h cooldown. Skipping.`, `Status = SkippedCooldown`.
 4. `Restart-Service HealthService` immediately before a run gives `Skipped:AgentRecentlyStarted`.
 
-**Status:** `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29): `Failed` with `UnknownScriptError (12004)` on both lab devices (after 1 s on `CHASEWIN11_2`, 206 s on `CBRADLEYSWIN11`). Hub's executor log on the VM gave the cause: `Launcher failed: Cannot bind argument to parameter 'Path' because it is an empty string`. Hub feeds the script to PowerShell through stdin, so `$PSCommandPath` is empty and the launcher's self-copy (`Copy-Item -Path $PSCommandPath`) throws. Every launcher that stages itself for a scheduled task had the same line: the three SCOM launchers, the three SCCM launchers (`CcmCache`, `OrphanedCcmSetup`, `WMIRepository`), `DEX_Start-WindowsUpdate.ps1`, and the `DeployScheduledTask` mode of `Measure-LogonDuration.ps1` and `Measure-LogonDurationMultiSession.ps1`. All ten now write `$MyInvocation.MyCommand.ScriptBlock.ToString()` to the payload path instead, which holds the full script text in both file and stdin mode (verified locally). The re-runs then exposed two more launcher defects that only show under Hub: `-WhatIf:$false` passed to `Register-ScheduledTask` (no such parameter) and `-DeleteExpiredTaskAfter` on a trigger-less task (needs an `EndBoundary`, so registration fails). Both removed from every launcher that had them. Re-run `c99707` (2026-10-30 00:21) reported `Completed` on both lab devices, but the payload Hub staged on the VM was 25,951 characters against a 30,629-character source: inside the script's main function `$MyInvocation.MyCommand.ScriptBlock` is the function body, so the header and the tail that switches the copy into payload mode were lost and the payload took the "already running" exit. Fixed by capturing the script text at script scope (the line before the function) in all six function-wrapped launchers. In the final re-run (`37acca`, 2026-10-30 00:31, `Completed` on both lab devices, result file `test-result-launcher.json`) the staged payload is 30,780 bytes, the payload log shows every step and `Payload complete`, and the registry record reads `Status = Skipped:NoAgent`, which is the correct result on a device without the SCOM agent. Details in `UEM-API-TESTING-SPEC.md`.
+**Status:** `DEFERRED`. SCOM agent remediation is out of scope since 2026-10-30 while the approach is reviewed (updating the SCOM agent is often the preferred fix). Previous status, kept for the record: `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29): `Failed` with `UnknownScriptError (12004)` on both lab devices (after 1 s on `CHASEWIN11_2`, 206 s on `CBRADLEYSWIN11`). Hub's executor log on the VM gave the cause: `Launcher failed: Cannot bind argument to parameter 'Path' because it is an empty string`. Hub feeds the script to PowerShell through stdin, so `$PSCommandPath` is empty and the launcher's self-copy (`Copy-Item -Path $PSCommandPath`) throws. Every launcher that stages itself for a scheduled task had the same line: the three SCOM launchers, the three SCCM launchers (`CcmCache`, `OrphanedCcmSetup`, `WMIRepository`), `DEX_Start-WindowsUpdate.ps1`, and the `DeployScheduledTask` mode of `Measure-LogonDuration.ps1` and `Measure-LogonDurationMultiSession.ps1`. All ten now write `$MyInvocation.MyCommand.ScriptBlock.ToString()` to the payload path instead, which holds the full script text in both file and stdin mode (verified locally). The re-runs then exposed two more launcher defects that only show under Hub: `-WhatIf:$false` passed to `Register-ScheduledTask` (no such parameter) and `-DeleteExpiredTaskAfter` on a trigger-less task (needs an `EndBoundary`, so registration fails). Both removed from every launcher that had them. Re-run `c99707` (2026-10-30 00:21) reported `Completed` on both lab devices, but the payload Hub staged on the VM was 25,951 characters against a 30,629-character source: inside the script's main function `$MyInvocation.MyCommand.ScriptBlock` is the function body, so the header and the tail that switches the copy into payload mode were lost and the payload took the "already running" exit. Fixed by capturing the script text at script scope (the line before the function) in all six function-wrapped launchers. In the final re-run (`37acca`, 2026-10-30 00:31, `Completed` on both lab devices, result file `test-result-launcher.json`) the staged payload is 30,780 bytes, the payload log shows every step and `Payload complete`, and the registry record reads `Status = Skipped:NoAgent`, which is the correct result on a device without the SCOM agent. Details in `UEM-API-TESTING-SPEC.md`.
 
 **Review notes.** Fixed 2026-10-29 (v1.0.1): a healthy recycle now reports `Recycled` and exit `0`; `WhatIf` is forwarded into the task command line and a WhatIf run reports `Skipped:WhatIf`. Monitoring gap during the restart; unsent queue lost.
 
@@ -1663,7 +1664,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 4. Verify `Test-Path C:\Users\dexprobe` false; `Get-CimInstance Win32_UserProfile | Where-Object LocalPath -like '*dexprobe*'` empty; the `ProfileList` SID key gone.
 5. Restore: `net user dexprobe /delete`; discard the scratch copy.
 
-**Status:** `MANUAL ONLY`. Never add to the UEM test group or the harness.
+**Status:** `PASS - UEM` for the enumerate and no-delete path. Ran through UEM as SYSTEM against the single-VM group `Test_JSpencerOnly` on 2026-10-30 (run `bbf07f`, `Completed` on `CHASEWIN11_2`, exit `0`). No profile on that VM is both idle for over 30 days and over 500 MB, so nothing was deleted, which is the expected outcome on a fresh VM. The delete path (steps 1 to 5 above, with a planted old profile) remains manual. Never add it to a group that contains the observing machine.
 
 **Review notes.** No dry run. `Deleted profile:` prints before the delete is attempted, so a failed delete still shows the line. `$LOG_PATH` is declared but never written; the README and testing guide say otherwise. `Win32_UserAccount` enumeration on a domain-joined machine queries the whole domain and can time out. `LastUseTime` is unreliable on recent Windows 11 builds.
 
@@ -1791,7 +1792,7 @@ The first three end or weaken the console session and must never be run through 
 3. Verify `query session` shows no Active or Disc user sessions; Security log 4647/4634 for the users.
 4. Empty box: `No active user sessions found.`, exit `0`.
 
-**Status:** `MANUAL ONLY`.
+**Status:** `PASS - UEM` through the single-VM group. UEM run `80650c` (2026-10-30, group `Test_JSpencerOnly`, high-impact gate lifted): `Completed` on `CHASEWIN11_2`, with Hub reporting after the sign-off because it runs as SYSTEM; result file `test-result-solo-signoff.json` in the connector folder. Device-side proof is Winlogon event 7002 on that VM. Still never run against a group that contains the observing machine; the connector enforces this with the manifest's `onlyInGroup`.
 
 **Review notes.** Destroys unsaved work. `SupportsShouldProcess` is declared but never wired to an input, so it is always live. Em dash and box-drawing characters inside the file; the BOM keeps them intact. Any purely numeric token is treated as a session ID.
 
@@ -1809,7 +1810,9 @@ The first three end or weaken the console session and must never be run through 
 
 **Test steps.** Snapshot, hold the recovery key, run as SYSTEM, power on, confirm `manage-bde -status C:` shows `Protection Status: Protection Off`, then `manage-bde -protectors -enable C:`. Negative path on a VM without BitLocker: expect `An error has occured: manage-bde -protectors -disable C: returned <code> ...` and exit `1` with no shutdown.
 
-**Status:** `MANUAL ONLY`. Header and error handling fixed 2026-10-29 (v1.1.0), parse-checked, behaviour unchanged.
+**Status:** `PASS - UEM` for the positive path (v1.3.0, run `1b5fcb`, 2026-10-30). BitLocker was enabled on `CHASEWIN11_2` first with a password protector and the no-TPM policy (the VM has no vTPM), UEM confirmed `BitLockerProtectionPresent`, then the script ran as SYSTEM through the single-VM group and Hub reported `Completed` 13 seconds after the sync. Device-side evidence from the operator: System event 1074 at 13:45:30, source `shutdown.exe`, user `NT AUTHORITY\SYSTEM`, type `shutdown`, comment "Emergency lock-down: BitLocker protectors suspended, powering off" (the v1.3.0 message), and no 1075 abort. A second 1074 at 13:25:04 with an empty comment is the v1.2.0 run `534500`, so that run also reached its in-process `shutdown /t 0`; its "no result" was purely the reporting race, as diagnosed. `manage-bde -status C:` afterwards showed `Protection On`, which is what `manage-bde -protectors -disable` without `-RebootCount` produces after one restart, so no manual re-enable was needed. The kernel log closes it: Kernel-General event 13 (shutting down) at 13:45:49, four seconds after the 15-second timer expired, and event 12 (started) at 13:48:53, which is also the device's `LastBootUpTime`; the v1.2.0 run shows the same pair at 13:25:11 and 13:31:48. So each run suspended the protectors and powered the VM off, and the VM came back on its own three to six minutes later without the operator booting it (a Fusion or host behaviour worth checking, not a script matter). For a real decommission the console check at boot is: boot the VM (no startup password while protectors are suspended), confirm `manage-bde -status C:` shows `Protection Off`, then `manage-bde -protectors -enable C:`. The v1.2.0 attempt (run `534500`, same day) ended as no result because that version ran `shutdown /t 0` in-process and the OS tore the host down before Hub could report; v1.3.0 hands the power-off to `shutdown.exe`'s 15-second timer instead, so the status is definitive. The negative path (unprotected device, expect `Failed` with no shutdown) is still unproven on v1.2.0+; prove it on a decrypted VM by setting `expect` to `Failed`. The v1.2.0 negative path (unprotected device, expect `Failed` with no shutdown) is still unproven, because the VM was encrypted before v1.2.0 could run against it; prove it on a decrypted VM by setting `expect` back to `Failed`.
+
+**History.** First UEM run on v1.1.0 against the single-VM group on 2026-10-30 (run `c8e0dd`). UEM reports that VM as `BitLockerProtectionNotPresent`, so the expected result was `Failed` with no shutdown. Instead the run ended `NoResult` and the device stopped checking in: a `DeviceQuery` control sent to the observing VM advanced its last-seen time within two minutes, while the target's stayed at the previous run's timestamp, so the VM powered off. Conclusion: in v1.1.0 `manage-bde -protectors -disable C:` did not return a non-zero exit code on that volume, and the exit-code guard let the script reach `shutdown /s /f /t 0`. Fixed in v1.2.0 (parse-checked): the script now requires `Get-BitLockerVolume C:` to report `ProtectionStatus On` before the suspend and `Off` after it, and treats `ERROR:` text from `manage-bde` as a failure; any other state throws and exits `1` without powering off. The VM was booted afterwards (it had no protectors to re-enable), BitLocker was enabled on it, the v1.2.0 attempt (run `534500`) ended as no result because of the in-process `/t 0`, and the v1.3.0 positive path passed as run `1b5fcb` above.
 
 **Review notes.** Fixed: added a header stating the intent and the clear-key exposure, the catch block now prints the error, and both native commands are exit-code checked so a failed `manage-bde` no longer proceeds to shutdown. The name remains misleading; consider renaming to make "suspend BitLocker and power off" explicit.
 
@@ -1831,7 +1834,7 @@ The first three end or weaken the console session and must never be run through 
 2. Expect the console to switch to the lock screen; `query session` shows the user `Disc` and `console` as `Conn`; `Get-Process -IncludeUserName` still lists the user's processes; exit `0`.
 3. User unlocks normally. No restore needed.
 
-**Status:** `MANUAL ONLY` (safe, but it interrupts the operator's session).
+**Status:** `PASS - UEM`. Ran through UEM against the single-VM group `Test_JSpencerOnly` on 2026-10-30 (run `496916`, `Completed` on `CHASEWIN11_2` about 200 s after the sync, exit `0`). The console session dropped to the lock screen and the user signed back in afterwards. Still never run it against a group that contains the observing machine.
 
 **Review notes.** With no console user the `tsdiscon` error is swallowed and exit is still `0`. `$WhatIfPreference` is checked but never settable.
 
@@ -1965,7 +1968,7 @@ The first three end or weaken the console session and must never be run through 
 4. After a reboot the orchestrator removes the task, key and helper scripts on its next poll.
 5. Restore: unregister everything under `\WorkspaceOneEx\`, remove the AdvancedReboot registry key and folder, remove `HKCU:\Software\Classes\rebootcountdown|rebootabort|rebootlater`.
 
-**Status:** `MANUAL ONLY`. Fixed 2026-10-29; main script and both extracted helpers parse clean under PowerShell 5.1. The deferral flow still needs one end-to-end run on the snapshot (steps 1 to 4) because the inventory's "Tested" predates these fixes.
+**Status:** `PASS - UEM` for the install path through the single-VM group. UEM run `ea5217` (2026-10-30, group `Test_JSpencerOnly`, high-impact gate lifted, user signed in): `Completed` on `CHASEWIN11_2`, which means the orchestrator task and helpers were written and registered under Hub; result file `test-result-solo-rebootdefer.json` in the connector folder. Fixed 2026-10-29; main script and both extracted helpers parse clean under PowerShell 5.1. The deferral flow itself (toast, defer, countdown, forced reboot at the deadline) still needs the manual steps 1 to 4 on that VM, then a revert to the snapshot, because the orchestrator persists and keeps prompting.
 
 **Review notes.** Fixed: `if($mandatoryReboot=$true)` (assignment) is now a comparison, so the no-users path reboots only after the deadline; `Write-Log` is defined inside the orchestrator and appends to `RebootPrompt.log` under the AdvancedReboot folder; `$shutdown` is assigned before the protocol handler commands are built, so "Reboot now" and the abort handler are well-formed; the task Description stamp and `Deadline` value are ISO round-trip strings and are parsed invariantly; the leaked `New-ItemProperty` output is suppressed. Remaining, harmless: the toast writes a per-user `Deadline` value that is never read (the reader uses `DeadlineAt`), `Deferrals` is never populated, a verbose line references two undefined path variables, and the file has no version string (the readme says 1.2.0.7).
 
@@ -1979,7 +1982,7 @@ The first three end or weaken the console session and must never be run through 
 | Prerequisites | `shutdown.exe`, PS 5.1 (`Get-WmiObject`) |
 | Automated coverage | `uem-tests.json` skip |
 
-**Purpose.** With a console user: `shutdown.exe /r /f /t 300` with a message. Without: immediate forced reboot.
+**Purpose.** With a console user: `shutdown.exe /r /f /t 300` with a message. Without: forced reboot after 10 seconds (1.0.1; was `/t 0`, which could tear the process down before Hub recorded the result).
 
 **Test steps**
 
@@ -1987,9 +1990,9 @@ The first three end or weaken the console session and must never be run through 
 2. Within 300 seconds `shutdown /a`. System log shows 1074 then 1075.
 3. No-user branch: disposable snapshot only; reboots immediately.
 
-**Status:** `MANUAL ONLY`.
+**Status:** `PASS - UEM` through the single-VM group. UEM run `f3996a` (2026-10-30, group `Test_JSpencerOnly`, high-impact gate lifted): `Completed` on `CHASEWIN11_2`, which then restarted on the countdown and checked back in at 11:01; result file `test-result-solo-simplereboot.json` in the connector folder. Device-side proof is System event 1074 on that VM. The connector's `onlyInGroup` guard keeps it away from any group containing the observing machine.
 
-**Review notes.** Typo `manueagement` in the no-user message. Does not detect an already pending shutdown (error 1190) and still exits `0`.
+**Review notes.** 1.0.1 (2026-10-30, parse-checked, not re-run): the no-user branch schedules the reboot 10 seconds out instead of `/t 0`, so Hub records the result in both branches, and the `manueagement` typo is fixed. Does not detect an already pending shutdown (error 1190) and still exits `0`.
 
 ### 11.3 `SmartReboot.ps1`
 
@@ -2022,6 +2025,6 @@ The first three end or weaken the console session and must never be run through 
 2. All eleven `FIX FIRST` items were corrected on 2026-10-29 (see each script's review notes). Still open: delete or move the empty `Restart-WinProcessSoft.ps1`; `Restart-WinProcessGracefulEx.ps1` works again but remains a prototype superseded by `Restart-WinProcessGraceful.ps1`; `DESIGN.md` in the SCOM folder lists stale file sizes.
 3. Add inventory rows for the five SCCM scripts, `Get-AppVolumesMountProbe.ps1`, `Measure-LogonDurationMultiSession.ps1` and `Restart-WinProcessGracefulEx.ps1` (or exclude them explicitly).
 4. Run the `NEEDS TEST` group on the lab VM in this order, cheapest first: 5.3, 5.5, 5.8, 5.12, 8.4, 10.2, 5.7, 5.15, 5.16, 5.13, 5.4, 5.2, 5.10.
-5. Stand up one product VM each for Defender-adjacent (CrowdStrike, Trellix, Trend Micro), Microsoft 365 (Outlook, Teams), Zoom, SCCM, SCOM, FSLogix and VPN, and work through the `NEEDS TEST - PRODUCT VM` group.
+5. Stand up one product VM each for Defender-adjacent (CrowdStrike, Trellix, Trend Micro), Microsoft 365 (Outlook, Teams), Zoom, SCCM, FSLogix and VPN, and work through the `NEEDS TEST - PRODUCT VM` group. SCOM is `DEFERRED` since 2026-10-30 and needs a decision on the remediation approach (agent upgrade versus restart or recycle) before any test.
 6. Once a script passes here, add or adjust its `uem-tests.json` entry and run it through the UEM test group per `UEM-API-TESTING-SPEC.md`. The loop is proven end to end as of 2026-10-29 (`Invoke-AutoRemediateChrome.ps1` is `PASS - UEM`); the full `-Type Script` sweep of every runnable manifest entry is the next run, and its result file is the evidence to cite for each script it completes on.
 

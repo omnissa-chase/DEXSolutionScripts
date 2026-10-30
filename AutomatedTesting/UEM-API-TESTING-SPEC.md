@@ -2,7 +2,7 @@
 
 **Audience:** whoever maintains the DEX scripts and the UEM script connector. This describes how a script or sensor in this repo is proven to work *as UEM runs it* (Hub, SYSTEM context, the published timeout, the real device) rather than only from an elevated console, and the tool that does it.
 
-**Status:** tool written and dry-run against the tenant on 2026-10-28; live runs on 2026-10-29 proved create, assign, sync and device-side execution. See [What has been verified](#what-has-been-verified).
+**Status:** tool written and dry-run against the tenant on 2026-10-28; live runs on 2026-10-29 proved create, assign, sync and device-side execution; on 2026-10-30 the seven session-ending or destructive scripts ran through the single-VM group `Test_JSpencerOnly`, six passed, the BitLocker power-off script was hardened to v1.2.0 after it shut the unencrypted VM down, and v1.3.0, which defers the power-off so Hub reports `Completed` first, passed its positive path on the same VM with BitLocker enabled, with the device's event 1074 carrying the script's own shutdown comment as proof. The manifest key `expect: NoResult` exists for scripts that cannot defer, but none in this repo needs it now. See [What has been verified](#what-has-been-verified) and [Session-ending scripts through a single-VM group](#session-ending-scripts-through-a-single-vm-group-2026-10-30).
 
 ## Why a second layer
 
@@ -122,6 +122,41 @@ Without an entry, a script is expected to report `Completed` and a sensor to rep
 A sensor `Failed` verdict carries the value, so the fix is usually in the script or in the manifest's expectation.
 
 `NoResult` on every item means the device is not picking up assignments: check it is online, `Last Seen` is recent, and Hub's `WorkflowStepStatusReporting` is running (the Workflow log shows it every 30 minutes).
+
+## Process restart pair against Chrome, 2026-10-30
+
+Run with `-IncludeHighImpact`, one script per run so they could not race for the same processes, with Chrome open in the lab VM's user session (runs `fb2f21` graceful, `17a0a0` blunt; result files `test-result-restart-graceful.json` and `test-result-restart.json`). Only `CBRADLEYSWIN11` reported; `CHASEWIN11_2` was off the network for the whole window, so the tool's verdict is `NoResult` for both and the evidence below is single-device.
+
+- `Restart-WinProcessGraceful.ps1` (`FileDescription = Google Chrome`, `Restart = true`, `GracefulTimeoutSec = 15`): `Completed` in UEM; the watchdog log in `%ProgramData%\AirWatch\Extensions\ProcessGraceful\state\` records all 10 Chrome processes closed gracefully (`matched=10 graceful=10 forced=0 userpending=0`), Chrome restarted from its original path, `result.json` written and the watchdog task unregistered. Chrome's PIDs on the device changed completely. This is the intended behaviour end to end.
+- `Restart-WinProcess.ps1` (`FileDescription = Google Chrome`, `StartService = true`): `Completed` in UEM; Chrome's PIDs changed, but every relaunched Chrome process is in **session 0**, because the script runs as SYSTEM and uses `Start-Process`. The user sees Chrome vanish and nothing come back, while SYSTEM-owned Chrome processes linger until reboot. Expected from the code, now confirmed on a device; `StartService = true` should not be used from UEM for interactive applications, and the script's notes should say so. The graceful script's interactive watchdog task is the correct pattern.
+
+## Session-ending scripts through a single-VM group, 2026-10-30
+
+The connector cannot observe a device that it is running on once that device reboots or signs out (yesterday's SignOff incident), so the seven scripts that end the session, sever the network, lock the console, touch user profiles or power the device off run against a dedicated smart group that holds only the second VM: `Test_JSpencerOnly` (id 4862, uuid `ebccbc3e-3828-4d1e-949b-50eaebd9817d`, member `CHASEWIN11_2` only, created through `POST api/mdm/smartgroups` with `CriteriaType UserDevice`). The manifest marks them `onlyInGroup: Test_JSpencerOnly`, and the tool skips them against any other group, so the observing machine can never be in scope by accident. Both VMs share one Mac host, so the host must stay awake for the run. Each ran alone, with `-SmartGroupName Test_JSpencerOnly -IncludeHighImpact`, after the user snapshotted the target:
+
+| Script | Run | Result | Note |
+|---|---|---|---|
+| `Invoke-AutoRemediateNetworkStack.ps1` | `e01538` | `Completed` after 199 s | Hub reported once the network was back |
+| `DEX_Invoke-SignoffWindows.ps1` | `80650c` | `Completed` after 199 s | Hub (SYSTEM) reports after the user is gone |
+| `Invoke-SimpleReboot.ps1` | `f3996a` | `Completed` after 237 s | Device rebooted and checked back in at 11:01 |
+| `Invoke_RebootWithUserDefer_1.2.0.7.ps1` | `ea5217` | `Completed` after 208 s | Proves the orchestrator install; the prompt, deferral and forced reboot are validated by hand, then the VM is reverted to its snapshot |
+| `DEX_Start-LockDeviceSoft.ps1` | `496916` | `Completed` after about 200 s | Console dropped to the lock screen; the user signed back in for the next runs |
+| `Start-UserProfileCleanup.ps1` | `bbf07f` | `Completed` after about 215 s | Enumerate and no-delete path; no profile on the VM meets the 30-day and 500 MB thresholds, so the delete path stays manual |
+| `DEX_LockDevice-BitlockEncryptionActivated.ps1` | `c8e0dd` | `NoResult` after 5 min | Expected `Failed` with no shutdown (UEM reports the VM `BitLockerProtectionNotPresent`). The VM stopped checking in instead, so the v1.1.0 exit-code guard let the script reach `shutdown`. Fixed in v1.2.0, next row |
+| `DEX_LockDevice-BitlockEncryptionActivated.ps1` v1.2.0 | `534500` | `NoResult` after 5 min (judged a pass under `expect: NoResult` at the time) | Positive path, first attempt. BitLocker was enabled on the VM first (password protector, no-TPM policy; UEM then reported `BitLockerProtectionPresent`). The in-process `shutdown /t 0` killed the host before Hub could report, so UEM could not distinguish a power-off from a non-run; the VM checked in again at 13:32 after the user booted it. Superseded by the next row |
+| `DEX_LockDevice-BitlockEncryptionActivated.ps1` v1.3.0 | `1b5fcb` | `Completed`, reported 13 s after the sync | Positive path with the power-off deferred 15 s through `shutdown.exe`'s timer. Device-side: System event 1074 at 13:45:30 from `shutdown.exe` as SYSTEM with the script's comment, no 1075. The same log shows a 1074 at 13:25:04 for the v1.2.0 run, so `534500` also reached its shutdown and only its reporting was lost. `manage-bde -status C:` afterwards read `Protection On` (default resume after one restart). Kernel-General event 13 at 13:45:49 and event 12 at 13:48:53 (the device's `LastBootUpTime`) prove the power-off completed and the VM restarted three minutes later on its own; the v1.2.0 run shows the same pair at 13:25:11 and 13:31:48. The unattended restart is a Fusion or host behaviour, not a script matter |
+
+Result files `test-result-solo-<tag>.json` in the connector folder. Device-side events (7002, 1074) live on `CHASEWIN11_2`.
+
+**Liveness check used for the BitLocker verdict.** A `NoResult` alone cannot tell "slow to report" from "powered off". `POST api/mdm/devices/{id}/commands?command=DeviceQuery` (HTTP 202) to the target and, as a control, to the observing VM settles it: the control's `LastSeen` (`GET api/mdm/devices/{id}`) advanced within two minutes (its Hub connection log shows the SYNC landing within a minute), while the target's stayed at the previous run's timestamp for 15 minutes. `LastSeen` does not advance on its own between samples, so always pair it with a query before reading it as "offline". Helpers: `device-query.ps1`, `device-lastseen.ps1` in the scratchpad.
+
+**Finding.** The manage-bde exit code is not a safe gate for a destructive follow-on step. On that VM `manage-bde -protectors -disable C:` evidently exited 0 even though Hub reports no BitLocker protection, so a script that pairs "suspend protectors" with "power off" must check the volume state itself (`Get-BitLockerVolume` protection On before, Off after) and treat `ERROR:` text in the manage-bde output as a failure. Applied in v1.2.0 of the script; the same rule applies to any future script that chains a native tool's result into an irreversible action.
+
+**Rule: hand a reboot or power-off to the OS timer, never run it in-process with `/t 0`.** Hub records a script's result when the PowerShell process exits. `shutdown.exe /t 0` inside the script tears that process down first, so UEM can only ever show no result, and a non-run looks identical to a success (run `534500` above could not be told apart from "never ran" without device-side evidence). `shutdown.exe /r|/s /f /t <seconds>` returns at once and winlogon owns the timer, so the script exits, Hub posts `Completed` with the script's output, and the device goes down a few seconds later. `Invoke-SimpleReboot.ps1` and `Invoke_RebootWithUserDefer_1.2.0.7.ps1` already worked this way, which is why both reported `Completed` before rebooting; `DEX_LockDevice-BitlockEncryptionActivated.ps1` v1.3.0 and the no-user branch of `Invoke-SimpleReboot.ps1` 1.0.1 were changed to match on 2026-10-30. With that rule in place no script in this repo needs `expect: NoResult`; the key stays in the tool for anything that genuinely cannot defer.
+
+## Scope note, 2026-10-30
+
+The SCOM agent remediation scripts (`Invoke-AutoRemediateSCOMAgent*`, `...SCOMClonedIdentity`, `...SCOMHealthServiceCache`, `...SCOMMonitoringHost`) are deferred by decision while the approach is reviewed: updating the SCOM agent is often the preferred fix, so restarting or recycling it may not be the right remediation at all. They are skipped in `uem-tests.json` and marked `DEFERRED` in `TEST-VALIDATION.md`. The launcher-plumbing findings below still stand, because the same pattern is used by the SCCM launchers and `DEX_Start-WindowsUpdate.ps1`. The read-only SCOM sensors stay in the sweep since they are harmless on a device without the agent.
 
 ## What has been verified
 

@@ -1,30 +1,40 @@
 <#
 .SYNOPSIS
-    Builds a Product Provisioning deployment package for TroubleshootWizard.
+    Builds the Workspace ONE deployment artifacts for TroubleshootWizard.
 
 .DESCRIPTION
-    Zips all payload files into TroubleshootWizard.zip, then bundles that
-    archive together with Install-TroubleshootWizard.ps1 into a final
-    ProductProvisioning/ folder ready to upload to Workspace ONE.
+    Reads the version from Install-TroubleshootWizard.ps1 and writes:
 
-    Layout of ProductProvisioning/:
-        Install-TroubleshootWizard.ps1   - install script (the PP manifest script)
-        TroubleshootWizard.zip           - all 11 payload files
+      Releases\v<ver>\SFD\TroubleshootWizard_v<ver>.zip
+          Everything (payload + installer + uninstaller), folders preserved.
+          Upload as the single SFD application file.
 
-    WS1 Product Provisioning config:
-        Install Command  : powershell.exe -ExecutionPolicy Bypass -File Install-TroubleshootWizard.ps1
-        Detection Rule   : Registry value exists
-                           HKLM\SOFTWARE\AirWatch\Extensions\TroubleshootWizard -> Version
+      Releases\v<ver>\ProductProvisioning\
+          Install-TroubleshootWizard.ps1
+          Uninstall-TroubleshootWizard.ps1
+          TroubleshootWizard.zip               (payload only)
+          Upload these files to a Product Provisioning Files/Actions record.
 
-.PARAMETER PublishedDir
-    Path to the Published/ folder containing all payload files and the installer.
-    Defaults to the directory containing this script.
+    Optionally signs every .ps1 in the staged payload first (-CertificateThumbprint),
+    via Sign-Package.ps1, so the archives contain signed scripts.
 
-.PARAMETER OutputDir
-    Where to write ProductProvisioning/. Defaults to a sibling of PublishedDir.
+.PARAMETER SourceDir
+    Folder containing the project files. Defaults to this script's folder.
+
+.PARAMETER OutputRoot
+    Where Releases\ is created. Defaults to <SourceDir>\Releases.
+
+.PARAMETER CertificateThumbprint
+    Code-signing certificate thumbprint (CurrentUser\My or LocalMachine\My). When
+    given, scripts are signed in the staging folder before zipping.
+
+.PARAMETER TimestampServer
+    RFC 3161 timestamp URL used when signing. Default: http://timestamp.digicert.com
 
 .EXAMPLE
     .\Create-ZipPackage.ps1
+.EXAMPLE
+    .\Create-ZipPackage.ps1 -CertificateThumbprint 508D2951E2DE747EDFB4E0A003985975EEAE9541
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -35,85 +45,112 @@
 
 [CmdletBinding()]
 param(
-    [string] $PublishedDir = $PSScriptRoot,
-    [string] $OutputDir    = (Join-Path (Split-Path $PSScriptRoot -Parent) 'ProductProvisioning')
+    [string] $SourceDir             = $PSScriptRoot,
+    [string] $OutputRoot            = '',
+    [string] $CertificateThumbprint = '',
+    [string] $TimestampServer       = 'http://timestamp.digicert.com'
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $OutputRoot) { $OutputRoot = Join-Path $SourceDir 'Releases' }
+
+$installerName   = 'Install-TroubleshootWizard.ps1'
+$uninstallerName = 'Uninstall-TroubleshootWizard.ps1'
+$signerName      = 'Sign-Package.ps1'
+$payloadZipName  = 'TroubleshootWizard.zip'
 
 $payloadFiles = @(
-    'Troubleshooter-Modular.ps1',
-    'Troubleshooter-Modular-Ex.ps1',
+    'TroubleshootWizard.ps1',
+    'TroubleshootWizard-UI.ps1',
+    'TroubleshootWizard-Common.ps1',
+    'Send-TroubleshootWizardEvent.ps1',
+    'Invoke-TroubleshootWizardFromEvent.ps1',
     'UI-Modern.xaml',
     'UI-Modern-Light.xaml',
-    'Branding.json',
-    'omnissa.png',
-    'hub.png',
-    'NetworkDiagSteps.json',
-    'AudioBluetoothDiagSteps.json',
-    'PrinterDiagSteps.json',
-    'VPNDiagSteps.json',
-    'WindowsUpdateDiagSteps.json'
+    'Branding.json'
 )
+$payloadFolders = @('DiagSteps', 'Resources')
 
-$installerName = 'Install-TroubleshootWizard.ps1'
-$zipName       = 'TroubleshootWizard.zip'
+# -- Version from installer ------------------------------------------------
+$installerText = Get-Content (Join-Path $SourceDir $installerName) -Raw
+if ($installerText -notmatch "(?m)^\`$AppVersion\s*=\s*'([^']+)'") { throw "Could not read `$AppVersion from $installerName" }
+$version = $Matches[1]
 
-Write-Output "`r`n=== TroubleshootWizard - Create Zip Package ==="
-Write-Output "Source   : $PublishedDir"
-Write-Output "Output   : $OutputDir"
+Write-Output "`r`n=== TroubleshootWizard - Create Package v$version ==="
+Write-Output "Source : $SourceDir"
+Write-Output "Output : $OutputRoot\v$version"
 
 # -- Validate source -------------------------------------------------------
 $missing = @()
-foreach ($f in ($payloadFiles + $installerName)) {
-    if (-not (Test-Path (Join-Path $PublishedDir $f))) { $missing += $f }
+foreach ($f in ($payloadFiles + $installerName + $uninstallerName)) {
+    if (-not (Test-Path (Join-Path $SourceDir $f))) { $missing += $f }
+}
+foreach ($d in $payloadFolders) {
+    if (-not (Test-Path (Join-Path $SourceDir $d))) { $missing += "$d\" }
 }
 if ($missing) {
-    Write-Output "`r`nMissing files:"
-    $missing | ForEach-Object { Write-Output "  $_" }
+    Write-Output "`r`nMissing files:"; $missing | ForEach-Object { Write-Output "  $_" }
     exit 1
 }
 
-# -- Prepare output folder -------------------------------------------------
-if (Test-Path $OutputDir) { Remove-Item $OutputDir -Recurse -Force }
-New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+# -- Stage ------------------------------------------------------------------
+$releaseDir = Join-Path $OutputRoot "v$version"
+$sfdDir     = Join-Path $releaseDir 'SFD'
+$ppDir      = Join-Path $releaseDir 'ProductProvisioning'
+$stagingDir = Join-Path $env:TEMP "TroubleshootWizard_Staging_$([guid]::NewGuid().ToString('N'))"
+$payloadDir = Join-Path $stagingDir 'payload'
+$fullDir    = Join-Path $stagingDir 'full'
 
-# -- Build payload zip -----------------------------------------------------
-$zipPath    = Join-Path $OutputDir $zipName
-$stagingDir = Join-Path $env:TEMP 'TroubleshootWizard_Staging'
-if (Test-Path $stagingDir) { Remove-Item $stagingDir -Recurse -Force }
-New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
-
-foreach ($f in $payloadFiles) {
-    Copy-Item (Join-Path $PublishedDir $f) (Join-Path $stagingDir $f)
+foreach ($d in $releaseDir, $sfdDir, $ppDir, $payloadDir, $fullDir) {
+    if (Test-Path $d) { Remove-Item $d -Recurse -Force }
+    New-Item -ItemType Directory -Path $d -Force | Out-Null
 }
 
+foreach ($f in $payloadFiles) { Copy-Item (Join-Path $SourceDir $f) (Join-Path $payloadDir $f) }
+foreach ($d in $payloadFolders) {
+    Copy-Item (Join-Path $SourceDir $d) (Join-Path $payloadDir $d) -Recurse
+    Get-ChildItem (Join-Path $payloadDir $d) -Recurse -File | Where-Object { $_.Extension -notin '.json', '.png' } | Remove-Item -Force
+}
+foreach ($f in $installerName, $uninstallerName) { Copy-Item (Join-Path $SourceDir $f) (Join-Path $stagingDir $f) }
+
+# -- Sign (optional) --------------------------------------------------------
+if ($CertificateThumbprint) {
+    $signer = Join-Path $SourceDir $signerName
+    if (-not (Test-Path $signer)) { throw "$signerName not found next to this script." }
+    Write-Output "`r`nSigning scripts with certificate $CertificateThumbprint ..."
+    & $signer -Path $stagingDir -CertificateThumbprint $CertificateThumbprint -TimestampServer $TimestampServer
+    if ($LASTEXITCODE -ne 0) { throw 'Signing failed - package not built.' }
+}
+
+# -- Build archives ---------------------------------------------------------
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-[System.IO.Compression.ZipFile]::CreateFromDirectory($stagingDir, $zipPath)
+
+# Product Provisioning: payload zip + installer/uninstaller alongside
+$ppZip = Join-Path $ppDir $payloadZipName
+[System.IO.Compression.ZipFile]::CreateFromDirectory($payloadDir, $ppZip)
+Copy-Item (Join-Path $stagingDir $installerName)   (Join-Path $ppDir $installerName)
+Copy-Item (Join-Path $stagingDir $uninstallerName) (Join-Path $ppDir $uninstallerName)
+
+# SFD: one zip with everything
+Copy-Item "$payloadDir\*" $fullDir -Recurse
+Copy-Item (Join-Path $stagingDir $installerName)   (Join-Path $fullDir $installerName)
+Copy-Item (Join-Path $stagingDir $uninstallerName) (Join-Path $fullDir $uninstallerName)
+$sfdZip = Join-Path $sfdDir "TroubleshootWizard_v$version.zip"
+[System.IO.Compression.ZipFile]::CreateFromDirectory($fullDir, $sfdZip)
+
 Remove-Item $stagingDir -Recurse -Force
 
-$zipSize = [math]::Round((Get-Item $zipPath).Length / 1KB, 1)
-Write-Output "`r`n  Created : $zipName  ($zipSize KB)"
+$kb = { param($p) [math]::Round((Get-Item $p).Length / 1KB, 1) }
+Write-Output "`r`n  SFD                : $sfdZip  ($(& $kb $sfdZip) KB)"
+Write-Output "  ProductProvisioning: $ppZip  ($(& $kb $ppZip) KB) + installer/uninstaller"
 
-# -- Copy installer --------------------------------------------------------
-Copy-Item (Join-Path $PublishedDir $installerName) (Join-Path $OutputDir $installerName)
-Write-Output "  Copied  : $installerName"
-
-# -- Summary ---------------------------------------------------------------
-Write-Output "`r`n=== Package ready: $OutputDir ==="
 Write-Output @"
 
-Workspace ONE Product Provisioning setup:
-  Upload both files:
-    - Install-TroubleshootWizard.ps1
-    - TroubleshootWizard.zip
-
-  Install Command:
-    powershell.exe -ExecutionPolicy Bypass -File Install-TroubleshootWizard.ps1
-
-  Detection Rule (registry value exists):
-    Key:   HKLM\SOFTWARE\AirWatch\Extensions\TroubleshootWizard
-    Value: Version
+Workspace ONE configuration (both methods):
+  Install command   : powershell.exe -ExecutionPolicy Bypass -File Install-TroubleshootWizard.ps1
+  Uninstall command : powershell.exe -ExecutionPolicy Bypass -File Uninstall-TroubleshootWizard.ps1
+  Detection         : registry value exists
+                      HKLM\SOFTWARE\AirWatch\Extensions\TroubleshootWizard -> Version = $version
+  Run as            : System (required: ACLs, HKLM, event source, scheduled task)
 "@
-
 exit 0

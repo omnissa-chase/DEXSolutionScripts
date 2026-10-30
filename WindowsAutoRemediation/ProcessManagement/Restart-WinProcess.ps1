@@ -11,17 +11,22 @@
 .NOTES
     Script Name  : Restart-WinProcess.ps1
     Data Type    : String
-    Version      : 1.1.0
+    Version      : 1.1.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-10-30
     Timeout      : 30 seconds
 
     Inputs (UEM script variables / environment):
         FileDescription  Required. Substring of the process Description to match.
         StartService     Optional. true/false. Relaunch each stopped process from its
                          original path after a 5 second pause. Default false.
+                         Under UEM this script runs as SYSTEM, so the relaunch lands in
+                         session 0 where no user can see it (confirmed with Chrome on
+                         2026-10-30). Use it for background processes only; for user
+                         applications use Restart-WinProcessGraceful.ps1, whose watchdog
+                         runs in the user's session.
 
     Exit codes: 0 all matched processes stopped (or none were running); 1 missing input
     or at least one process could not be stopped.

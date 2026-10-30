@@ -1,20 +1,31 @@
 {
-  "_comment": "Per-item overrides for Invoke-WsoContentTest.ps1 (see UEM-API-TESTING-SPEC.md). Keyed by the inventory Name column. Anything not listed here is tested with the defaults: a Script is expected to report Completed (exit 0) on every test device, a Sensor is expected to report a value that parses as its declared Data Type. Keys: skip (reason string: never tested), expect (Completed | Failed), variables (name -> value for $env:-backed parameters), match (regex the sensor value must satisfy), min / max (numeric bounds for Integer sensors), allowEmpty (true when an empty String value is acceptable), expectNoValue (true for a Boolean/DateTime sensor that emits nothing when its data source is absent; Hub rejects an empty typed value, so 'no value stored' is the pass condition on a device without the product), timeoutMinutes (per-item override of the wait for a result), note (free text carried into the result file). Expectations marked 'lab VM' assume the disposable VMware lab build (no Wi-Fi, no Trellix, no SCOM, no Office). Revisit them on a product VM.",
+  "_comment": "Per-item overrides for Invoke-WsoContentTest.ps1 (see UEM-API-TESTING-SPEC.md). Keyed by the inventory Name column. Anything not listed here is tested with the defaults: a Script is expected to report Completed (exit 0) on every test device, a Sensor is expected to report a value that parses as its declared Data Type. Keys: skip (reason string: never tested), expect (Completed | Failed | NoResult, the last for a script that powers the device off before Hub can report, so no result within timeoutMinutes is the pass), variables (name -> value for $env:-backed parameters), match (regex the sensor value must satisfy), min / max (numeric bounds for Integer sensors), allowEmpty (true when an empty String value is acceptable), expectNoValue (true for a Boolean/DateTime sensor that emits nothing when its data source is absent; Hub rejects an empty typed value, so 'no value stored' is the pass condition on a device without the product), timeoutMinutes (per-item override of the wait for a result), onlyInGroup (smart group name; the item is skipped unless the run targets exactly that group, used for session-ending or network-severing scripts so the machine running the tool is never in scope), note (free text carried into the result file). Expectations marked 'lab VM' assume the disposable VMware lab build (no Wi-Fi, no Trellix, no SCOM, no Office). Revisit them on a product VM.",
 
   "Invoke-SimpleReboot.ps1": {
-    "skip": "Reboots the test device mid-run. Validate by hand with the reboot break test."
+    "onlyInGroup": "Test_JSpencerOnly",
+    "timeoutMinutes": 5,
+    "note": "Reboots the target 5 minutes after exit 0 (shutdown.exe /t 300). Only against the single-VM group so the machine running the tool is never in scope. Device-side proof: System event 1074 and uptime reset on CHASEWIN11_2."
   },
   "Invoke_RebootWithUserDefer_1.2.0.7.ps1": {
-    "skip": "Reboots the test device after the deferral window."
+    "onlyInGroup": "Test_JSpencerOnly",
+    "timeoutMinutes": 5,
+    "note": "Installs the deferral orchestrator task and exits 0; the prompt and eventual reboot happen later. Completed proves the install. Needs a signed-in user on CHASEWIN11_2 to see the toast; the deferral and forced reboot are then validated by hand (TEST-VALIDATION.md section 11)."
   },
   "DEX_Invoke-SignoffWindows.ps1": {
-    "skip": "Signs the console user off the test device."
+    "onlyInGroup": "Test_JSpencerOnly",
+    "timeoutMinutes": 5,
+    "note": "Logs every interactive session off the target at once. Hub runs as SYSTEM and reports after the logoff. Device-side proof: Winlogon event 7002 on CHASEWIN11_2."
   },
   "DEX_Start-LockDeviceSoft.ps1": {
-    "skip": "Locks the console session of the test device."
+    "onlyInGroup": "Test_JSpencerOnly",
+    "timeoutMinutes": 5,
+    "note": "Disconnects the console session on the target with tsdiscon.exe, which lands on the lock screen. Needs a signed-in user on CHASEWIN11_2 to have any effect; exit 0 either way."
   },
   "DEX_LockDevice-BitlockEncryptionActivated.ps1": {
-    "skip": "Suspends BitLocker protectors and powers the test device off. Validate by hand per TEST-VALIDATION.md 9.2."
+    "onlyInGroup": "Test_JSpencerOnly",
+    "timeoutMinutes": 5,
+    "expect": "Completed",
+    "note": "Positive path: CHASEWIN11_2 has BitLocker on C: with a password protector (enabled 2026-10-30, no TPM, policy EnableBDEWithNoTPM). From v1.3.0 the script suspends the protectors, schedules the power-off 15 s out through shutdown.exe and exits 0, so Hub reports Completed with the manage-bde output before the device goes down. Afterwards boot the VM (no password prompt while suspended), confirm manage-bde -status C: shows Protection Off, then manage-bde -protectors -enable C:. On a device whose protection is not On, the script throws and exits 1 (Failed) without powering off; set expect to Failed to prove that guard (run c8e0dd on 1.1.0 showed the exit-code-only guard did not hold; run 534500 on 1.2.0 could only be judged as no result because of the in-process /t 0)."
   },
   "DEX_Stop-WindowsUpdate.ps1": {
     "skip": "Disables Windows Update and sets a 35-day pause on the test device. Validate by hand per TEST-VALIDATION.md 9.4."
@@ -23,10 +34,14 @@
     "skip": "Forces an update install on the test device, which can leave it pending a restart mid-sweep. Validate by hand per TEST-VALIDATION.md 9.5."
   },
   "Start-UserProfileCleanup.ps1": {
-    "skip": "Deletes user profiles. No dry-run mode; validate by hand per General-Testing-Guide.md section 2.2."
+    "onlyInGroup": "Test_JSpencerOnly",
+    "timeoutMinutes": 10,
+    "note": "Deletes local (non-enrollment) profiles unused for more than 30 days with hard-coded tunables and no dry-run mode, so only against the snapshotted single VM. On CHASEWIN11_2 no profile meets the age threshold, so Completed proves the enumeration and the no-delete path; the deletion path needs a planted stale profile and is a manual test (General-Testing-Guide.md 2.2)."
   },
   "Invoke-AutoRemediateNetworkStack.ps1": {
-    "skip": "Can sever the test device's network connection (adapter reset, Winsock reset). Covered by its break test."
+    "onlyInGroup": "Test_JSpencerOnly",
+    "timeoutMinutes": 10,
+    "note": "Resets adapters and Winsock on the target, which drops its network for a while; Hub reports once connectivity returns, hence the longer wait. Only against the single-VM group. Also covered by its break test on the lab VM."
   },
   "Start-DefenderFullScan.ps1": {
     "skip": "Starts a multi-hour Defender full scan on the test device and slows every later case. Validate by hand per TEST-VALIDATION.md 4.7."
@@ -40,10 +55,22 @@
     "note": "Print Spooler exists on every Windows build and restarts cleanly."
   },
   "Restart-WinProcess.ps1": {
-    "skip": "Needs a running target process on the test device. Fixed 2026-10-29 and verified by hand (TEST-VALIDATION.md 5.9). Set variables (FileDescription, StartService) and remove this skip to test through UEM."
+    "variables": { "FileDescription": "Google Chrome", "StartService": "true" },
+    "note": "High impact: run with -IncludeHighImpact. Target chosen 2026-10-30: Chrome is on the lab VMs and supports both the blunt and the graceful restart. Exits 0 when no matching process is running, so a device without Chrome open passes trivially; the device-side proof is Chrome's PIDs changing. Under UEM the relaunch runs as SYSTEM in session 0, so the user does not see the new window; that is a design limitation to record, not a test failure."
   },
   "Restart-WinProcessGraceful.ps1": {
-    "skip": "Needs a running target process and an interactive user on the test device. Set variables (FileDescription, Mode, Restart) and remove this skip to test."
+    "variables": { "FileDescription": "Google Chrome", "Restart": "true", "GracefulTimeoutSec": "15" },
+    "note": "High impact: run with -IncludeHighImpact. Dispatch-only script: Completed proves the watchdog task was registered and started. The outcome is in %ProgramData%\\AirWatch\\Extensions\\ProcessGraceful (watchdog.log, result.json) and the process_graceful_lastresult sensor. Chrome must be open on the device for anything to happen."
+  },
+
+  "Invoke-AutoRemediateSCOMAgentPart1.ps1": {
+    "skip": "Deferred 2026-10-30: SCOM agent remediation is out of scope while the approach is reviewed (an agent upgrade is often the preferred fix)."
+  },
+  "Invoke-AutoRemediateSCOMAgentPart2.ps1": {
+    "skip": "Deferred 2026-10-30: SCOM agent remediation is out of scope while the approach is reviewed."
+  },
+  "Invoke-AutoRemediateSCOMAgentPart3.ps1": {
+    "skip": "Deferred 2026-10-30: SCOM agent remediation is out of scope while the approach is reviewed."
   },
   "Invoke-AutoRemediateDriverIssues.ps1": {
     "variables": { "DriverFilter": "VMware" },
@@ -95,13 +122,13 @@
     "note": "Empties every user's Recycle Bin on the test device. Keep the test smart group to disposable VMs."
   },
   "Invoke-AutoRemediateSCOMHealthServiceCache.ps1": {
-    "skip": "SCOM agent is not installed on the lab VM. Expected to exit non-zero there, which proves nothing."
+    "skip": "Deferred 2026-10-30: SCOM agent remediation is out of scope while the approach is reviewed. (Also: no SCOM agent on the lab VM.)"
   },
   "Invoke-AutoRemediateSCOMClonedIdentity.ps1": {
-    "skip": "SCOM agent is not installed on the lab VM."
+    "skip": "Deferred 2026-10-30: SCOM agent remediation is out of scope while the approach is reviewed. (Also: no SCOM agent on the lab VM.)"
   },
   "Invoke-AutoRemediateSCOMMonitoringHost.ps1": {
-    "note": "No SCOM agent on the lab VM: the launcher dispatches, the payload reports Skipped:NoAgent and exits 0. Completed proves the launcher and task plumbing only."
+    "skip": "Deferred 2026-10-30: SCOM agent remediation is out of scope while the approach is reviewed. Launcher plumbing was proven under UEM in run 37acca (payload reached Skipped:NoAgent); keep that evidence."
   },
 
   "device_is_virtual.ps1": {

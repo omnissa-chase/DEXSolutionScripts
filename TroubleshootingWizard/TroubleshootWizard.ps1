@@ -11,8 +11,10 @@
     If the UI file is absent (or -SkipUI is passed), the script runs fully silent
     with no WPF dependency.
 .PARAMETER StepsJson
-    Path to the JSON file that defines the diagnostic steps.
-    If omitted, the script attempts to read it from the TroubleshootingWizard event log.
+    Path to the JSON file that defines the diagnostic steps. Required.
+    (Event-driven launches are handled by Invoke-TroubleshootWizardFromEvent.ps1,
+    which validates the event and passes the resolved path here. The engine
+    itself never reads the event log.)
 .PARAMETER Title
     Title shown in the WPF window header (default: 'Diagnostics Results').
 .PARAMETER RegistryKey
@@ -68,21 +70,19 @@ function Write-Log {
     $ts     = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $colors = @{ ERROR = 'Red'; WARNING = 'Yellow'; DEBUG = 'Gray'; INFO = 'White' }
     Write-Output "[$ts] [$Level] $Message"
-    $FileName = (Split-Path $PSCommandPath -Leaf).Replace('.psm1','').Replace('.ps1','')
-    $Message | Out-File -FilePath "$PSScriptRoot\$FileName.log" -Append
+    # Per-user log. The install folder is read-only for standard users, so never log there.
+    try {
+        $logDir = Join-Path $env:LOCALAPPDATA 'TroubleshootWizard'
+        if (-not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+        Add-Content -LiteralPath (Join-Path $logDir 'TroubleshootWizard.log') -Value "[$ts] [$Level] $Message" -Encoding UTF8
+    } catch { }
 }
 #endregion
 
 #region --- Load & validate JSON ---
-if ([string]::IsNullOrEmpty($StepsJson)) {
-    $Event = Get-WinEvent -ProviderName 'TroubleshootingWizard' -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($Event -and $Event.Message -match '[^.]*\.json' -and (Test-Path $Event.Message -ErrorAction SilentlyContinue)) {
-        $StepsJson = $Event.Message
-    }
-    if ([string]::IsNullOrEmpty($StepsJson)) {
-        Write-Log 'No StepsJson provided and none found in event log.' -Level ERROR
-        exit 1
-    }
+if ([string]::IsNullOrWhiteSpace($StepsJson)) {
+    Write-Log 'No -StepsJson provided. Use Invoke-TroubleshootWizardFromEvent.ps1 for event-driven launches.' -Level ERROR
+    exit 1
 }
 
 Write-Log "Loading step definitions from: $StepsJson"
