@@ -126,11 +126,14 @@ $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference    = 'SilentlyContinue'
 
 #region --- Script-level constants ---
+# Captured at script scope: under UEM Hub the script arrives through stdin and $PSCommandPath is
+# empty, so DeployScheduledTask persists this text instead of copying a file (fixed 2026-10-29).
+$script:SelfText   = try { $MyInvocation.MyCommand.ScriptBlock.ToString() } catch { $null }
 $script:ToolsDir   = 'C:\ProgramData\AirWatch\Extensions\DEXTools'
 $script:ScriptName = 'Measure-LogonDuration.ps1'
 $script:TaskName   = 'DEXTools_MeasureLogonDuration'
 $script:RegPath    = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration'
-$script:Version    = '1.1.0'
+$script:Version    = '1.1.1'
 $script:ValidModes = @('RunNow', 'DeployScheduledTask', 'ConfigureLogging')
 
 # Exit code the run will finish with. Script scope so the trailing entry-point block can
@@ -672,8 +675,11 @@ function Install-LogonDurationTask {
     [CmdletBinding()]
     param()
 
-    if ([string]::IsNullOrEmpty($PSCommandPath)) {
-        Write-Warning 'Cannot determine script path ($PSCommandPath is empty). Run from a saved .ps1 file.'
+    # UEM Hub hands the script to PowerShell through stdin, so $PSCommandPath is empty there
+    # (UEM sweep 2026-10-29). The script's own text is still available from the script-scope
+    # invocation, captured at the top of the file, so persist that when there is no file.
+    if ([string]::IsNullOrEmpty($PSCommandPath) -and [string]::IsNullOrEmpty($script:SelfText)) {
+        Write-Warning 'Cannot determine the script text ($PSCommandPath is empty and no script block). Run from a saved .ps1 file.'
         return
     }
 
@@ -684,7 +690,12 @@ function Install-LogonDurationTask {
 
     # Copy this script to the permanent tools location
     $destScript = Join-Path $script:ToolsDir $script:ScriptName
-    Copy-Item -Path $PSCommandPath -Destination $destScript -Force
+    if ([string]::IsNullOrEmpty($PSCommandPath)) {
+        Set-Content -LiteralPath $destScript -Value $script:SelfText -Encoding UTF8 -Force
+    }
+    else {
+        Copy-Item -Path $PSCommandPath -Destination $destScript -Force
+    }
 
     # Passed explicitly so the task can never inherit a machine-level environment variable
     # and re-deploy or re-configure at every logon. Logging setup is a deployment-time

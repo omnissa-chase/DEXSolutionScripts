@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     OrphanedCcmSetupResolutionWizard -- Clear a stuck ccmsetup.exe retry loop.
 
@@ -37,11 +37,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateOrphanedCcmSetup.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-10-29
     Timeout      : ~15 seconds (launcher exits immediately; payload runs via scheduled task up to 300 seconds)
 
 .DISCLAIMER
@@ -50,6 +50,8 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
+# Script text captured at script scope: inside the function, $MyInvocation describes the function, not the file.
+$script:SelfText = $MyInvocation.MyCommand.ScriptBlock.ToString()
 function Invoke-AutoRemediateOrphanedCcmSetup {
 param([switch]$RunAsPayload)
 
@@ -73,7 +75,8 @@ if (-not $RunAsPayload) {
         }
 
         # Copy the full script to a path that survives UEM's temp file cleanup.
-        Copy-Item -Path $PSCommandPath -Destination $PayloadPs1 -Force -ErrorAction Stop
+        # Hub runs scripts via stdin (no $PSCommandPath to copy), so write the running text itself.
+        Set-Content -LiteralPath $PayloadPs1 -Value $script:SelfText -Encoding UTF8 -Force -ErrorAction Stop
 
         # Stamp a 'Dispatched' record so sensors have a known value before the
         # payload finishes -- avoids a 'no data' gap in DEX dashboards.
@@ -91,7 +94,6 @@ if (-not $RunAsPayload) {
         $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
         $settings  = New-ScheduledTaskSettingsSet `
                          -ExecutionTimeLimit '00:10:00' `
-                         -DeleteExpiredTaskAfter '00:01:00' `
                          -StartWhenAvailable
 
         Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal `

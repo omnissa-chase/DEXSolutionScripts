@@ -2,9 +2,9 @@
 
 **Audience:** engineers validating resolution (non-sensor) scripts before they are marked `4) Complete - Tested` in `SCRIPT-INVENTORY-CSV.csv` and published through Workspace ONE UEM.
 
-**Scope:** every resolution script in the repo outside `Archived`, `Deprecated`, `TroubleshootingWizard`, `_RAWDATA`, `Sensors` and `OneTimeSensor`. 66 scripts in 7 groups. Sensors are covered by `UEM-API-TESTING-SPEC.md` and `General-Testing-Guide.md`, not here.
+**Scope:** every resolution script in the repo outside `Archived`, `Deprecated`, `TroubleshootingWizard`, `_RAWDATA`, `Sensors` and `OneTimeSensor`. 68 scripts in 7 groups. Sensors are covered by `UEM-API-TESTING-SPEC.md` and `General-Testing-Guide.md`, not here.
 
-**Last updated:** 2026-10-29 (defect fixes applied and statuses revised). Lab evidence in this document comes from the runs recorded in `C:\Temp\FixReport\Summary.csv` and `C:\Temp\DEXLabRuns\LabRun_20261028_14*\` on the lab VM.
+**Last updated:** 2026-10-29 (defect fixes, then the first UEM sweeps: 44 scripts and 69 sensors through the connector). Lab evidence in this document comes from the runs recorded in `C:\Temp\FixReport\Summary.csv` and `C:\Temp\DEXLabRuns\LabRun_20261028_14*\` on the lab VM.
 
 ---
 
@@ -28,6 +28,7 @@ Each script has one block with the same shape:
 | Status | Meaning |
 |---|---|
 | `PASS - LAB` | Break test ran on the lab VM, remediation fixed the injected fault, validation confirmed it. Result JSON path given |
+| `PASS - UEM` | A throwaway copy was published to the test tenant by the UEM connector (`UEM-API-TESTING-SPEC.md`), ran under Hub as SYSTEM on every live device in the test smart group and reported `Completed`. Proves the script runs clean as UEM runs it on a healthy machine; it does not inject a fault. Run id and result file given |
 | `PASS - UNIT` | Pester unit tests pass. No hardware-level proof |
 | `TESTED - MANUAL` | Inventory says `4) Complete - Tested`. The test was manual and no result artefact is in the repo. Steps below reproduce it |
 | `NEEDS TEST` | Steps written, not yet executed |
@@ -116,74 +117,76 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 
 | # | Script | Group | Inventory status | Impact | Automated coverage | Validation status |
 |---|---|---|---|---|---|---|
-| 1 | `Invoke-AutoRemediateAllDriverIssues.ps1` | Device / driver | Needs Testing | Critical | Break test, 21 unit tests, UEM entry | `PASS - LAB` 2026-10-28 |
-| 2 | `Invoke-AutoRemediateDriverIssues.ps1` | Device / driver | Needs Testing | Critical | Break test, 9 unit tests, UEM entry | `PASS - LAB` 2026-10-28 |
-| 3 | `Invoke-AutoRemediateAudioBluetooth.ps1` | Device / driver | Needs Testing | Medium | Break test (5 breaks) | `PASS - LAB` 2026-10-28 (after v1.0.2 fixes) |
+| 1 | `Invoke-AutoRemediateAllDriverIssues.ps1` | Device / driver | Needs Testing | Critical | Break test, 21 unit tests, UEM entry | `PASS - LAB` + UEM `6c8405` |
+| 2 | `Invoke-AutoRemediateDriverIssues.ps1` | Device / driver | Needs Testing | Critical | Break test, 9 unit tests, UEM entry | `PASS - LAB` + UEM `6c8405` |
+| 3 | `Invoke-AutoRemediateAudioBluetooth.ps1` | Device / driver | Needs Testing | Medium | Break test (5 breaks) | `PASS - LAB` + UEM `6c8405` |
 | 4 | `Invoke-AutoRemediateNetworkStack.ps1` | Device / driver | Needs Testing | High | Break test (2 breaks), UEM skip | `PASS - LAB` 2026-10-28 |
-| 5 | `Invoke-AutoRemediateWindowsUpdates.ps1` | Device / driver | Needs Testing | Medium | Break test (4 breaks) | `PASS - LAB` 2026-10-28 |
-| 6 | `Invoke-AutoRemediatePrinter.ps1` | Device / driver | Needs Testing | Low | Break test (4 breaks incl. reboot) | `PASS - LAB` 2026-10-28 |
-| 7 | `Invoke-AutoRemediateWiFiSignalIssues.ps1` | Windows remediation | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (no Wi-Fi adapter) |
-| 8 | `Invoke-DriverUpdates.ps1` | Windows remediation | Needs Testing | Medium | none | `NEEDS TEST` |
-| 9 | `Invoke-RemediateMemoryCompression.ps1` | Windows remediation | Needs Testing | Low | none | `NEEDS TEST` |
-| 10 | `Invoke-RemediatePageFile.ps1` | Windows remediation | Needs Testing | Medium | none | `NEEDS TEST` |
-| 11 | `Invoke-RemediateSysMain.ps1` | Windows remediation | Needs Testing | Low | none | `NEEDS TEST` |
-| 12 | `Disable-NonEssentialStartupApps.ps1` | Windows remediation | Needs Testing | Medium | none | `TESTED - MANUAL` (User path, 2026-10-29); SYSTEM path `NEEDS TEST` |
-| 13 | `Enable-HardwareAcceleratedGPUScheduling.ps1` | Windows remediation | Needs Testing | Medium | none | `NEEDS TEST` |
-| 14 | `Restart-WindowsUpdateServices.ps1` | Windows remediation | Needs Testing | Medium | none | `NEEDS TEST` |
+| 5 | `Invoke-AutoRemediateWindowsUpdates.ps1` | Device / driver | Needs Testing | Medium | Break test (4 breaks) | `PASS - LAB` + UEM `6c8405` |
+| 6 | `Invoke-AutoRemediatePrinter.ps1` | Device / driver | Needs Testing | Low | Break test (4 breaks incl. reboot) | `PASS - LAB` + UEM `6c8405` |
+| 7 | `Invoke-AutoRemediateWiFiSignalIssues.ps1` | Windows remediation | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
+| 8 | `Invoke-DriverUpdates.ps1` | Windows remediation | Needs Testing | Medium | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 9 | `Invoke-RemediateMemoryCompression.ps1` | Windows remediation | Needs Testing | Low | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 10 | `Invoke-RemediatePageFile.ps1` | Windows remediation | Needs Testing | Medium | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 11 | `Invoke-RemediateSysMain.ps1` | Windows remediation | Needs Testing | Low | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 12 | `Disable-NonEssentialStartupApps.ps1` | Windows remediation | Needs Testing | Medium | none | `TESTED - MANUAL` + UEM `6c8405` |
+| 13 | `Enable-HardwareAcceleratedGPUScheduling.ps1` | Windows remediation | Needs Testing | Medium | none | `PASS - UEM` (exit 1 on the first-enable run `6c8405` as designed; `Completed` on both devices in re-run `0501f4`; break steps still `NEEDS TEST`) |
+| 14 | `Restart-WindowsUpdateServices.ps1` | Windows remediation | Needs Testing | Medium | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
 | 15 | `Restart-WinProcess.ps1` | Windows remediation | Needs Testing | High | UEM skip (needs variables) | `TESTED - MANUAL` (fixed and verified 2026-10-29) |
 | 16 | `Restart-WinProcessGraceful.ps1` | Windows remediation | Needs Testing | High | UEM skip (needs variables) | `NEEDS TEST` |
 | 17 | `Restart-WinProcessGracefulEx.ps1` | Windows remediation | NOT IN CSV | - | none | `NEEDS TEST` (fixed 2026-10-29; prototype, not for publication) |
-| 18 | `Restart-WinService.ps1` | Windows remediation | Needs Testing | Medium | UEM entry (Spooler) | `NEEDS TEST` |
-| 19 | `Invoke-AutoRemediateAppXBloat.ps1` | Windows logon | Needs Testing | Medium | none | `NEEDS TEST` |
-| 20 | `Invoke-AutoRemediateFSLogixExclusions.ps1` | Windows logon | Needs Testing | None | none | `NEEDS TEST - PRODUCT VM` (no FSLogix) |
-| 21 | `Invoke-AutoRemediateLogonTaskContention.ps1` | Windows logon | Needs Testing | Low | none | `NEEDS TEST` |
-| 22 | `Invoke-AutoRemediateProfileBloat.ps1` | Windows logon | Needs Testing | Low | none | `NEEDS TEST` |
-| 23 | `Invoke-CrowdStrikeServiceRemediation.ps1` | Antivirus | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (fixed 2026-10-29) |
-| 24 | `Invoke-DefenderDynamicPerformance.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST` (rewritten 2026-10-29) |
-| 25 | `Invoke-DefenderEnableCloudBlock_BAFS.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` |
-| 26 | `Invoke-DefenderPauseScan.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` |
-| 27 | `Invoke-DefenderServiceRemediation.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` |
-| 28 | `Invoke-DefenderUpdateSignatures.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` |
+| 18 | `Restart-WinService.ps1` | Windows remediation | Needs Testing | Medium | UEM entry (Spooler) | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 19 | `Invoke-AutoRemediateAppXBloat.ps1` | Windows logon | Needs Testing | Medium | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 20 | `Invoke-AutoRemediateFSLogixExclusions.ps1` | Windows logon | Needs Testing | None | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
+| 21 | `Invoke-AutoRemediateLogonTaskContention.ps1` | Windows logon | Needs Testing | Low | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 22 | `Invoke-AutoRemediateProfileBloat.ps1` | Windows logon | Needs Testing | Low | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 23 | `Invoke-CrowdStrikeServiceRemediation.ps1` | Antivirus | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
+| 24 | `Invoke-DefenderDynamicPerformance.ps1` | Antivirus | Needs Testing | Low | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 25 | `Invoke-DefenderEnableCloudBlock_BAFS.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
+| 26 | `Invoke-DefenderPauseScan.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
+| 27 | `Invoke-DefenderServiceRemediation.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
+| 28 | `Invoke-DefenderUpdateSignatures.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 29 | `Start-DefenderFullScan.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST` (fixed 2026-10-29) |
-| 30 | `Start-DefenderThreatReport_1.4.8.4.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` |
-| 31 | `Invoke-TrellixCPUPriority.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` |
-| 32 | `Invoke-TrellixLocalUpdate.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` |
-| 33 | `Invoke-TrellixRefreshPolicies.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` |
-| 34 | `Invoke-TrendMicroServiceRemediation.ps1` | Antivirus | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` |
-| 35 | `Invoke-AutoRemediateChrome.ps1` | Application | Needs Testing | Low | none | `NEEDS TEST` |
-| 36 | `Invoke-AutoRemediateOneDrive.ps1` | Application | Needs Testing | Medium | none | `NEEDS TEST` |
-| 37 | `Invoke-AutoRemediateOutlook.ps1` | Application | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` |
-| 38 | `Invoke-AutoRemediateTeams.ps1` | Application | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` |
-| 39 | `Invoke-AutoRemediateZoom.ps1` | Application | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` |
+| 30 | `Start-DefenderThreatReport_1.4.8.4.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
+| 31 | `Invoke-TrellixCPUPriority.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
+| 32 | `Invoke-TrellixLocalUpdate.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
+| 33 | `Invoke-TrellixRefreshPolicies.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
+| 34 | `Invoke-TrendMicroServiceRemediation.ps1` | Antivirus | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
+| 35 | `Invoke-AutoRemediateChrome.ps1` | Application | Needs Testing | Low | uem-tests.json | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 36 | `Invoke-AutoRemediateOneDrive.ps1` | Application | Needs Testing | Medium | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 37 | `Invoke-AutoRemediateOutlook.ps1` | Application | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
+| 38 | `Invoke-AutoRemediateTeams.ps1` | Application | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
+| 39 | `Invoke-AutoRemediateZoom.ps1` | Application | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 40 | `Invoke-AutoRemediateBITSBacklog.ps1` | Application (SCCM) | NOT IN CSV | - | none | `NEEDS TEST - PRODUCT VM` |
 | 41 | `Invoke-AutoRemediateCcmCache.ps1` | Application (SCCM) | NOT IN CSV | - | none | `NEEDS TEST - PRODUCT VM` |
 | 42 | `Invoke-AutoRemediateOrphanedCcmSetup.ps1` | Application (SCCM) | NOT IN CSV | - | none | `NEEDS TEST - PRODUCT VM` |
 | 43 | `Invoke-AutoRemediateSCCMClient.ps1` | Application (SCCM) | NOT IN CSV | - | none | `NEEDS TEST - PRODUCT VM` |
 | 44 | `Invoke-AutoRemediateWMIRepository.ps1` | Application (SCCM) | NOT IN CSV | - | none | `NEEDS TEST - PRODUCT VM` |
 | 45 | `Invoke-AutoRemediateSCOMAgent.ps1` | Application (SCOM) | Needs Testing | Medium | none | Reference only (48,336 chars, over the UEM limit) |
-| 46 | `Invoke-AutoRemediateSCOMAgentPart1.ps1` | Application (SCOM) | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` |
-| 47 | `Invoke-AutoRemediateSCOMAgentPart2.ps1` | Application (SCOM) | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` |
-| 48 | `Invoke-AutoRemediateSCOMAgentPart3.ps1` | Application (SCOM) | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (fixed 2026-10-29) |
+| 46 | `Invoke-AutoRemediateSCOMAgentPart1.ps1` | Application (SCOM) | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
+| 47 | `Invoke-AutoRemediateSCOMAgentPart2.ps1` | Application (SCOM) | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
+| 48 | `Invoke-AutoRemediateSCOMAgentPart3.ps1` | Application (SCOM) | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 49 | `Invoke-AutoRemediateSCOMClonedIdentity.ps1` | Application (SCOM) | Needs Testing | High | UEM skip | `NEEDS TEST - PRODUCT VM` (fixed 2026-10-29) |
 | 50 | `Invoke-AutoRemediateSCOMHealthServiceCache.ps1` | Application (SCOM) | Needs Testing | High | UEM skip | `NEEDS TEST - PRODUCT VM` (fixed 2026-10-29) |
-| 51 | `Invoke-AutoRemediateSCOMMonitoringHost.ps1` | Application (SCOM) | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` |
-| 52 | `Start-ClearRecycleBin.ps1` | Disk cleanup | Tested | Low | none | `TESTED - MANUAL` |
-| 53 | `Start-DiskCleanup.ps1` | Disk cleanup | Tested | Low | none | `TESTED - MANUAL` |
+| 51 | `Invoke-AutoRemediateSCOMMonitoringHost.ps1` | Application (SCOM) | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM `6c8405`: `UnknownScriptError`; four launcher defects fixed in 1.0.2; final re-run 2026-10-30 ran the payload to `Skipped:NoAgent` on the lab VM) |
+| 52 | `Start-ClearRecycleBin.ps1` | Disk cleanup | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
+| 53 | `Start-DiskCleanup.ps1` | Disk cleanup | Tested | Low | none | `TESTED - MANUAL` (UEM `6c8405`: `ScriptTimedOut` on one device; fixed in 1.2.1, `Completed` on both in re-run `0501f4`) |
 | 54 | `Start-UserProfileCleanup.ps1` | Disk cleanup | Needs Testing | High | UEM skip | `MANUAL ONLY` |
 | 55 | `Get-AppVolumesMountProbe.ps1` | Generic troubleshooting | NOT IN CSV | - | none | `NEEDS TEST - PRODUCT VM` |
-| 56 | `Enable-LogonAuditLogs.ps1` | Generic troubleshooting | Tested | Low | none | `TESTED - MANUAL` |
-| 57 | `Measure-LogonDuration.ps1` | Generic troubleshooting | Tested | Low | none | `TESTED - MANUAL` |
+| 56 | `Enable-LogonAuditLogs.ps1` | Generic troubleshooting | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
+| 57 | `Measure-LogonDuration.ps1` | Generic troubleshooting | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 58 | `Measure-LogonDurationMultiSession.ps1` | Generic troubleshooting | NOT IN CSV | - | none | `NEEDS TEST` |
 | 59 | `DEX_Invoke-SignoffWindows.ps1` | MDM commands | Tested | High | UEM skip | `MANUAL ONLY` |
 | 60 | `DEX_LockDevice-BitlockEncryptionActivated.ps1` | MDM commands | Needs Testing | Critical | UEM skip | `MANUAL ONLY` (intent confirmed by inventory; header and error handling fixed 2026-10-29) |
 | 61 | `DEX_Start-LockDeviceSoft.ps1` | MDM commands | Tested | Low | UEM skip | `MANUAL ONLY` |
-| 62 | `Invoke-AutoRemediateGenericVPN.ps1` | VPN | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` |
-| 63 | `Invoke-VpnStateCollection.ps1` | VPN | Needs Testing | Low | none | `NEEDS TEST` |
-| 64 | `Invoke_RebootWithUserDefer_1.2.0.7.ps1` | Reboot | Tested | High | UEM skip | `MANUAL ONLY` (orchestrator and toast defects fixed 2026-10-29; needs one end-to-end re-run) |
-| 65 | `Invoke-SimpleReboot.ps1` | Reboot | Tested | High | UEM skip | `MANUAL ONLY` |
-| 66 | `SmartReboot.ps1` | Reboot | Tested | Low | none | `TESTED - MANUAL` |
+| 62 | `DEX_Stop-WindowsUpdate.ps1` | MDM commands | Needs Testing | Medium | UEM skip | `NEEDS TEST` (parse-checked and WhatIf dry run on the lab VM 2026-10-29; live run needs an elevated session) |
+| 63 | `DEX_Start-WindowsUpdate.ps1` | MDM commands | Needs Testing | Medium | UEM skip | `NEEDS TEST` (parse-checked, WhatIf dry run and read-only WUA search on the lab VM 2026-10-29; live run needs an elevated session) |
+| 64 | `Invoke-AutoRemediateGenericVPN.ps1` | VPN | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
+| 65 | `Invoke-VpnStateCollection.ps1` | VPN | Needs Testing | Low | none | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 66 | `Invoke_RebootWithUserDefer_1.2.0.7.ps1` | Reboot | Tested | High | UEM skip | `MANUAL ONLY` (orchestrator and toast defects fixed 2026-10-29; needs one end-to-end re-run) |
+| 67 | `Invoke-SimpleReboot.ps1` | Reboot | Tested | High | UEM skip | `MANUAL ONLY` |
+| 68 | `SmartReboot.ps1` | Reboot | Tested | Low | none | `TESTED - MANUAL` |
 
-Counts after the 2026-10-29 fixes: 6 `PASS - LAB`, 12 `TESTED - MANUAL`, 0 `FIX FIRST`, 6 `MANUAL ONLY`, 1 reference-only copy, 23 `NEEDS TEST - PRODUCT VM`, 18 `NEEDS TEST` (plus the SYSTEM path of `Disable-NonEssentialStartupApps.ps1`). 8 scripts have no inventory row. `Restart-WinProcessSoft.ps1` (0 bytes) is excluded from the count.
+Counts after the 2026-10-29 fixes and the first UEM sweeps (run `6c8405`, 44 scripts on two live devices): 6 `PASS - LAB`, 14 `PASS - UEM`, 12 `TESTED - MANUAL`, 0 `FIX FIRST`, 6 `MANUAL ONLY`, 1 reference-only copy, 23 `NEEDS TEST - PRODUCT VM`, 6 `NEEDS TEST` (plus the SYSTEM path of `Disable-NonEssentialStartupApps.ps1`). 8 scripts have no inventory row. `Restart-WinProcessSoft.ps1` (0 bytes) is excluded from the count.
 
 ---
 
@@ -229,7 +232,7 @@ Lab evidence used below is from the runs at 14:53 and 14:56 on 2026-10-28 (`LabR
 7. Verify: `Get-PnpDevice -Status Error` returns nothing; `Get-ItemProperty 'HKLM:\Software\AirWatch\Extension\DEXRecords\DriverIssues'` (or the name printed in the `[Registry]` line) shows the latest counts.
 8. Restore: the harness re-enables the device itself. If a run was interrupted, `.\Invoke-AutoRemediateAllDriverIssues_BreakTest.ps1 -Restore -Force`.
 
-**Status:** `PASS - LAB`. Evidence: `C:\Temp\FixReport\Invoke-AutoRemediateAllDriverIssues\250c0e222440.json` (Passed, UsbDriverDisabled, 2026-10-28 14:57) and `172ec542622b.json` (boundary probe, Failed as expected). Five passing runs and four expected-failure probes recorded in `Summary.csv` across the day. Unit tests 21/21.
+**Status:** `PASS - LAB`. Evidence: `C:\Temp\FixReport\Invoke-AutoRemediateAllDriverIssues\250c0e222440.json` (Passed, UsbDriverDisabled, 2026-10-28 14:57) and `172ec542622b.json` (boundary probe, Failed as expected). Five passing runs and four expected-failure probes recorded in `Summary.csv` across the day. Unit tests 21/21. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Fixed today: `Test-DriverMatch` not visible to step scriptblocks under UEM (GetNewClosure module scope); single-object `.Count` returning null in PS 5.1; `Select-String` count for Published Name. Inventory status should move to `4) Complete - Tested`.
 
@@ -263,7 +266,7 @@ Lab evidence used below is from the runs at 14:53 and 14:56 on 2026-10-28 (`LabR
    Expect a device list, `errored: 0`, exit `0`.
 6. Verify and restore as 3.1 steps 7 and 8.
 
-**Status:** `PASS - LAB`. Evidence: `C:\Temp\FixReport\Invoke-AutoRemediateDriverIssues\ac4fd4a9f531.json` (Passed, 14:57). Four passing runs today, zero failures. Unit tests 9/9.
+**Status:** `PASS - LAB`. Evidence: `C:\Temp\FixReport\Invoke-AutoRemediateDriverIssues\ac4fd4a9f531.json` (Passed, 14:57). Four passing runs today, zero failures. Unit tests 9/9. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Fixed today: `@($matched).Count` and `@($errored).Count` guards; entry point forwards named arguments. Inventory status should move to `4) Complete - Tested`.
 
@@ -297,7 +300,7 @@ Lab evidence used below is from the runs at 14:53 and 14:56 on 2026-10-28 (`LabR
 6. Verify: services Running, `Get-PnpDevice -Class MEDIA -Status Error` empty, consent store `Allow`.
 7. Restore: harness restores volume and consent to captured values. Manual fallback: `Start-Service Audiosrv,AudioEndpointBuilder,bthserv`, `Enable-PnpDevice` on the audio device, `Set-ItemProperty ...\ConsentStore\microphone -Name Value -Value Allow`.
 
-**Status:** `PASS - LAB`. Evidence: `C:\Temp\FixReport\Invoke-AutoRemediateAudioBluetooth\972720efc3e4.json` (Passed, 5/5 breaks validated, 14:58) and `782c100fb879.json` (Passed, 14:55). The two 14:29 and 14:32 runs validated only 3 of 5; the v1.0.2 changes below fixed the remaining two.
+**Status:** `PASS - LAB`. Evidence: `C:\Temp\FixReport\Invoke-AutoRemediateAudioBluetooth\972720efc3e4.json` (Passed, 5/5 breaks validated, 14:58) and `782c100fb879.json` (Passed, 14:55). The two 14:29 and 14:32 runs validated only 3 of 5; the v1.0.2 changes below fixed the remaining two. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** v1.0.2 changes made today: Audio Driver Health now calls `pnputil /enable-device` when the device reports error 22 (disabled) instead of `/restart-device`, which cannot clear a disabled device. Volume resolution now calls `winmm.dll waveOutSetVolume` with 0x7FFF7FFF instead of SendKeys volume-up, which has no effect in a SYSTEM session. Inventory status should move to `4) Complete - Tested`.
 
@@ -355,7 +358,7 @@ Lab evidence used below is from the runs at 14:53 and 14:56 on 2026-10-28 (`LabR
 4. Verify: `Get-Service wuauserv,BITS,CryptSvc | Select Name,Status,StartType` all Running and BITS `Manual`; `Get-ChildItem C:\Windows\SoftwareDistribution\DataStore` has no multi-GB file; `C:\Windows\SoftwareDistribution.old*` cleaned up by the harness restore.
 5. Restore: the harness restores BITS start type in reverse order of application. If the machine is left with BITS Disabled after an interrupted run: `Set-Service BITS -StartupType Manual; Start-Service BITS`.
 
-**Status:** `PASS - LAB`. Evidence: `C:\Temp\FixReport\Invoke-AutoRemediateWindowsUpdates\9a0da4c96876.json` (Passed, 4/4, 14:59), four passing runs today.
+**Status:** `PASS - LAB`. Evidence: `C:\Temp\FixReport\Invoke-AutoRemediateWindowsUpdates\9a0da4c96876.json` (Passed, 4/4, 14:59), four passing runs today. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** The Disk Space step is intentionally not broken by the harness; its remediation touches real files on `C:`. Inventory status should move to `4) Complete - Tested`.
 
@@ -393,7 +396,7 @@ Lab evidence used below is from the runs at 14:53 and 14:56 on 2026-10-28 (`LabR
 6. Verify: `Get-Service Spooler`, `Get-Printer | Select Name,WorkOffline`, `Get-WindowsOptionalFeature -Online -FeatureName Printing-Foundation-Features | Select State`.
 7. Restore: harness removes `DEXTest Printer` and the unroutable printer. Fallback: `Get-Printer | Where-Object Name -like 'DEXTest*' | Remove-Printer; Set-Service Spooler -StartupType Automatic; Start-Service Spooler`.
 
-**Status:** `PASS - LAB`, all four breaks. Evidence: `b9ab66452785.json` (PrinterOffline + NetworkPrinterUnreachable, Passed, 14:59), `e80561c2f791.json` (SpoolerService, Passed, 14:59), `1265da746055.json` (PrintFoundationFeature, Passed after 2 reboots, 15:02), all under `C:\Temp\FixReport\Invoke-AutoRemediatePrinter\`.
+**Status:** `PASS - LAB`, all four breaks. Evidence: `b9ab66452785.json` (PrinterOffline + NetworkPrinterUnreachable, Passed, 14:59), `e80561c2f791.json` (SpoolerService, Passed, 14:59), `1265da746055.json` (PrintFoundationFeature, Passed after 2 reboots, 15:02), all under `C:\Temp\FixReport\Invoke-AutoRemediatePrinter\`. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Harness fixes today: applied breaks are committed to the state file incrementally so an abort mid-apply can still be restored; `SpoolerService` is exclusive in random selections. The 14:30 and 14:33 runs that show `BreakFailed`/`Failed` with zero breaks predate those fixes. Inventory status should move to `4) Complete - Tested`.
 
@@ -426,7 +429,7 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 5. Verify `Get-Service CSFalconService` Running / Automatic.
 6. Restore: nothing; revoke the maintenance token.
 
-**Status:** `NEEDS TEST - PRODUCT VM`. Fixed 2026-10-29 (v1.0.1.0), parse-checked, not yet run against Falcon.
+**Status:** `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29) reported `Completed` on both lab devices, which proves only the not-installed path (result file `test-result-scripts.json` in the connector folder). Fixed 2026-10-29 (v1.0.1.0), parse-checked, not yet run against Falcon.
 
 **Review notes.** Fixed: the service array was the Trend Micro list, so the script never referenced a CrowdStrike service. It now targets `CSFalconService`, re-reads the service after the start attempt, prints a tamper-protection hint when it stays stopped, and exits `1` in that case instead of always `0`. On a device without Falcon it prints "No CrowdStrike Falcon services are installed" and exits `0`.
 
@@ -457,7 +460,7 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 5. Verify with the baseline command and `Get-ItemProperty 'HKLM:\SOFTWARE\AIRWATCH\Extensions\HealthDetection'`.
 6. Restore: `Set-MpPreference` back to the baseline values.
 
-**Status:** `NEEDS TEST`. Rewritten 2026-10-29 (v1.1.0), parse-checked, not yet run elevated. Expected output now: `Computed performance score N ... and cached it.`, `Applying Defender CPU profile 'Mid' (was '')`, a final `ScanAvgCPULoadFactor=50 EnableLowCpuPriority=False ...` line, exit `0`; second run `Using cached performance score N` and `... is already applied. No changes made.` Registry values are `PerformanceScore` and `CurrentProfile`.
+**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`. Rewritten 2026-10-29 (v1.1.0), parse-checked, not yet run elevated. Expected output now: `Computed performance score N ... and cached it.`, `Applying Defender CPU profile 'Mid' (was '')`, a final `ScanAvgCPULoadFactor=50 EnableLowCpuPriority=False ...` line, exit `0`; second run `Using cached performance score N` and `... is already applied. No changes made.` Registry values are `PerformanceScore` and `CurrentProfile`.
 
 **Review notes.** Fixed: cache key mismatch (`PeformanceScore` written, `PerformanceProfile` read), `CurrentProfile` never written so settings re-applied every run, scores 7 and 8 mapped to no profile, trailing `System.Windows.Forms` reference, missing `ConfigDefender` import on PowerShell 7, no output or exit code. Dead code removed. Exits `1` when Defender cmdlets are absent.
 
@@ -487,7 +490,7 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 5. Verify `Get-MpPreference | Select CloudBlockLevel,MAPSReporting,SubmitSamplesConsent` is `1 / 2 / 1`.
 6. Restore: only if the baseline differed. Sample submission at consent 1 sends files to Microsoft.
 
-**Status:** `TESTED - MANUAL`.
+**Status:** `TESTED - MANUAL`. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Always exits `0` even if `Set-MpPreference` fails. Policy-managed values make the cmdlet silently ineffective; the second run will keep printing "updating" in that case, which is the tell.
 
@@ -512,7 +515,7 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 5. Negative path: rename nothing; instead run on a machine with Defender removed to see `MpCmdRun.exe was not found.` as a terminating error.
 6. Restore: none.
 
-**Status:** `TESTED - MANUAL`.
+**Status:** `TESTED - MANUAL`. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Path selection is a string sort on `FullName` descending, so `C:\ProgramData\...\Platform\...` beats `C:\Program Files\Windows Defender\...` and version folders sort lexically, not numerically. The name says pause; it cancels. No exit code of its own.
 
@@ -537,7 +540,7 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 5. Verify all four Running, RTP True.
 6. Restore: `Set-Service WdNisSvc -StartupType Manual` if it was Manual. Re-enable Tamper Protection.
 
-**Status:** `TESTED - MANUAL`.
+**Status:** `TESTED - MANUAL`. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Always exits `0`. Forcing `WdNisSvc` to Automatic is a persistent config change. Starting `mpssvc` re-enables the firewall, which is visible to a user who had turned it off.
 
@@ -562,7 +565,7 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 5. Verify after 1 to 5 minutes: `DefenderSignaturesOutOfDate` False, event 2000 in the Defender Operational log.
 6. Restore: none needed once signatures are current.
 
-**Status:** `TESTED - MANUAL`.
+**Status:** `TESTED - MANUAL`. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** The job lives in the script's own session and the script exits immediately; under Hub the host process may end before the job runs. Prefer `Update-MpSignature` synchronously or `MpCmdRun -SignatureUpdate` if UEM runs show no event 2000. `$MaxFullScanHours` is unused.
 
@@ -621,7 +624,7 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 6. Second run: expect `Updating record for ...`. After 36 hours (or by editing `InstallDate` back 2 days) expect `Archiving record for ...` and the entry moved to `HealthDetection\THRT:<id>`.
 7. Restore: `Remove-MpThreat` for the EICAR threat, delete the `THRT:*` keys under both hives, remove `$env:TEMP\eicar.com` if still present.
 
-**Status:** `TESTED - MANUAL`.
+**Status:** `TESTED - MANUAL`. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** The `UninstallString` written for active threats runs `Remove-MpThreat` if anyone uninstalls the entry from WS1: intended, but worth knowing. If Defender cmdlets fail (third-party AV present) the script continues, writes `ActiveThreats = 0` and purges every `THRT:*` record. `InstallDate` is written as ISO 8601 rather than the `yyyyMMdd` that Programs and Features expects.
 
@@ -646,7 +649,7 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 5. Verify `PriorityClass` is `BelowNormal` for the processes that reported success.
 6. Restore: `Stop-Process -Name mfetp; Remove-Item $env:TEMP\mfetp.exe`. Priority resets on service restart.
 
-**Status:** `NEEDS TEST - PRODUCT VM`.
+**Status:** `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29) reported `Completed` on both lab devices, which proves only the not-installed path (result file `test-result-scripts.json` in the connector folder).
 
 **Review notes.** In the catch block `$_` is the ErrorRecord, so the failure row loses `ProcessName` and `PID`. Lowering scanner priority delays on-access scanning. No exit code.
 
@@ -670,7 +673,7 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 4. Verify the ENS update log under `C:\ProgramData\McAfee\Endpoint Security\Logs\` shows a new update and `C:\ProgramData\McAfee\Agent\logs\masvc_*.log` shows property collection and policy enforcement.
 5. Lab VM without the product: expect both "not found. Skipping" lines and an instant exit.
 
-**Status:** `NEEDS TEST - PRODUCT VM`.
+**Status:** `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29) reported `Completed` on both lab devices, which proves only the not-installed path (result file `test-result-scripts.json` in the connector folder).
 
 **Review notes.** Four 10-second sleeps plus the content update exceed a 30-second UEM script timeout; raise the timeout on the UEM item or drop the sleeps. External exit codes are not checked. Duplicates the CmdAgent logic in 4.11.
 
@@ -694,7 +697,7 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 4. Verify `masvc_<host>.log` shows "Collecting properties", "Checking for policies", "Enforcing policies", "Sending events", and ePO shows a new last-communication time.
 5. Lab VM without the product: expect the terminating error `CmdAgent.exe was not found.` and a non-zero host exit.
 
-**Status:** `NEEDS TEST - PRODUCT VM`.
+**Status:** `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29) reported `Failed` (exit 1) on both lab devices, which is the manifest's expected result there, which proves only the not-installed path (result file `test-result-scripts.json` in the connector folder).
 
 **Review notes.** Same 40-second floor as 4.10. Throws on a missing executable where 4.10 prints a message; pick one behaviour.
 
@@ -719,7 +722,7 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 5. Verify all present services Running / Automatic.
 6. Restore: re-lock the agent in policy. Note `TmPfw` set to Automatic turns the Trend firewall on if it was off by design.
 
-**Status:** `NEEDS TEST - PRODUCT VM`.
+**Status:** `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29) reported `Completed` on both lab devices, which proves only the not-installed path (result file `test-result-scripts.json` in the connector folder).
 
 **Review notes.** Header promises a real-time protection check that does not exist in the body. Always exits `0`. Identical body to 4.1.
 
@@ -759,7 +762,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 5. Verify: `AllowComputerToTurnOffDevice : Disabled`; `powercfg /q` shows AC and DC index `0x00000000` for wireless and `0x00000001` for USB selective suspend.
 6. Restore: reverse the `powercfg` values if the device had different defaults.
 
-**Status:** `NEEDS TEST - PRODUCT VM`.
+**Status:** `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29) reported `Failed` (exit 1) on both lab devices, which is the manifest's expected result there, which proves only the not-installed path (result file `test-result-scripts.json` in the connector folder).
 
 **Review notes.** Bounces the adapter on a mere warning, including when Wi-Fi is simply not connected. Disables USB selective suspend system-wide even for non-USB adapters. Exit `1` after a successful fix. Step 3 recommends `Invoke-DriverUpdates.ps1` but does not call it.
 
@@ -783,7 +786,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 4. Reboot-flag path without a real install: create `HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired` before an Install run and expect `3010`. Remove the key afterwards.
 5. Verify in Device Manager or `Get-PnpDeviceProperty` that the driver version changed; rerun Detect and expect exit `0`.
 
-**Status:** `NEEDS TEST`.
+**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
 
 **Review notes.** Detect exit `1` is indistinguishable from an error exit `1`; UEM will show Failed whenever updates exist. Malformed `$env:AllowReboot` or `$env:MaxUpdates` throws in the param block and the script falls through to a trailing `Exit 0`. WU search and download can exceed the 120-second timeout noted in the header.
 
@@ -808,7 +811,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 5. Verify `(Get-MMAgent).MemoryCompression` is `True`; registry `Status = Remediated`.
 6. Restore: none; or `Disable-MMAgent -MemoryCompression` if the image disables it on purpose.
 
-**Status:** `NEEDS TEST`.
+**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
 
 **Review notes.** Still attempts the fix when detection throws. Registry path uses `Extension` (singular) while the WindowsLogon scripts use `Extensions`. Some SSD or VDI baselines disable compression deliberately.
 
@@ -837,7 +840,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 4. Verify `(Get-CimInstance Win32_ComputerSystem).AutomaticManagedPagefile` is `True`; registry `Status = Remediated`, `RebootRequired = True`. Reboot, then rerun with no override and expect `[Passed] Page file is system-managed, ...`.
 5. Without the override and a manual-but-healthy page file, expect `[Warning]` and exit `1` with no change.
 
-**Status:** `NEEDS TEST`.
+**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
 
 **Review notes.** Both advisory Warning states exit `1`, which UEM reports as Failed with nothing to fix. A malformed threshold variable throws in the param block and the script falls through to `Exit 0`.
 
@@ -860,7 +863,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 3. Verify `Get-Service SysMain | Select Status,StartType` is Running / Automatic; rerun prints `[Passed] SysMain is running (StartType: Automatic)`.
 4. Restore: none.
 
-**Status:** `NEEDS TEST`.
+**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
 
 **Review notes.** Reverts deliberate SysMain disablement on SSD or VDI images. A GPO enforcing Disabled undoes the fix at the next refresh.
 
@@ -890,7 +893,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 3. Verify the HKCU values and the shortcut are gone; the HKLM value remains.
 4. Restore: `Remove-ItemProperty -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Name Dropbox`.
 
-**Status:** `TESTED - MANUAL` for the User-context path (2026-10-29, v1.0.2: planted `SpotifyLabTest` Run value and `DiscordLabTest.lnk` removed, exit `1` then `0`). `NEEDS TEST` for the SYSTEM path: run elevated via `PsExec64 -s` with a console user logged on and confirm the banner reads `Target user: <console user>` and the entries in that user's hive are removed.
+**Status:** `TESTED - MANUAL` for the User-context path (2026-10-29, v1.0.2: planted `SpotifyLabTest` Run value and `DiscordLabTest.lnk` removed, exit `1` then `0`). `NEEDS TEST` for the SYSTEM path: run elevated via `PsExec64 -s` with a console user logged on and confirm the banner reads `Target user: <console user>` and the entries in that user's hive are removed. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Fixed: under SYSTEM the script now resolves the console user and targets `HKEY_USERS\<SID>\...\Run` and that user's Startup folder; with no console user it reports and exits `0`. Header context updated. Remaining: substring matching gives false positives (`itch` matches Twitch, `Steam` matches SteamVR); removes org-deployed per-user Dropbox or Discord; no WhatIf; exit `1` on the run that fixes things.
 
@@ -913,7 +916,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 3. Verify `(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers').HwSchMode` is `2`. On real hardware reboot and check Settings > System > Display > Graphics > Default settings.
 4. Restore: set the value back to the baseline.
 
-**Status:** `NEEDS TEST`.
+**Status:** `PASS - UEM` for the healthy-machine run; the break steps above are still `NEEDS TEST`. UEM sweep `6c8405` (2026-10-29): `Failed` with exit 1 on both lab devices, as the manifest note predicts for the run that first enables HwSchMode. The re-run `0501f4` the same evening reported `Completed` on both devices, so the two-run behaviour is confirmed under UEM.
 
 **Review notes.** Step 4 treats `HwSchMode = 2` as "reboot pending" forever, so the script warns on every run after enabling. Writes the value even when no capable GPU was found. Uses `Get-WmiObject` (PS 5.1 only).
 
@@ -936,7 +939,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 3. Failure path: `Set-Service wuauserv -StartupType Disabled; Stop-Service wuauserv`. Run, expect `FAILED. Only 3 of 4 service(s) are running after remediation.`, exit `1`. Restore with `Set-Service wuauserv -StartupType Manual`.
 4. Verify `Get-Service wuauserv,bits,cryptsvc,msiserver | Select Name,Status` all Running. Note `msiserver` is left running where it is normally stopped.
 
-**Status:** `NEEDS TEST`.
+**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
 
 **Review notes.** Overlaps with the Windows Update DataStore and service steps in `Invoke-AutoRemediateWindowsUpdates.ps1` (the header says so). Non-ASCII box-drawing and em dash characters in comments and one output string; the file has a BOM so it decodes correctly, but a stripped copy would not. `-ErrorAction Continue` inside `Try` means stop/start failures print `stopped.`/`started.` anyway. `Stop-Service -Force` on `cryptsvc` and `bits` stops dependents that are never restarted.
 
@@ -1025,7 +1028,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 3. Failure path: `Set-Service Spooler -StartupType Disabled; Stop-Service Spooler`, run, expect `Error, ... could not be started: ...` and exit `1`. Restore `Set-Service Spooler -StartupType Automatic; Start-Service Spooler`.
 4. No match: `$env:ServiceName='NoSuchService'`, expect `Error: no service matched 'NoSuchService'.`, exit `1`.
 
-**Status:** `NEEDS TEST`. Ready for the UEM test group as configured in the manifest.
+**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`. Ready for the UEM test group as configured in the manifest.
 
 **Review notes.** Substring matching can hit many services (`Update` matches `wuauserv`, `UsoSvc`, `WaaSMedicSvc`, Edge and Google update services) and restarts all of them. `Stop-Service -Force` stops dependents without restarting them. Stop, 1-second pause and start of a slow service can exceed the 15-second timeout in the header.
 
@@ -1050,7 +1053,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 5. Verify the packages are gone from both cmdlets; `HKLM:\Software\AirWatch\Extensions\AppXBloat\Remediation` shows `RemediationsRun = 1`, `RemediationErrors = 0`. Rerun prints `No matching packages are provisioned for new users`.
 6. Re-arm for another run: revert the snapshot or point `$env:DenyListExtra='Microsoft.WindowsAlarms'` at a still-provisioned package.
 
-**Status:** `NEEDS TEST`.
+**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
 
 **Review notes.** `Remove-AppxPackage -AllUsers` commonly fails for in-use packages (0x80073CFA) and then the script exits `1`. Enumeration plus removal can exceed the 90-second header timeout. Version constant and header disagree. The Store can reinstall removed apps.
 
@@ -1080,7 +1083,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 4. Verify `Get-MpPreference | Select -ExpandProperty ExclusionProcess` lists `frxccd.exe`, `frxccds.exe`, `frxsvc.exe`; `ExclusionPath` includes `C:\ProgramData\FSLogix\Cache\*` and `\\labfs\Profiles\*.VHDX`; `ExclusionExtension` has `VHD`, `VHDX`. Rerun prints `All 3 process exclusions present` and so on.
 5. Restore: `sc.exe delete frxsvc`, `Remove-Item HKLM:\SOFTWARE\FSLogix -Recurse`, `Remove-MpPreference` for each added item.
 
-**Status:** `NEEDS TEST - PRODUCT VM` (simulation above is acceptable for logic validation).
+**Status:** `NEEDS TEST - PRODUCT VM` (simulation above is acceptable for logic validation). Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Tamper Protection or Intune-managed exclusions (`DisableLocalAdminMerge`) make `Add-MpPreference` fail or be ignored, giving a perpetual Failed. Under SYSTEM `$env:TEMP` equals `C:\Windows\Temp`, so two path entries duplicate. Version constant and header disagree.
 
@@ -1111,7 +1114,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 4. Verify `(Get-ScheduledTask -TaskPath '\LabVendor\').Triggers | Select Delay` shows `PT1M` and `PT1M30S`; registry `HKLM:\Software\AirWatch\Extensions\LogonTaskContention\Remediation` has `TasksDelayed = 2`. Rerun prints `All 2 qualifying task(s) already have at least a 60 second delay`.
 5. Restore: `Get-ScheduledTask -TaskPath '\LabVendor\' | Unregister-ScheduledTask -Confirm:$false`.
 
-**Status:** `NEEDS TEST`.
+**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
 
 **Review notes.** The ISO 8601 parser handles only `PT#H#M#S`; a delay stored as `P0DT0H1M0S` or `P1D` parses as 0 and can be lowered. `Set-ScheduledTask` fails for tasks with a stored password. Delaying vendor agents is user-visible.
 
@@ -1141,7 +1144,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 4. Verify the `labbloat` files and `lab*.lnk` are gone; `HKLM:\Software\AirWatch\Extensions\ProfileBloat\Remediation` shows `ReclaimedMB = 60`, `CleanupsRun = 2`; log at `C:\Windows\Temp\UEM_AutoRemediateProfileBloat.log`.
 5. Restore: clear the two env overrides.
 
-**Status:** `NEEDS TEST`.
+**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
 
 **Review notes.** Step 7 deletes `CustomDestinations` and `AutomaticDestinations`, which hold user-pinned Jump List items (not pure cache). Deleting `WER\ReportQueue` discards un-uploaded crash reports. Large profiles can exceed the 300-second header timeout because each step walks its tree twice.
 
@@ -1161,7 +1164,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 | Inventory | `3) Complete - Needs Testing`, impact Low |
 | Inputs | `$env:CacheSizeWarningMB` (500), `$env:ExtensionCountWarning` (20), `$env:AllowDestructiveActions` (reserved, gates nothing) |
 | Prerequisites | Chrome installed (else `[Skipped]`, exit 0); console user |
-| Automated coverage | none |
+| Automated coverage | `uem-tests.json` entry (expects `Completed`) |
 
 **Purpose.** Six steps: Chrome Cache Bloat (clears `Cache` and `Code Cache` when Chrome is closed), Extension Count (report), Google Update Service Health (report), Enterprise Policy Check (report), GPU / Renderer Crash Loop (report), Stale NativeMessaging Hosts (removes keys whose manifest file is gone). Writes `HKLM:\Software\AirWatch\Extension\DEXRecords\ChromeErrors`.
 
@@ -1182,7 +1185,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 4. Chrome running: expect `-> Remediation ERROR: Chrome is running -- cache folders are locked...` on step 1.
 5. Restore: `sc.exe config gupdate start= delayed-auto`, remove the policy key and value, delete the fake extension folders and crash reports.
 
-**Status:** `NEEDS TEST`.
+**Status:** `PASS - UEM` for the healthy-machine run; the break steps above are still `NEEDS TEST`. On 2026-10-29 the connector published copy `DEXTEST_0bf8d0_Invoke-AutoRemediateChrome` to as1831, assigned it to `Test_Treddy` with `RUN_IMMEDIATELY`, and Hub reported `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2` within a minute of `SyncWorkflows` (result file `test-result-pair.json` in the connector folder; device record `HKLM:\Software\AirWatch\Extension\DEXRecords\ChromeErrors` updated, exit 0). Earlier copies ran the same way eight times that day while the sign-out problem described in `UEM-API-TESTING-SPEC.md` was being diagnosed, all exit 0.
 
 **Review notes.** No step returns `Failed` by design, so exit `1` only follows a detection exception. Step 6 reads `HKCU:` which under SYSTEM is the SYSTEM hive, unlike the `HKU\<SID>` approach used elsewhere. Recursive cache sizing can be slow on very large caches.
 
@@ -1206,7 +1209,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 4. Disabled service path: `Set-Service FileSyncHelper -StartupType Disabled`, rerun, expect `[Info] FileSyncHelper is Disabled -- skipping restart...`. Restore to Manual.
 5. Restore: `Remove-EventLog -Source OneDriveLabTest`.
 
-**Status:** `NEEDS TEST`.
+**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
 
 **Review notes.** Starting OneDrive is user-visible. Step 5 has two identical `if` branches; the second is dead code. Step 3 scans every Level-2 Application event in 24 hours with a wildcard on Message and can be slow.
 
@@ -1234,7 +1237,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 3. Run with `$env:AllowDestructiveActions='true'` and Outlook closed. Expect `-> Remediation ran` on steps 1 and 2; verify `LoadBehavior` is `0` and `labtest_<stamp>.bak` exists.
 4. Restore: `UpdatesEnabled` back to `True`, delete the lab add-in key and the `.bak`, clear the env variables.
 
-**Status:** `NEEDS TEST - PRODUCT VM`.
+**Status:** `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29) reported `Completed` on both lab devices, which proves only the not-installed path (result file `test-result-scripts.json` in the connector folder).
 
 **Review notes.** With exactly one add-in the count in the message prints blank (single-object `.Count` in PS 5.1). Step 4 messages promise an update attempt that never happens (no resolution) and still yield exit `1`. Step 3 queries seven days of Application events without a level filter in the query hash. OST rename forces a full mailbox resync.
 
@@ -1266,7 +1269,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 4. Stuck updater: copy `powershell.exe` to the `Update.exe` path, start it with `-Command Start-Sleep 7200`, wait 31 minutes, rerun. Expect `[Failed ] Teams Updater Stuck: ... (PID n, running 31min). -> Remediation ran` and the process gone.
 5. Restore: delete the fake Teams folders.
 
-**Status:** `NEEDS TEST - PRODUCT VM` (the fake-install path above validates the Classic steps on the lab VM).
+**Status:** `NEEDS TEST - PRODUCT VM` (the fake-install path above validates the Classic steps on the lab VM). Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** `Get-AppxPackage MSTeams` as SYSTEM returns only SYSTEM's packages, so New Teams is unlikely to be detected without `-AllUsers`, and `Add-AppxPackage -Register` as SYSTEM registers for SYSTEM. Step 6 prints `-> Remediation ran` even when it only printed the skip message, and returns Failed regardless of the flag. Step 4's `error|failed|exception` regex is loose.
 
@@ -1298,7 +1301,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 3. Run with `$env:AllowDestructiveActions='true'`. Expect steps 4 and 5 `-> Remediation ran`; verify `zoom_token.db` is gone and the consent key `Value` is `Allow`.
 4. Restore: remove the fake install, the Zoom folders, the `ZoomUpdate` key and the consent key.
 
-**Status:** `NEEDS TEST - PRODUCT VM` (fake-install path validates logic on the lab VM).
+**Status:** `NEEDS TEST - PRODUCT VM` (fake-install path validates logic on the lab VM). Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** The regex term `401` matches any `401` substring. Step 5 triggers the per-app Allow even in the global-Deny case where the message says only the user can fix it. Step 4 forces a re-login.
 
@@ -1461,7 +1464,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 5. Verify `Get-ItemProperty HKLM:\Software\AirWatch\Extensions\SCOM` shows a fresh `Part1RunTime`.
 6. Restore: `Remove-Item 'HKLM:\SOFTWARE\Microsoft\Microsoft Operations Manager' -Recurse; Remove-Item C:\Lab\SCOM -Recurse`.
 
-**Status:** `NEEDS TEST - PRODUCT VM` (fixture validates the registry and connectivity logic on the lab VM).
+**Status:** `NEEDS TEST - PRODUCT VM` (fixture validates the registry and connectivity logic on the lab VM). Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Version constant and header disagree. Step 1 resolution skips if any process named `setup` is running.
 
@@ -1485,7 +1488,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 4. Verify registry `StateFolderMB`, `NotRegistered24h`, `UnloadedWorkflows24h`, `Part2RunTime`.
 5. Restore: `Remove-EventLog -LogName 'Operations Manager'` and the fixture.
 
-**Status:** `NEEDS TEST - PRODUCT VM` (Agent Runtime Footprint needs real processes).
+**Status:** `NEEDS TEST - PRODUCT VM` (Agent Runtime Footprint needs real processes). Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Most expensive part (90-second budget in the README). Writes decimal strings such as `1700.2` that Part 3 cannot parse (see 6.14).
 
@@ -1508,7 +1511,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 3. Certificate: `Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Microsoft Operations Manager\3.0\Machine Settings' ChannelCertificateSerialNumber ([byte[]](1,2,3,4)) -Type Binary` (create the key first). Expect `[Failed ] Channel Certificate Health: Channel certificate serial 04030201 is configured but no matching certificate exists ...`, exit `1`.
 4. Time: `Stop-Service w32time`, expect `[Warning] Time Synchronisation Skew: Windows Time service did not respond ...`. Restart the service.
 
-**Status:** `NEEDS TEST - PRODUCT VM`. Fixed 2026-10-29 (v1.1.1), parse-checked. Re-run the fixture in step 2 and confirm the score drops when `StateFolderMB` is over 1536 and `ConfigAgeHours` over 24.
+**Status:** `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29) reported `Completed` on both lab devices, which proves only the not-installed path (result file `test-result-scripts.json` in the connector folder). Fixed 2026-10-29 (v1.1.1), parse-checked. Re-run the fixture in step 2 and confirm the score drops when `StateFolderMB` is over 1536 and `ConfigAgeHours` over 24.
 
 **Review notes.** Fixed: `Get-Cached` now parses culture-invariant doubles and rounds, so the decimal strings Part 2 writes no longer read back as -1 and the `ConfigurationCacheStale`, `HealthServiceStateOversized` and CPU deductions apply. Remaining: exit code does not reflect Part 1 or 2 failures (by design, documented in the README).
 
@@ -1577,7 +1580,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 3. Second run within 20 hours: `Recycled at <time>, within the 20h cooldown. Skipping.`, `Status = SkippedCooldown`.
 4. `Restart-Service HealthService` immediately before a run gives `Skipped:AgentRecentlyStarted`.
 
-**Status:** `NEEDS TEST - PRODUCT VM`.
+**Status:** `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29): `Failed` with `UnknownScriptError (12004)` on both lab devices (after 1 s on `CHASEWIN11_2`, 206 s on `CBRADLEYSWIN11`). Hub's executor log on the VM gave the cause: `Launcher failed: Cannot bind argument to parameter 'Path' because it is an empty string`. Hub feeds the script to PowerShell through stdin, so `$PSCommandPath` is empty and the launcher's self-copy (`Copy-Item -Path $PSCommandPath`) throws. Every launcher that stages itself for a scheduled task had the same line: the three SCOM launchers, the three SCCM launchers (`CcmCache`, `OrphanedCcmSetup`, `WMIRepository`), `DEX_Start-WindowsUpdate.ps1`, and the `DeployScheduledTask` mode of `Measure-LogonDuration.ps1` and `Measure-LogonDurationMultiSession.ps1`. All ten now write `$MyInvocation.MyCommand.ScriptBlock.ToString()` to the payload path instead, which holds the full script text in both file and stdin mode (verified locally). The re-runs then exposed two more launcher defects that only show under Hub: `-WhatIf:$false` passed to `Register-ScheduledTask` (no such parameter) and `-DeleteExpiredTaskAfter` on a trigger-less task (needs an `EndBoundary`, so registration fails). Both removed from every launcher that had them. Re-run `c99707` (2026-10-30 00:21) reported `Completed` on both lab devices, but the payload Hub staged on the VM was 25,951 characters against a 30,629-character source: inside the script's main function `$MyInvocation.MyCommand.ScriptBlock` is the function body, so the header and the tail that switches the copy into payload mode were lost and the payload took the "already running" exit. Fixed by capturing the script text at script scope (the line before the function) in all six function-wrapped launchers. In the final re-run (2026-10-30 00:31) the staged payload is 30,780 bytes, the payload log shows every step and `Payload complete`, and the registry record reads `Status = Skipped:NoAgent`, which is the correct result on a device without the SCOM agent. Details in `UEM-API-TESTING-SPEC.md`.
 
 **Review notes.** Fixed 2026-10-29 (v1.0.1): a healthy recycle now reports `Recycled` and exit `0`; `WhatIf` is forwarded into the task command line and a WhatIf run reports `Skipped:WhatIf`. Monitoring gap during the restart; unsent queue lost.
 
@@ -1612,7 +1615,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 5. Unelevated negative: expect `Cannot read the Recycle Bin for <user>. Run this as SYSTEM.` and exit `1`.
 6. Verify `Get-ChildItem -LiteralPath 'C:\$Recycle.Bin' -Force -Directory` counts and `(Get-Volume -DriveLetter C).SizeRemaining` up by about 1 GB.
 
-**Status:** `TESTED - MANUAL`.
+**Status:** `TESTED - MANUAL`. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Irrecoverable for all users; deploy with `OlderThanDays`. `DiskCleanup\Testing-Guide.md` section 4.3 still describes a registry `StateFlags0056` from the old cleanmgr version; v2.2.0 writes no registry.
 
@@ -1636,7 +1639,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 4. Timeout path: `$env:WaitTimeoutSeconds='1'`, expect the warning and exit `1`.
 5. No-wait path: unset `WaitForCleanup`, expect no waiting line and an immediate return while cleanmgr keeps running.
 
-**Status:** `TESTED - MANUAL`.
+**Status:** `TESTED - MANUAL`. UEM sweep `6c8405` (2026-10-29): `ScriptTimedOut` on `CBRADLEYSWIN11`, `Completed` on `CHASEWIN11_2`. The script itself exited 0 in 5 s; cleanmgr, launched with the call operator, inherited the host's output pipe and Hub waited for cleanup to finish. Fixed in 1.2.1 (Start-Process); re-run `0501f4` the same evening reported `Completed` on both devices.
 
 **Review notes.** The default 900-second wait needs a UEM timeout near 20 minutes; without the wait use 30 seconds. Hard-coded `C:`. Header script name differs from the file name. A pending Windows Update install can legitimately make a waiting run hit the ceiling.
 
@@ -1711,7 +1714,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 4. Verify `wevtutil gl Microsoft-Windows-PrintService/Operational` shows `enabled: true` (same for TaskScheduler).
 5. Unelevated with logs disabled: `[FAILED]` lines and exit `1`.
 
-**Status:** `TESTED - MANUAL`.
+**Status:** `TESTED - MANUAL`. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** The marker is written even when a log reports `[FAILED]`, so later runs skip and never retry, and `-Force` cannot be reached from UEM.
 
@@ -1735,7 +1738,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 4. No-user path: `PsExec64 -s` with nobody at the console. Expect `No interactive user detected. Nothing to measure.`, exit `1`.
 5. Restore: `Unregister-ScheduledTask -TaskPath '\DEXTools\' -TaskName DEXTools_MeasureLogonDuration -Confirm:$false; Remove-Item 'C:\ProgramData\AirWatch\Extensions\DEXTools' -Recurse; Remove-Item HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration -Recurse`.
 
-**Status:** `TESTED - MANUAL`.
+**Status:** `TESTED - MANUAL`. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** `TotalLogonDurationSec` is based on Winlogon event 7001, which fires almost at logon time, so expect 0 to 1 second rather than real time-to-desktop. Registry and task failures only warn.
 
@@ -1767,7 +1770,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 
 ## 9. MDM command scripts
 
-All three end or weaken the console session. They are skipped in `uem-tests.json` and must never be run through the harness or against a VM you are working from.
+The first three end or weaken the console session and must never be run through the harness or against a VM you are working from. The Windows Update on/off pair (9.4, 9.5) changes update behaviour on whatever device it lands on, so it is also skipped in `uem-tests.json` and tested on the lab VM by hand. All five are skipped in `uem-tests.json`.
 
 ### 9.1 `DEX_Invoke-SignoffWindows.ps1`
 
@@ -1832,6 +1835,59 @@ All three end or weaken the console session. They are skipped in `uem-tests.json
 
 **Review notes.** With no console user the `tsdiscon` error is swallowed and exit is still `0`. `$WhatIfPreference` is checked but never settable.
 
+### 9.4 `DEX_Stop-WindowsUpdate.ps1`
+
+| Field | Value |
+|---|---|
+| Path / version | `MDMCommands\DEX_Stop-WindowsUpdate.ps1`, 1.0.0 |
+| Inventory | `3) Complete - Needs Testing`, impact Medium |
+| Inputs | `$env:WhatIf` (dry run); `-NoPause` switch (console/image builds only). Tunables hard-coded: `$PauseUpdates`, `$PauseDays`, `$StopEvenIfInstalling`, `$StopTimeoutSeconds` |
+| Prerequisites | `wuauserv` present; elevated (SYSTEM) session; `sc.exe` |
+| Automated coverage | `uem-tests.json` skip |
+
+**Purpose.** Turns Windows Update off: sets `wuauserv` to Disabled, stops it (`sc.exe stop` plus a 20 s poll), and writes the six Settings-app pause values under `HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings` for 35 days. Declines (exit 0) while the Windows Update Agent reports an install in progress. Stamps `HKLM:\Software\AirWatch\Extensions\WindowsUpdateControl`. Guide: `MDMCommands\WindowsUpdate-OnOff-Guide.md`.
+
+**Test steps**
+
+1. Snapshot the VM. Precondition: `Get-Service wuauserv` is `Running / Manual`; `Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings' | Select Pause*` shows no values.
+2. Dry run: `$env:WhatIf='true'; powershell.exe -File .\DEX_Stop-WindowsUpdate.ps1`. Expect a `[Before]` block, three `What if:` lines (start type, stop, pause), no `[After]` block, exit `0`, no registry stamp written.
+3. Live run as SYSTEM (`PsExec64 -s` or a scheduled task), `$env:WhatIf` unset. Expect `wuauserv start type set to Disabled.`, `wuauserv stopped.`, `Updates paused until <date> (UTC).`, an `[After]` block showing `Stopped / Disabled` and `paused until`, exit `0`.
+4. Verify: `Get-Service wuauserv` is `Stopped / Disabled`; the six `Pause*` values exist with ISO 8601 UTC strings 35 days apart; the stamp key has `Mode=Off`, `Status=Completed`, `PauseUntil`. Settings > Windows Update shows "Updates paused until".
+5. Idempotency: run again. Expect `already Disabled`, `already stopped`, pause rewritten, exit `0`.
+6. Install-in-progress path: start a large install (or run 9.5 in Direct mode and wait for `Status=Running`), then run this script. Expect `SKIPPED: an update is installing right now`, exit `0`, service untouched, `Status=SkippedInstalling`.
+7. Restore: run 9.5 with `$InstallMode = 'None'`, or revert the snapshot.
+
+**Status:** `NEEDS TEST`. Parse-checked under Windows PowerShell 5.1 and PowerShell 7 and dry-run on the lab VM 2026-10-29 (non-elevated session, so steps 3 to 6 are outstanding).
+
+**Review notes.** The hold is deliberately bounded: `WaaSMedicSvc` resets the start type within about a day and the pause expires after 35 days. Both are documented in the guide. Stopping the service is guarded by `ShouldProcess`; the `sc.exe` call does not honour `$WhatIfPreference` on its own.
+
+### 9.5 `DEX_Start-WindowsUpdate.ps1`
+
+| Field | Value |
+|---|---|
+| Path / version | `MDMCommands\DEX_Start-WindowsUpdate.ps1`, 1.0.0 |
+| Inventory | `3) Complete - Needs Testing`, impact Medium |
+| Inputs | `$env:WhatIf` (dry run); `-Mode Orchestrator|Direct|None` and `-Wait` (console/image builds only; `-Wait` runs the Direct payload inline and returns 0, 3010 or 1); `-RunAsPayload` (internal, set by the Direct-mode task and by `-Wait`). Tunables hard-coded: `$InstallMode` (`Orchestrator`, `Direct`, `None`), `$ResumePause`, `$IncludeDrivers`, `$StartTimeoutSeconds`, `$UsoWaitSeconds`, `$DirectTimeLimitHrs`, `$DirectDeadlineMin` |
+| Prerequisites | `wuauserv` present; elevated (SYSTEM) session; `UsoClient.exe` (Windows 10 1607+); Direct mode needs an AV/EDR exclusion for `C:\ProgramData\AirWatch\Extensions\` |
+| Automated coverage | `uem-tests.json` skip |
+
+**Purpose.** Turns Windows Update on and makes the device update now: sets `wuauserv` back to Manual if Disabled, starts it (`sc.exe start` plus a 15 s poll), removes the six pause values and runs `UsoClient ResumeUpdate`, then either asks the orchestrator for `RefreshSettings` and `ScanInstallWait` (default), or registers the hidden SYSTEM task `WS1_DEX_WindowsUpdateInstall` that runs this same file with `-RunAsPayload` and installs everything applicable through the Windows Update Agent COM API (search, download, install; global mutex; 150 min phase deadline; 3 h task cap; log at `%SystemRoot%\Temp\UEM_DEX_Start-WindowsUpdate.log`). Never restarts the device.
+
+**Test steps**
+
+1. Precondition: the device is in the 9.4 "off" state (`Stopped / Disabled`, paused). Have at least one applicable update (`(New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher().Search("IsInstalled=0 and IsHidden=0 and Type='Software'").Updates.Count` is greater than 0); a VM a month behind is ideal.
+2. Dry run: `$env:WhatIf='true'`. Expect `[Before]` block, `What if:` lines for start type, start, clear pause and the orchestrator trigger, exit `0`, no changes.
+3. Live run, Orchestrator mode, as SYSTEM. Expect `wuauserv start type set to Manual.`, `wuauserv started.`, `UsoClient ResumeUpdate returned 0`, `Pause cleared.`, `UsoClient RefreshSettings returned 0`, `UsoClient ScanInstallWait returned 0` (or the "still running" line), `[After]` showing `Running / Manual` and `not paused`, exit `0`, in under 35 s.
+4. Verify within 5 to 30 minutes: Settings > Windows Update shows a scan or download in progress and then installs; `Get-WindowsUpdateLog` shows a scan started by `UsoClient`; the stamp has `Mode=On`, `Status=Triggered`.
+5. Direct mode: set `$InstallMode = 'Direct'` in a copy and run as SYSTEM. Expect `the Direct install task 'WS1_DEX_WindowsUpdateInstall' is running as SYSTEM`, exit `0`. Verify `Get-ScheduledTask WS1_DEX_WindowsUpdateInstall` is `Running`, the log fills with `Searching`, `Queued:`, `Downloading`, `Installing`, and the stamp moves `Dispatched` to `Running` to `Completed` with `Found`, `Installed`, `Failed`, `RebootRequired`. The task is gone when the payload finishes.
+6. Concurrency: run Direct mode twice in quick succession. Expect the second run to print `A Direct-mode install is already running`, exit `0`.
+7. Negative path: with `wuauserv` broken (`sc.exe config wuauserv binPath= bad` on a snapshot), expect `wuauserv did not reach Running`, exit `1`, `Status=Failed`. Revert the snapshot.
+8. Restore: nothing required beyond letting the device restart if `RebootRequired` is true.
+
+**Status:** `NEEDS TEST`. Parse-checked under Windows PowerShell 5.1 and PowerShell 7, WhatIf dry run and the payload's read-only WUA search (`ResultCode=2`, 32 s) exercised on the lab VM 2026-10-29 in a non-elevated session. Steps 3 to 7 are outstanding.
+
+**Review notes.** Orchestrator mode honours the device's `AUOptions`; with a notify-only policy it downloads and waits for the user, which the script warns about. `IUpdateInstaller.Install()` is synchronous, so inside the payload the 150 min deadline is only checked between phases and the task's 3 h `ExecutionTimeLimit` is the hard stop. `UsoClient` is launched with `UseShellExecute` so a child that outlives the script does not hold Hub's stdio handles.
+
 ---
 
 ## 10. VPN scripts
@@ -1858,7 +1914,7 @@ All three end or weaken the console session. They are skipped in `uem-tests.json
 6. Lab VM without a tunnel adapter: `No VPN client present on this device. Nothing to process.`, exit `0`.
 7. Restore: `Set-Service RasMan -StartupType Manual`, remove the WireGuard tunnel.
 
-**Status:** `NEEDS TEST - PRODUCT VM`.
+**Status:** `NEEDS TEST - PRODUCT VM`. UEM sweep `6c8405` (2026-10-29) reported `Completed` on both lab devices, which proves only the not-installed path (result file `test-result-scripts.json` in the connector folder).
 
 **Review notes.** `RasMan` and `IKEEXT` are Manual-start and normally stopped when idle, so step 2 reports Failed and starts them on every run on any device with a tunnel adapter. Detection-only failures do not change the exit code; only a thrown remediation does.
 
@@ -1881,7 +1937,7 @@ All three end or weaken the console session. They are skipped in `uem-tests.json
 3. With DNS reset: `NoDnsOnTunnel` deduction.
 4. Verify `Get-ItemProperty HKLM:\Software\AirWatch\Extensions\VPN` shows `Connected`, `TunnelMode`, `TunnelMtu`, `ClientCount`, fresh `LastRun`; log `C:\Windows\Temp\UEM_VpnStateCollection.log`.
 
-**Status:** `NEEDS TEST` (the no-client path runs on the lab VM; tunnel states need 10.1's setup).
+**Status:** `NEEDS TEST` (the no-client path runs on the lab VM; tunnel states need 10.1's setup). Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
 **Review notes.** Flap and last-connect correlation compares NetworkProfile event text to the adapter `InterfaceDescription`, which may never match, leaving `FlapCount24h` at 0 on real tunnels. Verify on the lab tunnel. Any virtual adapter not in the exclusion list (Tailscale, ZeroTier, WARP, OpenVPN TAP) counts as a VPN client.
 
@@ -1967,5 +2023,5 @@ All three end or weaken the console session. They are skipped in `uem-tests.json
 3. Add inventory rows for the five SCCM scripts, `Get-AppVolumesMountProbe.ps1`, `Measure-LogonDurationMultiSession.ps1` and `Restart-WinProcessGracefulEx.ps1` (or exclude them explicitly).
 4. Run the `NEEDS TEST` group on the lab VM in this order, cheapest first: 5.3, 5.5, 5.8, 5.12, 8.4, 10.2, 5.7, 5.15, 5.16, 5.13, 5.4, 5.2, 5.10.
 5. Stand up one product VM each for Defender-adjacent (CrowdStrike, Trellix, Trend Micro), Microsoft 365 (Outlook, Teams), Zoom, SCCM, SCOM, FSLogix and VPN, and work through the `NEEDS TEST - PRODUCT VM` group.
-6. Once a script passes here, add or adjust its `uem-tests.json` entry and run it through the UEM test group per `UEM-API-TESTING-SPEC.md`.
+6. Once a script passes here, add or adjust its `uem-tests.json` entry and run it through the UEM test group per `UEM-API-TESTING-SPEC.md`. The loop is proven end to end as of 2026-10-29 (`Invoke-AutoRemediateChrome.ps1` is `PASS - UEM`); the full `-Type Script` sweep of every runnable manifest entry is the next run, and its result file is the evidence to cite for each script it completes on.
 

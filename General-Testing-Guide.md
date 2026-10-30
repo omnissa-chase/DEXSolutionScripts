@@ -185,12 +185,13 @@ Recurring sensor (registry-only, no disk enumeration or network calls). Lists ev
 | `Status` | `"OK"` or `"Failed"` (see `Error` on failure) |
 | `DataCollectedAt` | When the sensor ran |
 | `Username` | `DOMAIN\user` whose folders are being reported |
-| `RedirectedCount` | Number of folders in `Folders` whose path is a UNC path |
-| `Folders[].Folder` | Known-folder name (`Desktop`, `Documents`, `AppDataRoaming`, `Downloads`, etc. — 13 total, including the 5 GUID-keyed folders with no classic name) |
-| `Folders[].Path` | Current resolved target path, or `null` if the registry value isn't set |
-| `Folders[].Redirected` | `true` if `Path` is a UNC path (`\\server\share\...`) rather than local |
+| `RedirectedCount` | Number of folders whose path is a UNC path |
+| `Redirected` | Object keyed by known-folder name (`Desktop`, `Documents`, `AppDataRoaming`, `Downloads`, etc.; 13 candidates including the 5 GUID-keyed folders with no classic name) whose value is the UNC target (`\\server\share\...`). Empty `{}` when nothing is redirected |
+| `Local` | Array of the known-folder names that still point at the local profile (or whose registry value is unset). Becomes a plain count if the value would otherwise exceed 1 KB |
 
-> `Redirected: false` does not always mean "not customized" — OneDrive Known Folder Move rewrites these same registry values to point at a local OneDrive path, which correctly reports `Redirected: false` here since it isn't a network path.
+> UEM stores at most 1 KB per sensor sample and Hub silently drops anything longer (`output length is greater than 1KB length` in `AWProcessCommands-<date>.log`). The shape above replaced a 13-entry per-folder array on 2026-10-29 because that array was about 1.2 KB on a plain device and never reached the console. If a site redirects many folders to long paths the sensor first turns `Local` into a count, then trims each target to `\\server\share`.
+
+> A folder listed under `Local` does not always mean "not customized" — OneDrive Known Folder Move rewrites these same registry values to point at a local OneDrive path, which correctly reports `Redirected: false` here since it isn't a network path.
 
 ### 4.2 Sensor — logon_folder_redirection_latency_probe.ps1
 
@@ -206,11 +207,16 @@ One-time/run-once companion to 4.1. For every UNC-redirected folder it finds, ti
 | `TimedOut` | `true` if the sensor's own 15s budget ran out before every redirected folder was probed |
 | `OverallRiskScore` | Sum of every folder's `RiskScore` |
 | `OverallSeverity` | `NotApplicable` (nothing redirected), `Normal`, `Elevated`, or `Critical` — bucketed from `OverallRiskScore` |
-| `Folders[].Folder` / `Path` / `Redirected` | Same meaning as 4.1 |
-| `Folders[].Reachable` | `true`/`false` if a TCP:445 connect to the target server succeeded within 1.5s; `null` if not redirected |
-| `Folders[].ConnectMs` | TCP connect time in ms (latency proxy) — `null` if not redirected or unreachable |
+| `RedirectedCount` | Number of entries in `Folders` |
+| `Folders[]` | One entry per UNC-redirected folder only (local folders are not probed and appear under `NotApplicable`). Empty `[]` when nothing is redirected |
+| `Folders[].Folder` / `Path` / `Redirected` | Same meaning as 4.1; `Redirected` is always `true` here. `Path` is dropped if the value would otherwise exceed 1 KB |
+| `Folders[].Reachable` | `true`/`false` if a TCP:445 connect to the target server succeeded within 1.5s |
+| `Folders[].ConnectMs` | TCP connect time in ms (latency proxy) — `null` if unreachable |
 | `Folders[].LikelyServedByCache` | `true` if the server was unreachable but the folder still resolved instantly — a strong signal Offline Files (CSC) is serving it locally instead of over the network |
-| `Folders[].Severity` | `NotApplicable`, `Normal`, `Elevated` (`ConnectMs >= 150`), `Critical` (unreachable), or `TimedOut` (budget ran out before this folder was probed) |
+| `Folders[].Severity` | `Normal`, `Elevated` (`ConnectMs >= 150`), `Critical` (unreachable), or `TimedOut` (budget ran out before this folder was probed) |
 | `Folders[].RiskScore` | Per-folder weighted score — `AppDataRoaming`/`Desktop`/`Start Menu` are weighted highest since they're read synchronously during shell init; `-4` if `Severity` is `TimedOut` |
+| `NotApplicable` | Array of known-folder names that are not redirected. Becomes a plain count if the value would otherwise exceed 1 KB |
+
+> Same 1 KB sensor-sample cap as 4.1: the earlier 13-entry array was about 2.5 KB on a plain device and Hub dropped every sample. Reshaped 2026-10-29.
 
 > Why two sensors instead of one: this repo's sensor conventions reserve network calls for one-time sensors only, so the cheap registry-only listing (recurring) and the network reachability probe (one-time) can't be the same script.

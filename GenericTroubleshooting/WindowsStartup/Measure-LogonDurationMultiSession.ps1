@@ -167,11 +167,11 @@
 
 .NOTES
     Script Name  : Measure-LogonDurationMultiSession.ps1
-    Version      : 2.0.0
+    Version      : 2.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-02
+    Last Modified: 2026-10-29
     Timeout      : 300 seconds
 
     PowerShell 5.1 compatible.
@@ -283,13 +283,16 @@ $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference    = 'SilentlyContinue'
 
 #region --- Script-level constants ---
+# Captured at script scope: under UEM Hub the script arrives through stdin and $PSCommandPath is
+# empty, so DeployScheduledTask persists this text instead of copying a file (fixed 2026-10-29).
+$script:SelfText     = try { $MyInvocation.MyCommand.ScriptBlock.ToString() } catch { $null }
 $script:ToolsDir     = 'C:\ProgramData\AirWatch\Extensions\DEXTools'
 $script:ScriptName   = 'Measure-LogonDurationMultiSession.ps1'
 $script:TaskName     = 'DEXTools_MeasureLogonDurationMultiSession'
 $script:RegRoot      = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration'
 $script:SessionsRoot = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration\Sessions'
 $script:AggRoot      = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration\Aggregate'
-$script:Version      = '2.0.0'
+$script:Version      = '2.0.1'
 $script:ValidModes   = @('RunNow', 'DeployScheduledTask', 'ConfigureLogging')
 $script:ValidScopes  = @('LastLogon', 'AllActive', 'AllSince', 'AllUsers')
 
@@ -1729,8 +1732,11 @@ function Install-MultiSessionTask {
         [int]$Repeat
     )
 
-    if ([string]::IsNullOrEmpty($PSCommandPath)) {
-        Write-Warning 'Cannot determine script path ($PSCommandPath is empty). Run from a saved .ps1 file.'
+    # UEM Hub hands the script to PowerShell through stdin, so $PSCommandPath is empty there
+    # (UEM sweep 2026-10-29). The script's own text is still available from the script-scope
+    # invocation, captured at the top of the file, so persist that when there is no file.
+    if ([string]::IsNullOrEmpty($PSCommandPath) -and [string]::IsNullOrEmpty($script:SelfText)) {
+        Write-Warning 'Cannot determine the script text ($PSCommandPath is empty and no script block). Run from a saved .ps1 file.'
         return
     }
 
@@ -1739,7 +1745,12 @@ function Install-MultiSessionTask {
     }
 
     $destScript = Join-Path $script:ToolsDir $script:ScriptName
-    Copy-Item -Path $PSCommandPath -Destination $destScript -Force
+    if ([string]::IsNullOrEmpty($PSCommandPath)) {
+        Set-Content -LiteralPath $destScript -Value $script:SelfText -Encoding UTF8 -Force
+    }
+    else {
+        Copy-Item -Path $PSCommandPath -Destination $destScript -Force
+    }
 
     # Every setting is passed explicitly so the task can never inherit a machine-level
     # environment variable and re-deploy or re-configure at every logon. Logging setup

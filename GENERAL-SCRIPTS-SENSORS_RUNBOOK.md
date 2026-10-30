@@ -160,6 +160,10 @@ This project stages payloads under `C:\ProgramData\AirWatch\Extensions`. Many AV
 # === Launcher: dispatch payload via one-shot scheduled task, then exit ===
 param([switch]$RunAsPayload)
 
+# The whole script's text, captured here at script scope. Hub pipes the script in on stdin,
+# so there is no file to copy, and inside a function $MyInvocation would describe the function.
+$SelfText   = $MyInvocation.MyCommand.ScriptBlock.ToString()
+
 $TaskName   = "WS1_MyLongRunningWork"
 $BaseDir    = "C:\ProgramData\AirWatch\Extensions\MyApp"
 $PayloadPs1 = Join-Path $BaseDir "Invoke-MyWork.ps1"
@@ -177,8 +181,12 @@ if (-not $RunAsPayload) {
             New-Item -ItemType Directory -Path $BaseDir -Force -ErrorAction Stop | Out-Null
         }
 
-        # Self-copy: the UEM temp copy of this script is deleted after execution.
-        Copy-Item -Path $PSCommandPath -Destination $PayloadPs1 -Force -ErrorAction Stop
+        # Self-persist. Hub feeds the script to PowerShell through stdin, so $PSCommandPath is
+        # EMPTY under UEM and Copy-Item -Path $PSCommandPath throws. The running script's text
+        # is still available from $MyInvocation in both file and stdin mode, so write that.
+        # $SelfText must be captured at SCRIPT scope (see the top of this template): inside a
+        # function, $MyInvocation.MyCommand.ScriptBlock is the function body, not the file.
+        Set-Content -LiteralPath $PayloadPs1 -Value $SelfText -Encoding UTF8 -Force -ErrorAction Stop
 
         if ($existing) {
             Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
@@ -187,9 +195,14 @@ if (-not $RunAsPayload) {
         $action    = New-ScheduledTaskAction -Execute "powershell.exe" `
                         -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$PayloadPs1`" -RunAsPayload"
         $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        # No -DeleteExpiredTaskAfter here: with no trigger there is no EndBoundary and
+        # Register-ScheduledTask rejects the XML ("missing a required element or attribute").
+        # The payload unregisters its own task when it finishes (see the payload section).
         $settings  = New-ScheduledTaskSettingsSet -ExecutionTimeLimit "00:10:00" `
-                        -DeleteExpiredTaskAfter "00:01:00" -StartWhenAvailable -AllowStartIfOnBatteries
+                        -StartWhenAvailable -AllowStartIfOnBatteries
 
+        # Register-ScheduledTask and Start-ScheduledTask have no -WhatIf/-Confirm; do not pass
+        # -WhatIf:$false to them even in a SupportsShouldProcess script (Unregister- does accept it).
         Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal `
             -Settings $settings -Force -ErrorAction Stop | Out-Null
         Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
@@ -207,6 +220,8 @@ if (-not $RunAsPayload) {
 exit 0
 ```
 
+> **Why not `Copy-Item -Path $PSCommandPath`?** Hub does not run the script as a file. Its executor pipes the text into `powershell.exe` on stdin (the executor log says `PowerShell executor (stdin)`), so `$PSCommandPath`, `$PSScriptRoot` and `$MyInvocation.MyCommand.Path` are all empty under UEM, and anything that depends on them fails only in production. The first UEM sweep on 2026-10-29 caught this as `UnknownScriptError (12004)` with `Launcher failed: Cannot bind argument to parameter 'Path' because it is an empty string` in `AW.ProtectionAgent.PowershellExecutor64-<date>.log`. `$MyInvocation.MyCommand.ScriptBlock.ToString()` returns the whole script text in both modes, so it is the portable way to persist yourself. Capture it at script scope if you need it inside a function, because `$MyInvocation` inside a function describes the function.
+
 ### 4.3 Process Dispatch — No Task Registration
 
 `UseShellExecute = $true` is the load-bearing detail. It launches the child through the shell so the child **does not inherit the parent's stdio handles**. With `UseShellExecute = $false`, Hub can keep waiting on those inherited handles even after the parent exits — which defeats the entire purpose of dispatching.
@@ -215,6 +230,7 @@ exit 0
 # === Launcher: dispatch payload as a detached process, then exit ===
 param([switch]$RunAsPayload)
 
+$SelfText   = $MyInvocation.MyCommand.ScriptBlock.ToString()   # see 4.2
 $BaseDir    = "C:\ProgramData\AirWatch\Extensions\MyApp"
 $PayloadPs1 = Join-Path $BaseDir "Invoke-MyWork.ps1"
 
@@ -223,7 +239,9 @@ if (-not $RunAsPayload) {
         if (-not (Test-Path $BaseDir)) {
             New-Item -ItemType Directory -Path $BaseDir -Force -ErrorAction Stop | Out-Null
         }
-        Copy-Item -Path $PSCommandPath -Destination $PayloadPs1 -Force -ErrorAction Stop
+        # See 4.2: $PSCommandPath is empty under Hub, so persist the running text instead
+        # ($SelfText captured at script scope, right after the param block).
+        Set-Content -LiteralPath $PayloadPs1 -Value $SelfText -Encoding UTF8 -Force -ErrorAction Stop
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName  = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
@@ -1224,8 +1242,11 @@ Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Silent
 $action  = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -File `"$scriptPath`""
 
-# Trigger: run once, immediately (30-second delay to let Hub finish)
+# Trigger: run once, immediately (30-second delay to let Hub finish).
+# -DeleteExpiredTaskAfter below only works when the trigger has an EndBoundary; without it
+# Register-ScheduledTask fails with "The task XML is missing a required element or attribute".
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddSeconds(30)
+$trigger.EndBoundary = (Get-Date).AddMinutes(10).ToString('s')
 
 # Run as the logged-on user (interactive session)
 $principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users" -RunLevel Limited
@@ -1250,7 +1271,7 @@ exit 0
 | Setting | Purpose |
 |---|---|
 | `-ExecutionTimeLimit` | Hard cap. Always set it — the main advantage over process dispatch. |
-| `-DeleteExpiredTaskAfter` | Self-cleanup so tasks do not accumulate. |
+| `-DeleteExpiredTaskAfter` | Self-cleanup so tasks do not accumulate. Only valid when the task has a trigger with an `EndBoundary`; on a trigger-less task started with `Start-ScheduledTask` it makes registration fail (found by the UEM sweep 2026-10-29), so those tasks must unregister themselves instead. |
 | `-StartWhenAvailable` | Runs after a missed window (device was off). |
 | `-AllowStartIfOnBatteries` | Required for laptops; otherwise the task silently will not run. |
 | `-Hidden` | Keeps the task out of the default Task Scheduler view. |

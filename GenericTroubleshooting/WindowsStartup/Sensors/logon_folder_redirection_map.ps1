@@ -6,12 +6,14 @@
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-14
+    Last Modified: 2026-10-29
     Timeout      : < 5 seconds (recurring sensor)
 
     Lists every Folder Redirection-eligible known folder for the active interactive
-    user and where it currently points -- local path or UNC target -- as a single
-    JSON object. Registry-only (HKU\<SID>\...\Explorer\Shell Folders / User Shell
+    user as a single JSON object: "Redirected" maps each redirected folder to its
+    UNC target, "Local" names the folders that still point at the local profile.
+    The value is kept under the 1 KB that UEM stores per sensor sample (2026-10-29:
+    the earlier per-folder array was ~1.2 KB and Hub dropped it as too long). Registry-only (HKU\<SID>\...\Explorer\Shell Folders / User Shell
     Folders), no disk enumeration or network calls, so this is a recurring sensor
     unlike logon_duration_measure.ps1/profile_size_inventory.ps1. It complements
     this repo's FolderRedirectMs timing signal (event IDs 501/502) with the actual
@@ -83,15 +85,35 @@ try {
         }
     }
 
+    # UEM keeps at most 1 KB per sensor value: Hub logs "output length is greater than 1KB length"
+    # and drops the sample, so the full per-folder list (about 1.2 KB on a plain device) never
+    # reached the console. Only redirected folders carry their target; local folders are listed
+    # by name, and the payload degrades further when a site redirects many folders to long paths.
+    $redirected = @($folders | Where-Object { $_.Redirected })
+    $local      = @($folders | Where-Object { -not $_.Redirected } | ForEach-Object { $_.Folder })
+    $targets    = [ordered]@{}
+    foreach ($f in $redirected) { $targets[$f.Folder] = $f.Path }
+
     $payload = [ordered]@{
         Status           = 'OK'
         DataCollectedAt  = (Get-Date).ToString('s')
         Username         = $loggedOnUser
-        RedirectedCount  = @($folders | Where-Object { $_.Redirected }).Count
-        Folders          = @($folders)
+        RedirectedCount  = $redirected.Count
+        Redirected       = $targets
+        Local            = $local
     }
 
-    Write-Output ($payload | ConvertTo-Json -Compress -Depth 4)
+    $json = $payload | ConvertTo-Json -Compress -Depth 4
+    if ($json.Length -gt 1000) {
+        $payload['Local'] = $local.Count
+        $json = $payload | ConvertTo-Json -Compress -Depth 4
+    }
+    if ($json.Length -gt 1000) {
+        foreach ($k in @($targets.Keys)) { $targets[$k] = ($targets[$k] -replace '^(\\\\[^\\]+\\[^\\]+).*$', '$1') }
+        $json = $payload | ConvertTo-Json -Compress -Depth 4
+    }
+
+    Write-Output $json
     return
 }
 catch {

@@ -155,7 +155,10 @@ $Steps = @(
                 try {
                     $action    = New-ScheduledTaskAction -Execute $_oneDriveExe -Argument '/background'
                     $principal = New-ScheduledTaskPrincipal -UserId $_loggedOnUser -LogonType Interactive -RunLevel Limited
-                    $settings  = New-ScheduledTaskSettingsSet -DeleteExpiredTaskAfter '00:02:00' -ExecutionTimeLimit '00:01:00'
+                    # No -DeleteExpiredTaskAfter: it needs a trigger with an EndBoundary and this task has no
+                    # trigger, so Register-ScheduledTask rejects the XML ("missing a required element", EndBoundary).
+                    # The finally block below removes the task instead.
+                    $settings  = New-ScheduledTaskSettingsSet -ExecutionTimeLimit '00:01:00'
                     Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
                     Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
                     Start-Sleep -Seconds 5   # Allow process time to launch before the task is unregistered

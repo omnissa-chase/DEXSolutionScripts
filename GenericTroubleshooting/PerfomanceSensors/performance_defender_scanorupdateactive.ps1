@@ -2,11 +2,17 @@
 .NOTES
     Script Name  : performance_defender_scanorupdateactive.ps1
     Data Type    : String 
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-07-10
+    Last Modified: 2026-10-29
+
+    Returns Idle, FullScanActive, Updating or FullScanActive;Updating as one line.
+    1.0.1: the Get-WinEvent calls are silenced. Under Hub the sensor ran in 1.5 s and
+    was rejected as "failed sanity" while an interactive run printed Idle, which
+    points at a non-terminating error record reaching the output stream; a sensor
+    must emit exactly one line.
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -27,11 +33,11 @@
     try {
         $stats = (Get-MpComputerStatus -ErrorAction SilentlyContinue)
         # Attempt to gather the full scan status from the event log
-        $startEvt = Get-WinEvent -LogName "Microsoft-Windows-Windows Defender/Operational" -MaxEvents 100 |
+        $startEvt = Get-WinEvent -LogName "Microsoft-Windows-Windows Defender/Operational" -MaxEvents 100 -ErrorAction SilentlyContinue |
             Where-Object { $_.Id -eq 1000 -and $_.Message -match 'Scan Parameters:\s*Full scan' } |
             Select-Object -First 1
 
-        $endEvt = Get-WinEvent -LogName "Microsoft-Windows-Windows Defender/Operational" -MaxEvents 100 |
+        $endEvt = Get-WinEvent -LogName "Microsoft-Windows-Windows Defender/Operational" -MaxEvents 100 -ErrorAction SilentlyContinue |
             Where-Object { $_.Id -eq 1001 -and $_.Message -match 'Scan Parameters:\s*Full scan' } |
             Select-Object -First 1
     
@@ -64,4 +70,4 @@
         $status = 'Idle'
     }
 
-    echo $status
+    Write-Output ([string]$status)

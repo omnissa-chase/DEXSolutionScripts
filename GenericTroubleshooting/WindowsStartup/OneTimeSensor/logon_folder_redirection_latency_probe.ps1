@@ -6,8 +6,13 @@
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-14
+    Last Modified: 2026-10-29
     Timeout      : < 15 seconds (one-time/run-once sensor; MUST NOT be scheduled as a recurring sensor)
+
+    Output is one JSON object kept under the 1 KB that UEM stores per sensor sample:
+    "Folders" holds probe details for redirected folders only, "NotApplicable" names
+    the local ones (2026-10-29: the earlier 13-entry array was ~2.5 KB and Hub
+    dropped every sample as too long).
 
     Companion to logon_folder_redirection_map.ps1. That sensor is registry-only and
     tells you WHERE each redirected known folder points; this one tells you whether
@@ -146,6 +151,7 @@ try {
     $shellFolders     = "Registry::HKEY_USERS\$userSID\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
     $userShellFolders = "Registry::HKEY_USERS\$userSID\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
 
+    $notApplicable = New-Object System.Collections.ArrayList
     $results = foreach ($name in $script:KnownFolders.Keys) {
         $valueName = $script:KnownFolders[$name]
         $path = $null
@@ -162,16 +168,8 @@ try {
 
         $redirected = ($path -like '\\*')
         if (-not $redirected) {
-            [PSCustomObject][ordered]@{
-                Folder             = $name
-                Path               = if ([string]::IsNullOrWhiteSpace($path)) { $null } else { $path }
-                Redirected         = $false
-                Reachable          = $null
-                ConnectMs          = $null
-                LikelyServedByCache = $null
-                Severity           = 'NotApplicable'
-                RiskScore          = 0
-            }
+            # Local folders are reported by name only (see the 1 KB note below the loop).
+            $notApplicable.Add($name) | Out-Null
             continue
         }
 
@@ -217,24 +215,41 @@ try {
         }
     }
 
-    $totalRiskScore = ($results | Measure-Object -Property RiskScore -Sum).Sum
+    $results = @($results)
+    $totalRiskScore = [int](($results | Measure-Object -Property RiskScore -Sum).Sum)
     $overallSeverity =
         if ($totalRiskScore -ge 80) { 'Critical' }
         elseif ($totalRiskScore -ge 40) { 'Elevated' }
         elseif ($totalRiskScore -gt 0) { 'Normal' }
         else { 'NotApplicable' }
 
+    # UEM keeps at most 1 KB per sensor value: Hub logs "output length is greater than 1KB length"
+    # and drops the sample (the earlier 13-entry array was ~2.5 KB on a plain device). Only
+    # redirected folders carry probe details; local folders are named, then counted, and finally
+    # target paths are dropped, until the JSON fits.
     $payload = [ordered]@{
-        Status          = 'OK'
-        DataCollectedAt = (Get-Date).ToString('s')
-        Username        = $loggedOnUser
-        TimedOut        = ($overallStopwatch.ElapsedMilliseconds -ge $budgetMs)
+        Status           = 'OK'
+        DataCollectedAt  = (Get-Date).ToString('s')
+        Username         = $loggedOnUser
+        TimedOut         = ($overallStopwatch.ElapsedMilliseconds -ge $budgetMs)
         OverallRiskScore = $totalRiskScore
         OverallSeverity  = $overallSeverity
-        Folders         = @($results)
+        RedirectedCount  = $results.Count
+        Folders          = $results
+        NotApplicable    = @($notApplicable)
     }
 
-    Write-Output ($payload | ConvertTo-Json -Compress -Depth 4)
+    $json = $payload | ConvertTo-Json -Compress -Depth 4
+    if ($json.Length -gt 1000) {
+        $payload['NotApplicable'] = $notApplicable.Count
+        $json = $payload | ConvertTo-Json -Compress -Depth 4
+    }
+    if ($json.Length -gt 1000) {
+        $payload['Folders'] = @($results | Select-Object Folder, Reachable, ConnectMs, LikelyServedByCache, Severity, RiskScore)
+        $json = $payload | ConvertTo-Json -Compress -Depth 4
+    }
+
+    Write-Output $json
     return
 }
 catch {

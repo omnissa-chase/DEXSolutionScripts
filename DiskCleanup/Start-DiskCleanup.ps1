@@ -23,13 +23,18 @@
 
 .NOTES
     Script Name  : DEX_Start-DiskCleanup.ps1
-    Version      : 1.2.0
+    Version      : 1.2.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-09-03
+    Last Modified: 2026-10-29
     Timeout      : 30 seconds without -Wait. With -Wait, allow WaitTimeoutSeconds
                    plus a margin; the default 900s needs a 20 minute timeout.
+
+    1.2.1: cleanmgr is started with Start-Process instead of the call operator.
+    Found by the UEM sweep on 2026-10-29: the call operator let cleanmgr inherit
+    the script host's output pipe, Hub kept waiting for end-of-output while
+    cleanup ran, and the step timed out even though the script had exited 0.
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -176,8 +181,12 @@ ForEach ($CleanOption in $WindowsDiskCleanOptions) {
    }
 }
 
-# Run Disk Cleanup with the configured profile ID
-& cleanmgr "/sagerun:$DskCleanProfileId"
+# Run Disk Cleanup with the configured profile ID.
+# Start-Process (ShellExecute) is deliberate: with the call operator the child inherited
+# this host's stdout pipe and held it open for as long as cleanup ran, so under Hub the
+# script's own exit 0 went unseen and the step failed with "PowerShellExecutor timed out
+# waiting for output" (ScriptTimedOut 12007) whenever cleanup outlived the 30 s budget.
+Start-Process -FilePath "cleanmgr.exe" -ArgumentList "/sagerun:$DskCleanProfileId" -WindowStyle Hidden
 
 $WaitTimedOut = $false
 If ($Wait) {

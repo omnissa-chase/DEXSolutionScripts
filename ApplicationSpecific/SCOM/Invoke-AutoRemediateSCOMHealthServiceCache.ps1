@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     SCOMHealthServiceCacheResolutionWizard -- Flush the Operations Manager agent state cache. DESTRUCTIVE.
@@ -22,11 +22,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateSCOMHealthServiceCache.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : x64
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-10-29
     Timeout      : ~5 seconds (launcher exits immediately; payload runs via scheduled task, self-capped at 15 minutes)
 
     Environment variables:
@@ -39,11 +39,12 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
+$script:SelfText = $MyInvocation.MyCommand.ScriptBlock.ToString()
 function Invoke-AutoRemediateSCOMHealthServiceCache {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param([switch]$RunAsPayload)
 
-$SCRIPT_VERSION = '1.0.1'
+$SCRIPT_VERSION = '1.0.2'
 
 # -- Dispatch constants (launcher + payload) --
 $TaskName   = 'WS1_SCOMHealthServiceCache'
@@ -76,7 +77,7 @@ if (-not $RunAsPayload) {
             New-Item -ItemType Directory -Path $BaseDir -Force -ErrorAction Stop -WhatIf:$false | Out-Null
         }
 
-        Copy-Item -Path $PSCommandPath -Destination $PayloadPs1 -Force -ErrorAction Stop -WhatIf:$false
+        Set-Content -LiteralPath $PayloadPs1 -Value $script:SelfText -Encoding UTF8 -Force -ErrorAction Stop -WhatIf:$false
 
         if (-not (Test-Path $RegPath)) { New-Item -Path $RegPath -Force -ErrorAction Stop -WhatIf:$false | Out-Null }
         Set-ItemProperty -Path $RegPath -Name 'Status'           -Value 'Dispatched'           -Type String -ErrorAction Stop -WhatIf:$false
@@ -97,12 +98,11 @@ if (-not $RunAsPayload) {
         $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
         $settings  = New-ScheduledTaskSettingsSet `
                          -ExecutionTimeLimit '00:20:00' `
-                         -DeleteExpiredTaskAfter '00:01:00' `
                          -StartWhenAvailable `
                          -AllowStartIfOnBatteries
 
         Register-ScheduledTask -TaskName $TaskName -Action $action -Principal $principal `
-            -Settings $settings -Force -ErrorAction Stop -WhatIf:$false | Out-Null
+            -Settings $settings -Force -ErrorAction Stop | Out-Null
         Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 
         Write-Output "$HEAD Dispatched '$TaskName'. Results will appear at: $RegPath"
