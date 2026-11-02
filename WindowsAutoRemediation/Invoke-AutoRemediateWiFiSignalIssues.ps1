@@ -31,11 +31,15 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateWiFiSignalIssues.ps1
-    Version      : 2.0.1
+    Version      : 2.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-11-02 (2.0.2: adapter lookups wrapped in @() so a single
+                   adapter keeps its Count; steps 4 and 5 report Warning instead of
+                   Passed when the query throws; detection re-runs after each
+                   remediation, results carry FinalStatus/FinalMessage, the summary
+                   adds Fixed and Still failing, and the exit code follows FinalStatus.)
     Timeout      : 60 seconds
 
 .DISCLAIMER
@@ -60,13 +64,13 @@ $Steps = @(
         Enabled          = $true
         ResolveOnWarning = $false
         DetectionScript  = {
-            $found = if ($AdapterName) {
-                @(Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue)
+            $found = @(if ($AdapterName) {
+                Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue
             } else {
-                @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+                Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
                     Where-Object { $_.MediaType -match '802.11' -or
-                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' })
-            }
+                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' }
+            })
             if (-not $found -or $found.Count -eq 0) {
                 $hint = if ($AdapterName) { " matching '$AdapterName'" } else { '' }
                 return @{ Status = 'Failed'; Message = "No wireless adapter found$hint." }
@@ -104,13 +108,13 @@ $Steps = @(
             }
         }
         ResolutionScript = {
-            $bounce = if ($AdapterName) {
-                @(Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue)
+            $bounce = @(if ($AdapterName) {
+                Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue
             } else {
-                @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+                Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
                     Where-Object { $_.MediaType -match '802.11' -or
-                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' })
-            }
+                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' }
+            })
             foreach ($a in $bounce) { Disable-NetAdapter -Name $a.Name -Confirm:$false -ErrorAction SilentlyContinue }
             Start-Sleep -Seconds 3
             foreach ($a in $bounce) { Enable-NetAdapter  -Name $a.Name -Confirm:$false -ErrorAction SilentlyContinue }
@@ -124,13 +128,13 @@ $Steps = @(
         Enabled          = $true
         ResolveOnWarning = $false
         DetectionScript  = {
-            $wifiAdapters = if ($AdapterName) {
-                @(Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue)
+            $wifiAdapters = @(if ($AdapterName) {
+                Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue
             } else {
-                @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+                Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
                     Where-Object { $_.MediaType -match '802.11' -or
-                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' })
-            }
+                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' }
+            })
             $stale = @()
             foreach ($a in $wifiAdapters) {
                 try {
@@ -158,33 +162,41 @@ $Steps = @(
         Enabled          = $true
         ResolveOnWarning = $false
         DetectionScript  = {
-            $wifiAdapters = if ($AdapterName) {
-                @(Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue)
+            $wifiAdapters = @(if ($AdapterName) {
+                Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue
             } else {
-                @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+                Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
                     Where-Object { $_.MediaType -match '802.11' -or
-                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' })
-            }
-            $offenders = @()
+                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' }
+            })
+            $offenders  = @()
+            $unreadable = @()
             foreach ($a in $wifiAdapters) {
                 try {
                     $pm = Get-NetAdapterPowerManagement -Name $a.Name -ErrorAction Stop
                     if ($pm.AllowComputerToTurnOffDevice -eq 'Enabled') { $offenders += $a.Name }
-                } catch { }
+                } catch {
+                    # Non-elevated callers get "A device attached to the system is not
+                    # functioning." here; an unreadable setting is not a passing one.
+                    $unreadable += "$($a.Name) ($($_.Exception.Message.Trim()))"
+                }
             }
             if ($offenders.Count -gt 0) {
                 return @{ Status = 'Failed'; Message = "'Allow computer to turn off device' is Enabled on: $($offenders -join ', ')." }
             }
+            if ($unreadable.Count -gt 0) {
+                return @{ Status = 'Warning'; Message = "Could not read power management on: $($unreadable -join '; '). Run elevated to check." }
+            }
             return @{ Status = 'Passed'; Message = "'Allow computer to turn off device' is Disabled on all wireless adapters." }
         }
         ResolutionScript = {
-            $wifiAdapters = if ($AdapterName) {
-                @(Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue)
+            $wifiAdapters = @(if ($AdapterName) {
+                Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue
             } else {
-                @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+                Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
                     Where-Object { $_.MediaType -match '802.11' -or
-                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' })
-            }
+                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' }
+            })
             foreach ($a in $wifiAdapters) {
                 Set-NetAdapterPowerManagement -Name $a.Name -AllowComputerToTurnOffDevice Disabled `
                     -ErrorAction SilentlyContinue
@@ -198,33 +210,42 @@ $Steps = @(
         Enabled          = $true
         ResolveOnWarning = $false
         DetectionScript  = {
-            $wifiAdapters = if ($AdapterName) {
-                @(Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue)
+            $wifiAdapters = @(if ($AdapterName) {
+                Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue
             } else {
-                @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+                Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
                     Where-Object { $_.MediaType -match '802.11' -or
-                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' })
-            }
-            $offenders = @()
+                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' }
+            })
+            $offenders  = @()
+            $unreadable = @()
             foreach ($a in $wifiAdapters) {
-                $props = Get-NetAdapterAdvancedProperty -Name $a.Name -ErrorAction SilentlyContinue |
-                    Where-Object { $_.DisplayName -match 'Power Saving Mode' -and
-                                   $_.DisplayValue -notmatch 'Off|Disabled|Maximum Performance' }
-                foreach ($p in $props) { $offenders += "$($a.Name): '$($p.DisplayName)' = $($p.DisplayValue)" }
+                try {
+                    $props = Get-NetAdapterAdvancedProperty -Name $a.Name -ErrorAction Stop |
+                        Where-Object { $_.DisplayName -match 'Power Saving Mode' -and
+                                       $_.DisplayValue -notmatch 'Off|Disabled|Maximum Performance' }
+                    foreach ($p in $props) { $offenders += "$($a.Name): '$($p.DisplayName)' = $($p.DisplayValue)" }
+                } catch {
+                    # A query error is not "property not exposed by driver"; report it.
+                    $unreadable += "$($a.Name) ($($_.Exception.Message.Trim()))"
+                }
             }
             if ($offenders.Count -gt 0) {
                 return @{ Status = 'Failed'; Message = "Power saving not at maximum performance: $($offenders -join '; ')." }
             }
+            if ($unreadable.Count -gt 0) {
+                return @{ Status = 'Warning'; Message = "Could not read advanced properties on: $($unreadable -join '; '). Run elevated to check." }
+            }
             return @{ Status = 'Passed'; Message = 'Adapter power saving properties are at maximum performance (or not exposed by driver).' }
         }
         ResolutionScript = {
-            $wifiAdapters = if ($AdapterName) {
-                @(Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue)
+            $wifiAdapters = @(if ($AdapterName) {
+                Get-NetAdapter -Name $AdapterName -ErrorAction SilentlyContinue
             } else {
-                @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+                Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
                     Where-Object { $_.MediaType -match '802.11' -or
-                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' })
-            }
+                                   $_.InterfaceDescription -match 'Wireless|Wi-?Fi|WLAN' }
+            })
             foreach ($a in $wifiAdapters) {
                 $props = Get-NetAdapterAdvancedProperty -Name $a.Name -ErrorAction SilentlyContinue |
                     Where-Object { $_.DisplayName -match 'Power Saving Mode' -and
@@ -335,10 +356,10 @@ Write-Output '------------------------------------------------------------------
 
 foreach ($step in $activeSteps) {
 
-    $status     = 'Failed'
-    $message    = 'Detection script did not return a result.'
-    $remediated = $false
-    $remError   = ''
+    $status       = 'Failed'
+    $message      = 'Detection script did not return a result.'
+    $remediated   = $false
+    $remError     = ''
 
     # -- Detection ------------------------------------------------------------
     try {
@@ -350,6 +371,11 @@ foreach ($step in $activeSteps) {
         $message = "Detection exception: $($_.Exception.Message)"
     }
 
+    # FinalStatus/FinalMessage are what the step looks like after remediation; they
+    # equal Status/Message when no remediation ran.
+    $finalStatus  = $status
+    $finalMessage = $message
+
     # -- Remediation ----------------------------------------------------------
     $shouldRemediate = ($status -eq 'Failed') -or
                        ($status -eq 'Warning' -and $step.ResolveOnWarning)
@@ -358,6 +384,17 @@ foreach ($step in $activeSteps) {
         try {
             & $step.ResolutionScript | Out-Null
             $remediated = $true
+            # Re-run detection so the result reflects what the remediation actually
+            # changed. Resolution scripts use SilentlyContinue, so "ran" alone proves
+            # nothing (a non-elevated run changes nothing and used to report success).
+            try {
+                $recheck      = & $step.DetectionScript
+                $finalStatus  = $recheck.Status
+                $finalMessage = $recheck.Message
+            } catch {
+                $finalStatus  = 'Failed'
+                $finalMessage = "Re-check exception: $($_.Exception.Message)"
+            }
         } catch {
             $remError = $_.Exception.Message
         }
@@ -370,36 +407,48 @@ foreach ($step in $activeSteps) {
         'Failed'  { 'Red'    }
         default   { 'White'  }
     }
-    $remNote = if ($remediated)    { '  -> Remediation ran' }
+    $remNote = if ($remediated) {
+                   $note = "  -> Remediated (now: $finalStatus)"
+                   if ($finalStatus -ne 'Passed') { $note += "`r`n            $finalMessage" }
+                   $note
+               }
                elseif ($remError)  { "  -> Remediation ERROR: $remError" }
                else                { '' }
 
     Write-Output "`r`n  [$($status.PadRight(7))] $($step.Name): $message$remNote"
 
     $results.Add([PSCustomObject]@{
-        Order      = $step.Order
-        Name       = $step.Name
-        Status     = $status
-        Message    = $message
-        Remediated = $remediated
-        RemError   = $remError
+        Order        = $step.Order
+        Name         = $step.Name
+        Status       = $status
+        Message      = $message
+        Remediated   = $remediated
+        RemError     = $remError
+        FinalStatus  = $finalStatus
+        FinalMessage = $finalMessage
     })
 }
 
 # -- Summary -------------------------------------------------------------------
 # @() guards: in Windows PowerShell 5.1 a single PSCustomObject has no .Count, so a
 # lone Failed step would otherwise yield $null here and the script would exit 0.
-$passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
-$warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
-$remCount = @($results | Where-Object { $_.Remediated }).Count
+# Passed/Warnings/Failed describe what detection found; Fixed and Still failing
+# describe where the machine stands after remediation, and only the latter drives
+# the exit code.
+$passed       = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
+$warnings     = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
+$failed       = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+$remCount     = @($results | Where-Object { $_.Remediated }).Count
+$fixed        = @($results | Where-Object { $_.Remediated -and $_.FinalStatus -eq 'Passed' }).Count
+$stillFailing = @($results | Where-Object { $_.FinalStatus -eq 'Failed' }).Count
 
 Write-Output "`r`n-------------------------------------------------------------------"
 Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "  Fixed: $fixed  |  Still failing: $stillFailing"
 Write-Output "`r`n-------------------------------------------------------------------"
 Write-Output ''
 
-if ($failed -gt 0) { exit 1 }
+if ($stillFailing -gt 0) { exit 1 }
 exit 0
 }
 
