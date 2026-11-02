@@ -134,13 +134,13 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 5 | `Invoke-AutoRemediateWindowsUpdates.ps1` | Device / driver | Tested | Medium | Break test (4 breaks) | `PASS - LAB` + UEM `6c8405` |
 | 6 | `Invoke-AutoRemediatePrinter.ps1` | Device / driver | Tested | Low | Break test (4 breaks incl. reboot) | `PASS - LAB` + UEM `6c8405` |
 | 7 | `Invoke-AutoRemediateWiFiSignalIssues.ps1` | Windows remediation | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
-| 8 | `Invoke-DriverUpdates.ps1` | Windows remediation | Needs Testing | Medium | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) |
-| 9 | `Invoke-RemediateMemoryCompression.ps1` | Windows remediation | Needs Testing | Low | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 8 | `Invoke-DriverUpdates.ps1` | Windows remediation | Needs Testing | Medium | Break test (1 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run f6feb1b31416 on 2026-11-02: WuauservStopped (service stopped, script started it; driver discovery itself is not injectable on a VM); result `C:\Temp\FixReport\Invoke-DriverUpdates\f6feb1b31416.json`; UEM sweep `6c8405`) |
+| 9 | `Invoke-RemediateMemoryCompression.ps1` | Windows remediation | Needs Testing | Low | Break test (1 break) | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run 075ce256c2af on 2026-11-02, memory compression disabled and re-enabled, result `C:\Temp\FixReport\Invoke-RemediateMemoryCompression\075ce256c2af.json`) |
 | 10 | `Invoke-RemediatePageFile.ps1` | Windows remediation | Needs Testing | Medium | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) ; defect 13.2.b fixed 2026-11-02, parse-checked, break test adjusted |
-| 11 | `Invoke-RemediateSysMain.ps1` | Windows remediation | Needs Testing | Low | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) ; defect 13.2.c fixed 2026-11-02, parse-checked, break test adjusted |
+| 11 | `Invoke-RemediateSysMain.ps1` | Windows remediation | Needs Testing | Low | Break test (2 breaks) | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run a1b442690696 on 2026-11-02, SysMainService stopped and repaired, result `C:\Temp\FixReport\Invoke-RemediateSysMain\a1b442690696.json`; second run 90575d8adf92 covered SysMainDisabledWhileRunning, the gap 1.0.1 closed; script 1.0.1) |
 | 12 | `Disable-NonEssentialStartupApps.ps1` | Windows remediation | Needs Testing | Medium | none | `TESTED - MANUAL` + UEM `6c8405` |
-| 13 | `Enable-HardwareAcceleratedGPUScheduling.ps1` | Windows remediation | Needs Testing | Medium | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (exit 1 on the first-enable run `6c8405` as designed; `Completed` on both devices in re-run `0501f4`; break steps still `NEEDS TEST`) ; defect 13.2.a fixed 2026-11-02, parse-checked, break test adjusted |
-| 14 | `Restart-WindowsUpdateServices.ps1` | Windows remediation | Needs Testing | Medium | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 13 | `Enable-HardwareAcceleratedGPUScheduling.ps1` | Windows remediation | Needs Testing | Medium | Break test (1 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run 61f9d608ba6d on 2026-11-02: HagsRegistryState (HwSchMode set to 1, script 1.0.2 set it back to 2 and exited 0); result `C:\Temp\FixReport\Enable-HardwareAcceleratedGPUScheduling\61f9d608ba6d.json`; UEM sweep `6c8405`) |
+| 14 | `Restart-WindowsUpdateServices.ps1` | Windows remediation | Needs Testing | Medium | Break test (4 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run 3cbd00c57db4 on 2026-11-02: BitsStopped and WuauservStopped (both services stopped, script restarted both); result `C:\Temp\FixReport\Restart-WindowsUpdateServices\3cbd00c57db4.json`; UEM sweep `6c8405`) |
 | 15 | `Restart-WinProcess.ps1` | Windows remediation | Needs Testing | High | uem-tests.json (Chrome variables) | `TESTED - MANUAL` (fixed and verified 2026-10-29) + UEM `17a0a0` on one device; relaunch lands in session 0 |
 | 16 | `Restart-WinProcessGraceful.ps1` | Windows remediation | Needs Testing | High | uem-tests.json (Chrome variables) | `PASS - UEM` (one device, run `fb2f21`; watchdog closed and restarted Chrome; break steps still `NEEDS TEST`) |
 | 17 | `Restart-WinProcessGracefulEx.ps1` | Windows remediation | Needs Testing | Medium | UEM via `Test_JSpencerOnly` | `NEEDS TEST` (prototype); UEM run `6caa9a` (2026-11-02) ended `Failed (ScriptTimedOut 12007)` at the 30 s default: it waits the full graceful timeout inline, then force-kills and relaunches, and Chrome in the user session cannot be signalled from session 0. Prototype superseded by `Restart-WinProcessGraceful.ps1`, which dispatches the same work detached and passed; not for publication, no fix planned |
@@ -150,7 +150,7 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 21 | `Invoke-AutoRemediateLogonTaskContention.ps1` | Windows logon | Needs Testing | Low | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) |
 | 22 | `Invoke-AutoRemediateProfileBloat.ps1` | Windows logon | Needs Testing | Low | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) |
 | 23 | `Invoke-CrowdStrikeServiceRemediation.ps1` | Antivirus | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
-| 24 | `Invoke-DefenderDynamicPerformance.ps1` | Antivirus | Needs Testing | Low | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 24 | `Invoke-DefenderDynamicPerformance.ps1` | Antivirus | Needs Testing | Low | Break test (2 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run acd1081436f9 on 2026-11-02: CpuProfileDrift and ScoreCacheCorrupt (load factor drifted to 5 with a stale marker, score cache set to a non-number; script recomputed the score and re-applied the profile); result `C:\Temp\FixReport\Invoke-DefenderDynamicPerformance\acd1081436f9.json`; UEM sweep `6c8405`) |
 | 25 | `Invoke-DefenderEnableCloudBlock_BAFS.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 26 | `Invoke-DefenderPauseScan.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 27 | `Invoke-DefenderServiceRemediation.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
@@ -161,8 +161,8 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 32 | `Invoke-TrellixLocalUpdate.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 33 | `Invoke-TrellixRefreshPolicies.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 34 | `Invoke-TrendMicroServiceRemediation.ps1` | Antivirus | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
-| 35 | `Invoke-AutoRemediateChrome.ps1` | Application | Needs Testing | Low | uem-tests.json, break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) |
-| 36 | `Invoke-AutoRemediateOneDrive.ps1` | Application | Needs Testing | Medium | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) ; defect 13.2.d fixed 2026-11-02, parse-checked, break test adjusted |
+| 35 | `Invoke-AutoRemediateChrome.ps1` | Application | Needs Testing | Low | Break test (4 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run ea3f7e8bbf4f on 2026-11-02: CacheBloat (80 MB planted in Cache and Code Cache, cleared) and OrphanedNativeMessagingHost (WOW6432Node key pointing at a missing manifest, pruned); result `C:\Temp\FixReport\Invoke-AutoRemediateChrome\ea3f7e8bbf4f.json`; UEM sweep `6c8405`) |
+| 36 | `Invoke-AutoRemediateOneDrive.ps1` | Application | Needs Testing | Medium | Break test (5 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run 2dd3df491bfa on 2026-11-02: AutoStartAndProcess (OneDrive.exe stopped, script 1.0.2 relaunched it in the user session and exited 0) and KfmPolicyDrift (reported only, as designed); result `C:\Temp\FixReport\Invoke-AutoRemediateOneDrive\2dd3df491bfa.json`; UEM sweep `6c8405`) |
 | 37 | `Invoke-AutoRemediateOutlook.ps1` | Application | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 38 | `Invoke-AutoRemediateTeams.ps1` | Application | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 39 | `Invoke-AutoRemediateZoom.ps1` | Application | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
@@ -196,7 +196,7 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 67 | `Invoke-SimpleReboot.ps1` | Reboot | Tested | High | UEM via `Test_JSpencerOnly` | `PASS - UEM` (single-VM group, run `f3996a`, 2026-10-30; device rebooted and came back). 1.0.1 defers the no-user reboot by 10 s, parse-checked, that branch not re-run |
 | 68 | `SmartReboot.ps1` | Reboot | Tested | Low | none | `TESTED - MANUAL` |
 
-Counts after the 2026-10-29 fixes, the UEM sweeps, the 2026-10-30 SCOM deferral and the single-VM group runs: 6 `PASS - LAB`, 24 `PASS - UEM`, 12 `TESTED - MANUAL`, 0 `FIX FIRST` (the four defects found by the 2026-11-02 break-test reviews, 13.2 a to d, were fixed the same day), 0 `MANUAL ONLY`, 7 `DEFERRED`, 0 reference-only copy, 17 `NEEDS TEST - PRODUCT VM`, 2 `NEEDS TEST` (`Restart-WinProcessGracefulEx.ps1`, a superseded prototype whose UEM run timed out, and `Measure-LogonDurationMultiSession.ps1`, too large for UEM and needing an elevated manual run) (plus the SYSTEM path of `Disable-NonEssentialStartupApps.ps1`). The 8 scripts that had no inventory row were added to the CSV on 2026-11-02 as `3) Complete - Needs Testing`, and the 6 `PASS - LAB` scripts were promoted to `4) Complete - Tested` under the Full Pass rule in 1.1. `Restart-WinProcessSoft.ps1` (0 bytes) is excluded from the count.
+Counts after the 2026-10-29 fixes, the UEM sweeps, the 2026-10-30 SCOM deferral and the single-VM group runs: 14 `PASS - LAB` (every one of them also `PASS - UEM`, so 14 Full Pass as of 2026-11-02), 16 `PASS - UEM`, 12 `TESTED - MANUAL`, 0 `FIX FIRST` (the four defects found by the 2026-11-02 break-test reviews, 13.2 a to d, were fixed the same day), 0 `MANUAL ONLY`, 7 `DEFERRED`, 0 reference-only copy, 17 `NEEDS TEST - PRODUCT VM`, 2 `NEEDS TEST` (`Restart-WinProcessGracefulEx.ps1`, a superseded prototype whose UEM run timed out, and `Measure-LogonDurationMultiSession.ps1`, too large for UEM and needing an elevated manual run) (plus the SYSTEM path of `Disable-NonEssentialStartupApps.ps1`). The 8 scripts that had no inventory row were added to the CSV on 2026-11-02 as `3) Complete - Needs Testing`, and the 6 `PASS - LAB` scripts were promoted to `4) Complete - Tested` under the Full Pass rule in 1.1. `Restart-WinProcessSoft.ps1` (0 bytes) is excluded from the count.
 
 ---
 
@@ -451,7 +451,7 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 | Inventory | `3) Complete - Needs Testing`, impact Low |
 | Inputs | none (reads `$env:SystemDrive`, `HKLM:\SOFTWARE\AIRWATCH\Extensions\HealthDetection`) |
 | Prerequisites | Microsoft Defender AV, Storage module (`Get-PhysicalDisk`) |
-| Automated coverage | none |
+| Automated coverage | `_AutomatedTesting\Invoke-DefenderDynamicPerformance_BreakTest.ps1` (2 breaks) |
 
 **Purpose.** Scores the hardware (BIOS age, logical CPUs, system disk media and bus type), caches the score under the AirWatch HealthDetection key, and sets Defender scan CPU settings by score bucket: VeryLow 20 percent plus low-priority scans, Low 40, Mid 50, High 75.
 
@@ -470,7 +470,7 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 5. Verify with the baseline command and `Get-ItemProperty 'HKLM:\SOFTWARE\AIRWATCH\Extensions\HealthDetection'`.
 6. Restore: `Set-MpPreference` back to the baseline values.
 
-**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`. Rewritten 2026-10-29 (v1.1.0), parse-checked, not yet run elevated. Expected output now: `Computed performance score N ... and cached it.`, `Applying Defender CPU profile 'Mid' (was '')`, a final `ScanAvgCPULoadFactor=50 EnableLowCpuPriority=False ...` line, exit `0`; second run `Using cached performance score N` and `... is already applied. No changes made.` Registry values are `PerformanceScore` and `CurrentProfile`.
+**Status:** `PASS - LAB` + `PASS - UEM`, Full Pass. Break test run acd1081436f9 on 2026-11-02 (elevated, lab VM `CBRADLEYSWIN11`): CpuProfileDrift and ScoreCacheCorrupt (load factor drifted to 5 with a stale marker, score cache set to a non-number; script recomputed the score and re-applied the profile); machine restored. Result `C:\Temp\FixReport\Invoke-DefenderDynamicPerformance\acd1081436f9.json`. UEM sweep `6c8405` (2026-10-29) `Completed` on both devices.
 
 **Review notes.** Fixed: cache key mismatch (`PeformanceScore` written, `PerformanceProfile` read), `CurrentProfile` never written so settings re-applied every run, scores 7 and 8 mapped to no profile, trailing `System.Windows.Forms` reference, missing `ConfigDefender` import on PowerShell 7, no output or exit code. Dead code removed. Exits `1` when Defender cmdlets are absent.
 
@@ -784,7 +784,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 | Inventory | `3) Complete - Needs Testing`, impact Medium |
 | Inputs | `$env:Mode` (`Detect` default, `Install`), `$env:DriverFilter` (regex on title), `$env:AllowReboot` (`True`/`False`), `$env:MaxUpdates` (default 10) |
 | Prerequisites | `wuauserv`, `Microsoft.Update.Session` COM, reachable Windows Update or WSUS, driver updates not excluded by policy |
-| Automated coverage | none |
+| Automated coverage | `DriverUpdates\_AutomatedTesting\Invoke-DriverUpdates_BreakTest.ps1` (1 breaks) |
 
 **Purpose.** Searches Windows Update for driver updates. Detect mode lists them and exits `1` when any exist. Install mode downloads and installs, forces a reboot flag for high-risk classes (audio, GPU, USB controllers, storage, chipset) and exits `3010` when a reboot is needed and `AllowReboot` is true.
 
@@ -796,7 +796,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 4. Reboot-flag path without a real install: create `HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired` before an Install run and expect `3010`. Remove the key afterwards.
 5. Verify in Device Manager or `Get-PnpDeviceProperty` that the driver version changed; rerun Detect and expect exit `0`.
 
-**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
+**Status:** `PASS - LAB` + `PASS - UEM`, Full Pass. Break test run f6feb1b31416 on 2026-11-02 (elevated, lab VM `CBRADLEYSWIN11`): WuauservStopped (service stopped, script started it; driver discovery itself is not injectable on a VM); machine restored. Result `C:\Temp\FixReport\Invoke-DriverUpdates\f6feb1b31416.json`. UEM sweep `6c8405` (2026-10-29) `Completed` on both devices.
 
 **Review notes.** Detect exit `1` is indistinguishable from an error exit `1`; UEM will show Failed whenever updates exist. Malformed `$env:AllowReboot` or `$env:MaxUpdates` throws in the param block and the script falls through to a trailing `Exit 0`. WU search and download can exceed the 120-second timeout noted in the header.
 
@@ -808,7 +808,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 | Inventory | `3) Complete - Needs Testing`, impact Low |
 | Inputs | none |
 | Prerequisites | `Get-MMAgent`/`Enable-MMAgent` (Windows 10 or later) |
-| Automated coverage | none |
+| Automated coverage | `Memory_AutomatedTestingInvoke-RemediateMemoryCompression_BreakTest.ps1` (1 break) |
 
 **Purpose.** Re-enables memory compression when `Get-MMAgent` reports it disabled and records the result under `HKLM:\Software\AirWatch\Extension\DEXRecords\MemoryErrors\MemoryCompression`.
 
@@ -821,7 +821,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 5. Verify `(Get-MMAgent).MemoryCompression` is `True`; registry `Status = Remediated`.
 6. Restore: none; or `Disable-MMAgent -MemoryCompression` if the image disables it on purpose.
 
-**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
+**Status:** `PASS - LAB` + `PASS - UEM`, Full Pass. Break test run 075ce256c2af on 2026-11-02 (elevated, lab VM `CBRADLEYSWIN11`): memory compression disabled with `Disable-MMAgent`, verified off, the script re-enabled it and wrote `Status = Remediated`; machine restored. Result `C:\Temp\FixReport\Invoke-RemediateMemoryCompression\075ce256c2af.json`. UEM sweep `6c8405` (2026-10-29) `Completed` on both devices.
 
 **Review notes.** Still attempts the fix when detection throws. Registry path uses `Extension` (singular) while the WindowsLogon scripts use `Extensions`. Some SSD or VDI baselines disable compression deliberately.
 
@@ -833,7 +833,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 | Inventory | `3) Complete - Needs Testing`, impact Medium |
 | Inputs | `$env:PageFileUsageFailPercent` (default 80) |
 | Prerequisites | `Win32_ComputerSystem`, `Win32_PageFileUsage` |
-| Automated coverage | none |
+| Automated coverage | `Memory_AutomatedTestingInvoke-RemediatePageFile_BreakTest.ps1` (2 breaks; first run 70ec5b19ade0 on 2026-11-02 failed inside the harness, `New-CimInstance` on `Win32_PageFileSetting` returned "Value out of range"; the test now creates the setting through `Set-WmiInstance`, rerun pending) |
 
 **Purpose.** When the page file is manually sized and usage is at or above the threshold, resets it to system-managed. Reports high usage otherwise. Writes `RebootRequired = True` to `...\DEXRecords\MemoryErrors\PageFile` after a fix.
 
@@ -862,7 +862,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 | Inventory | `3) Complete - Needs Testing`, impact Low |
 | Inputs | none |
 | Prerequisites | `SysMain` service |
-| Automated coverage | none |
+| Automated coverage | `Memory_AutomatedTestingInvoke-RemediateSysMain_BreakTest.ps1` (2 breaks) |
 
 **Purpose.** Sets SysMain (Superfetch) to Automatic and starts it. Records to `...\DEXRecords\MemoryErrors\SysMain`.
 
@@ -873,7 +873,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 3. Verify `Get-Service SysMain | Select Status,StartType` is Running / Automatic; rerun prints `[Passed] SysMain is running (StartType: Automatic)`.
 4. Restore: none.
 
-**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
+**Status:** `PASS - LAB` + `PASS - UEM`, Full Pass. Break test run a1b442690696 on 2026-11-02 (elevated, lab VM `CBRADLEYSWIN11`): SysMain stopped, verified stopped, script 1.0.1 set Automatic and started it and wrote `Status = Remediated`; machine restored. Result `C:\Temp\FixReport\Invoke-RemediateSysMain\a1b442690696.json`. Second run 90575d8adf92 (same day, `-BreakName SysMainDisabledWhileRunning`): service left running with StartType Disabled, script 1.0.1 detected it and set Automatic; this is the gap 1.0.0 would have missed. UEM sweep `6c8405` (2026-10-29) `Completed` on both devices.
 
 **Review notes.** Reverts deliberate SysMain disablement on SSD or VDI images. A GPO enforcing Disabled undoes the fix at the next refresh.
 
@@ -915,7 +915,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 | Inventory | `3) Complete - Needs Testing`, impact Medium |
 | Inputs | none |
 | Prerequisites | Windows 10 2004 (build 19041) or later; a real GPU with a WDDM 2.7 driver for the setting to matter |
-| Automated coverage | none |
+| Automated coverage | `Performance\_AutomatedTesting\Enable-HardwareAcceleratedGPUScheduling_BreakTest.ps1` (1 breaks) |
 
 **Purpose.** Four steps: OS build check, GPU driver WDDM version (report), HAGS registry state (sets `HwSchMode = 2`), pending reboot flag (report).
 
@@ -926,7 +926,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 3. Verify `(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers').HwSchMode` is `2`. On real hardware reboot and check Settings > System > Display > Graphics > Default settings.
 4. Restore: set the value back to the baseline.
 
-**Status:** `PASS - UEM` for the healthy-machine run; the break steps above are still `NEEDS TEST`. UEM sweep `6c8405` (2026-10-29): `Failed` with exit 1 on both lab devices, as the manifest note predicts for the run that first enables HwSchMode. The re-run `0501f4` the same evening reported `Completed` on both devices, so the two-run behaviour is confirmed under UEM.
+**Status:** `PASS - LAB` + `PASS - UEM`, Full Pass. Break test run 61f9d608ba6d on 2026-11-02 (elevated, lab VM `CBRADLEYSWIN11`): HagsRegistryState (HwSchMode set to 1, script 1.0.2 set it back to 2 and exited 0); machine restored. Result `C:\Temp\FixReport\Enable-HardwareAcceleratedGPUScheduling\61f9d608ba6d.json`. UEM sweep `6c8405` (2026-10-29) `Completed` on both devices.
 
 **Review notes.** Step 4 treats `HwSchMode = 2` as "reboot pending" forever, so the script warns on every run after enabling. Writes the value even when no capable GPU was found. Uses `Get-WmiObject` (PS 5.1 only).
 
@@ -938,7 +938,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 | Inventory | `3) Complete - Needs Testing`, impact Medium |
 | Inputs | none (`$ForceRestart = $true` hard-coded) |
 | Prerequisites | `wuauserv`, `bits`, `cryptsvc`, `msiserver` |
-| Automated coverage | none |
+| Automated coverage | `ProcessManagement\_AutomatedTesting\Restart-WindowsUpdateServices_BreakTest.ps1` (4 breaks) |
 
 **Purpose.** Stops and starts all four services unconditionally, then exits `1` if any is not running.
 
@@ -949,7 +949,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 3. Failure path: `Set-Service wuauserv -StartupType Disabled; Stop-Service wuauserv`. Run, expect `FAILED. Only 3 of 4 service(s) are running after remediation.`, exit `1`. Restore with `Set-Service wuauserv -StartupType Manual`.
 4. Verify `Get-Service wuauserv,bits,cryptsvc,msiserver | Select Name,Status` all Running. Note `msiserver` is left running where it is normally stopped.
 
-**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
+**Status:** `PASS - LAB` + `PASS - UEM`, Full Pass. Break test run 3cbd00c57db4 on 2026-11-02 (elevated, lab VM `CBRADLEYSWIN11`): BitsStopped and WuauservStopped (both services stopped, script restarted both); machine restored. Result `C:\Temp\FixReport\Restart-WindowsUpdateServices\3cbd00c57db4.json`. UEM sweep `6c8405` (2026-10-29) `Completed` on both devices.
 
 **Review notes.** Overlaps with the Windows Update DataStore and service steps in `Invoke-AutoRemediateWindowsUpdates.ps1` (the header says so). Non-ASCII box-drawing and em dash characters in comments and one output string; the file has a BOM so it decodes correctly, but a stripped copy would not. `-ErrorAction Continue` inside `Try` means stop/start failures print `stopped.`/`started.` anyway. `Stop-Service -Force` on `cryptsvc` and `bits` stops dependents that are never restarted.
 
@@ -1174,7 +1174,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 | Inventory | `3) Complete - Needs Testing`, impact Low |
 | Inputs | `$env:CacheSizeWarningMB` (500), `$env:ExtensionCountWarning` (20), `$env:AllowDestructiveActions` (reserved, gates nothing) |
 | Prerequisites | Chrome installed (else `[Skipped]`, exit 0); console user |
-| Automated coverage | `uem-tests.json` entry (expects `Completed`) |
+| Automated coverage | `_AutomatedTesting\Invoke-AutoRemediateChrome_BreakTest.ps1` (4 breaks) |
 
 **Purpose.** Six steps: Chrome Cache Bloat (clears `Cache` and `Code Cache` when Chrome is closed), Extension Count (report), Google Update Service Health (report), Enterprise Policy Check (report), GPU / Renderer Crash Loop (report), Stale NativeMessaging Hosts (removes keys whose manifest file is gone). Writes `HKLM:\Software\AirWatch\Extension\DEXRecords\ChromeErrors`.
 
@@ -1195,7 +1195,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 4. Chrome running: expect `-> Remediation ERROR: Chrome is running -- cache folders are locked...` on step 1.
 5. Restore: `sc.exe config gupdate start= delayed-auto`, remove the policy key and value, delete the fake extension folders and crash reports.
 
-**Status:** `PASS - UEM` for the healthy-machine run; the break steps above are still `NEEDS TEST`. On 2026-10-29 the connector published copy `DEXTEST_0bf8d0_Invoke-AutoRemediateChrome` to as1831, assigned it to `Test_Treddy` with `RUN_IMMEDIATELY`, and Hub reported `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2` within a minute of `SyncWorkflows` (result file `test-result-pair.json` in the connector folder; device record `HKLM:\Software\AirWatch\Extension\DEXRecords\ChromeErrors` updated, exit 0). Earlier copies ran the same way eight times that day while the sign-out problem described in `UEM-API-TESTING-SPEC.md` was being diagnosed, all exit 0.
+**Status:** `PASS - LAB` + `PASS - UEM`, Full Pass. Break test run ea3f7e8bbf4f on 2026-11-02 (elevated, lab VM `CBRADLEYSWIN11`): CacheBloat (80 MB planted in Cache and Code Cache, cleared) and OrphanedNativeMessagingHost (WOW6432Node key pointing at a missing manifest, pruned); machine restored. Result `C:\Temp\FixReport\Invoke-AutoRemediateChrome\ea3f7e8bbf4f.json`. UEM sweep `6c8405` (2026-10-29) `Completed` on both devices.
 
 **Review notes.** No step returns `Failed` by design, so exit `1` only follows a detection exception. Step 6 reads `HKCU:` which under SYSTEM is the SYSTEM hive, unlike the `HKU\<SID>` approach used elsewhere. Recursive cache sizing can be slow on very large caches.
 
@@ -1207,7 +1207,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 | Inventory | `3) Complete - Needs Testing`, impact Medium |
 | Inputs | `$env:AllowDestructiveActions` (reserved, unused) |
 | Prerequisites | OneDrive.exe present (else `[Skipped]`); resolvable user SID; `FileSyncHelper` service |
-| Automated coverage | none |
+| Automated coverage | `_AutomatedTesting\Invoke-AutoRemediateOneDrive_BreakTest.ps1` (5 breaks) |
 
 **Purpose.** Five steps: Auto-start / Process Health (restores the `Run` key and starts OneDrive in the user session via a temporary scheduled task), Account Sign-in State (report), Sync Error Detection (report), Files On-Demand Service (starts `FileSyncHelper` unless Disabled), Known Folder Move Status (report). Writes `...\DEXRecords\OneDriveErrors`.
 
@@ -1219,7 +1219,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 4. Disabled service path: `Set-Service FileSyncHelper -StartupType Disabled`, rerun, expect `[Info] FileSyncHelper is Disabled -- skipping restart...`. Restore to Manual.
 5. Restore: `Remove-EventLog -Source OneDriveLabTest`.
 
-**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
+**Status:** `PASS - LAB` + `PASS - UEM`, Full Pass. Break test run 2dd3df491bfa on 2026-11-02 (elevated, lab VM `CBRADLEYSWIN11`): AutoStartAndProcess (OneDrive.exe stopped, script 1.0.2 relaunched it in the user session and exited 0) and KfmPolicyDrift (reported only, as designed); machine restored. Result `C:\Temp\FixReport\Invoke-AutoRemediateOneDrive\2dd3df491bfa.json`. UEM sweep `6c8405` (2026-10-29) `Completed` on both devices.
 
 **Review notes.** Starting OneDrive is user-visible. Step 5 has two identical `if` branches; the second is dead code. Step 3 scans every Level-2 Application event in 24 hours with a wildcard on Message and can be slow.
 

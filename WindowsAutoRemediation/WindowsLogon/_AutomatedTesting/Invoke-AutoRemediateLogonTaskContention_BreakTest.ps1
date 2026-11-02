@@ -195,12 +195,46 @@ function Get-DexLogonTriggers {
     @($Task.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' })
 }
 
+function Get-DexAllTasks {
+    <#
+        Every task outside \Microsoft\, read one at a time. A bare Get-ScheduledTask
+        enumerates everything in one CIM call and, when one task cannot be read, the
+        whole call can come back empty (run 4b1fd3dc15d5 on 2026-11-02 captured zero
+        qualifying tasks on a host that has one, and did not see its own ten fixtures).
+        The Schedule.Service COM API lists folders and names without that failure
+        mode; each task is then fetched individually and unreadable ones are skipped.
+    #>
+    $out = New-Object System.Collections.ArrayList
+    try {
+        $svc = New-Object -ComObject 'Schedule.Service'
+        $svc.Connect()
+        $queue = New-Object System.Collections.Queue
+        $queue.Enqueue($svc.GetFolder('\'))
+        while ($queue.Count -gt 0) {
+            $folder = $queue.Dequeue()
+            if ($folder.Path -like '\Microsoft*') { continue }
+            foreach ($sub in @($folder.GetFolders(0))) { $queue.Enqueue($sub) }
+            foreach ($t in @($folder.GetTasks(1))) {
+                $path = if ($folder.Path -eq '\') { '\' } else { $folder.Path.TrimEnd('\') + '\' }
+                try {
+                    $task = Get-ScheduledTask -TaskPath $path -TaskName $t.Name -ErrorAction Stop
+                    if ($task) { [void]$out.Add($task) }
+                } catch { }
+            }
+        }
+    } catch {
+        # COM unavailable: fall back to the single call, which is all the script has.
+        foreach ($task in @(Get-ScheduledTask -ErrorAction SilentlyContinue)) { [void]$out.Add($task) }
+    }
+    @($out)
+}
+
 function Get-DexQualifyingLogonTasks {
     # Same filter as the script under test: enabled, outside \Microsoft\, at least one
     # AtLogOn trigger. Used to decide how many volume fixtures are needed and to prove
     # the volume break actually crossed the warn threshold.
     @(
-        Get-ScheduledTask -ErrorAction SilentlyContinue |
+        Get-DexAllTasks |
             Where-Object {
                 $_.State -ne 'Disabled' -and
                 $_.TaskPath -notlike '\Microsoft\*' -and
@@ -334,8 +368,10 @@ $BreakCatalog = @(
             }
         }
         Verify   = {
-            ((Get-DexFixtureVolumeTasks).Count -gt 0) -and
-            ((Get-DexQualifyingLogonTasks).Count -ge $ScriptVolumeWarnCount)
+            $fixtures   = @(Get-DexFixtureVolumeTasks)
+            $qualifying = @(Get-DexQualifyingLogonTasks)
+            Write-DexStep -Status 'Info' -Name 'Verify AtLogOnTaskVolume' -Message "fixtures=$($fixtures.Count) qualifying=$($qualifying.Count) threshold=$ScriptVolumeWarnCount; qualifying: $(($qualifying | ForEach-Object { "$($_.TaskPath)$($_.TaskName)" }) -join ', ')"
+            ($fixtures.Count -gt 0) -and ($qualifying.Count -ge $ScriptVolumeWarnCount)
         }
         # Correct behaviour is to report and leave alone: every volume fixture must
         # still be registered, enabled and carrying its original delay, the host must
@@ -587,6 +623,7 @@ try {
 
 } catch {
     Write-DexStep -Status 'Failed' -Name 'Harness' -Message $_.Exception.Message
+    $state.HarnessError = "$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
     if ($state.Overall -eq 'Incomplete') { $state.Overall = 'Failed' }
     $exitCode = 1
 }

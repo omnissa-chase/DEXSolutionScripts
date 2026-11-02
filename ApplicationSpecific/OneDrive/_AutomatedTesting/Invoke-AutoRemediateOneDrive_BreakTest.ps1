@@ -755,6 +755,7 @@ try {
 
 } catch {
     Write-DexStep -Status 'Failed' -Name 'Harness' -Message $_.Exception.Message
+    $state.HarnessError = "$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
     if ($state.Overall -eq 'Incomplete') { $state.Overall = 'Failed' }
     $exitCode = 1
 }

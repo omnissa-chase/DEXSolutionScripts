@@ -323,6 +323,7 @@ function Write-DexTestResult {
         Remediation     = $State['Remediation']
         Validation      = $State['Validation']
         Overall         = $State['Overall']
+        HarnessError    = $State['HarnessError']   # set by a break test's catch block; null on a clean run
     }
 
     $result | ConvertTo-Json -Depth 8 |

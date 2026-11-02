@@ -351,8 +351,11 @@ function Set-FixtureProfileBackdate {
     param([Parameter(Mandatory = $true)][string]$Sid, [Parameter(Mandatory = $true)][string]$Path)
     $then = (Get-Date).AddDays(-$FixtureBackdateDays)
     $ft   = $then.ToFileTime()
-    $high = [BitConverter]::ToInt32([BitConverter]::GetBytes([uint32](($ft -shr 32) -band 0xFFFFFFFF)), 0)
-    $low  = [BitConverter]::ToInt32([BitConverter]::GetBytes([uint32]($ft -band 0xFFFFFFFF)), 0)
+    # 0xFFFFFFFF is an [int32] -1 in Windows PowerShell 5.1, so "-band 0xFFFFFFFF" kept all 64 bits and
+    # the [uint32] cast of the low word threw (run 0c7bf67c2b55, 2026-11-02). Mask with an explicit int64.
+    $mask = [int64]4294967295
+    $high = [BitConverter]::ToInt32([BitConverter]::GetBytes([uint32](($ft -shr 32) -band $mask)), 0)
+    $low  = [BitConverter]::ToInt32([BitConverter]::GetBytes([uint32]($ft -band $mask)), 0)
     $key  = Join-Path $ProfileListPath $Sid
     if (Test-Path -LiteralPath $key) {
         foreach ($n in 'LocalProfileLoadTimeHigh', 'LocalProfileUnloadTimeHigh') {
@@ -851,6 +854,7 @@ try {
 
 } catch {
     Write-DexStep -Status 'Failed' -Name 'Harness' -Message $_.Exception.Message
+    $state.HarnessError = "$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
     if ($state.Overall -eq 'Incomplete') { $state.Overall = 'Failed' }
     $exitCode = 1
 }

@@ -218,12 +218,35 @@ function Initialize-Fixture {
     }
 
     if (-not (Get-FixtureProfilePath)) {
-        Add-DexUserEnvType
-        $buffer = New-Object System.Text.StringBuilder 1024
-        $hr = [DexUserEnv]::CreateProfile($user.SID.Value, $FixtureUserName, $buffer, 1024)
-        if ($hr -ne 0) { throw ('CreateProfile failed with HRESULT 0x{0:X8}' -f $hr) }
+        # First choice: userenv!CreateProfile (no logon). On the lab VM it returned
+        # 0x800706F7 (RPC_X_BAD_STUB_DATA, run a70511beb91d, 2026-11-02), so a real
+        # profile load through a hidden process started as the user is the fallback.
+        $created = $false
+        try {
+            Add-DexUserEnvType
+            $buffer = New-Object System.Text.StringBuilder 1024
+            $hr = [DexUserEnv]::CreateProfile($user.SID.Value, $FixtureUserName, $buffer, 1024)
+            if ($hr -eq 0 -and (Get-FixtureProfilePath)) { $created = $true }
+            else { Write-DexStep -Status 'Info' -Name 'Fixture' -Message ('CreateProfile returned 0x{0:X8}; loading the profile through a logon instead' -f $hr) }
+        } catch {
+            Write-DexStep -Status 'Info' -Name 'Fixture' -Message "CreateProfile unavailable ($($_.Exception.Message)); loading the profile through a logon instead"
+        }
+        if (-not $created) {
+            if (-not $password) {
+                # Account left over from an earlier run: give it a fresh random password.
+                $chars    = [char[]]'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+                $plain    = (-join ($chars | Get-Random -Count 20)) + 'Aa1!'
+                $password = ConvertTo-SecureString -String $plain -AsPlainText -Force
+                Set-LocalUser -Name $FixtureUserName -Password $password -ErrorAction Stop
+            }
+            Enable-LocalUser -Name $FixtureUserName -ErrorAction Stop
+            $cred = New-Object System.Management.Automation.PSCredential (".\$FixtureUserName", $password)
+            Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList '/c exit 0' -Credential $cred `
+                -LoadUserProfile -WorkingDirectory $env:SystemRoot -WindowStyle Hidden -Wait -ErrorAction Stop
+            Start-Sleep -Seconds 2
+        }
         $path = Get-FixtureProfilePath
-        if (-not $path) { throw 'CreateProfile returned success but Win32_UserProfile does not list the profile.' }
+        if (-not $path) { throw 'The profile was not created (Win32_UserProfile does not list it).' }
         Write-DexStep -Status 'Info' -Name 'Fixture' -Message "Created profile at '$path'"
     }
 
@@ -927,6 +950,7 @@ try {
 
 } catch {
     Write-DexStep -Status 'Failed' -Name 'Harness' -Message $_.Exception.Message
+    $state.HarnessError = "$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
     if ($state.Overall -eq 'Incomplete') { $state.Overall = 'Failed' }
     $exitCode = 1
 }

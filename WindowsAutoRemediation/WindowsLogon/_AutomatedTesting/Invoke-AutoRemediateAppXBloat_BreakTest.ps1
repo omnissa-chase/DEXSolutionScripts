@@ -158,25 +158,38 @@ function Initialize-Fixture {
         New-Item -ItemType Directory -Path $assets -Force -ErrorAction Stop | Out-Null
     }
     [System.IO.File]::WriteAllBytes((Join-Path $assets 'Logo.png'), [Convert]::FromBase64String($FixtureLogoBase64))
+    # A framework package cannot be registered loose in DevelopmentMode (0x80073CF9, run
+    # f3daf194e657, 2026-11-02), so the fixture is a main package with one full-trust
+    # application whose executable is a copy of cmd.exe. Nothing ever launches it.
+    Copy-Item -LiteralPath "$env:SystemRoot\System32\cmd.exe" -Destination (Join-Path $FixturePackageDir 'probe.exe') -Force -ErrorAction Stop
 
     $manifest = @"
 <?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-         IgnorableNamespaces="uap">
-  <Identity Name="$FixturePackageName" Publisher="$FixturePublisher" Version="1.0.0.0" ProcessorArchitecture="neutral" />
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap rescap">
+  <Identity Name="$FixturePackageName" Publisher="$FixturePublisher" Version="1.0.0.0" ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>DEXTest Bloat Probe</DisplayName>
     <PublisherDisplayName>DEXTest</PublisherDisplayName>
     <Logo>Assets\Logo.png</Logo>
-    <Framework>true</Framework>
   </Properties>
   <Dependencies>
-    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
   </Dependencies>
   <Resources>
     <Resource Language="en-US" />
   </Resources>
+  <Applications>
+    <Application Id="Probe" Executable="probe.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="DEXTest Bloat Probe" Description="DEX break-test fixture; safe to remove"
+                          Square150x150Logo="Assets\Logo.png" Square44x44Logo="Assets\Logo.png" BackgroundColor="transparent" />
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
 </Package>
 "@
     [System.IO.File]::WriteAllText($FixtureManifest, $manifest, [System.Text.UTF8Encoding]::new($false))
@@ -547,6 +560,7 @@ try {
 
 } catch {
     Write-DexStep -Status 'Failed' -Name 'Harness' -Message $_.Exception.Message
+    $state.HarnessError = "$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
     if ($state.Overall -eq 'Incomplete') { $state.Overall = 'Failed' }
     $exitCode = 1
 }

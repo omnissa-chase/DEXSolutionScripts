@@ -204,11 +204,38 @@ function Set-PageFileFixedSize {
     $name     = Join-Path $env:SystemDrive 'pagefile.sys'
     $existing = Get-PageFileSettings | Where-Object { $_.Name -ieq $name } | Select-Object -First 1
     if ($existing) {
-        $existing | Set-CimInstance -Property @{ InitialSize = [uint32]$SizeMB; MaximumSize = [uint32]$SizeMB } -ErrorAction Stop
+        # Set-CimInstance on this class returns "Value out of range" (run 4e166254f72d, 2026-11-02);
+        # the WMI object's Put() accepts the same sizes.
+        $wmi = Get-WmiObject -Class Win32_PageFileSetting -ErrorAction Stop | Where-Object { $_.Name -ieq $name } | Select-Object -First 1
+        $wmi.InitialSize = [uint32]$SizeMB
+        $wmi.MaximumSize = [uint32]$SizeMB
+        $wmi.Put() | Out-Null
     } else {
-        New-CimInstance -ClassName Win32_PageFileSetting `
-            -Property @{ Name = $name; InitialSize = [uint32]$SizeMB; MaximumSize = [uint32]$SizeMB } `
+        New-PageFileSetting -Name $name -SizeMB $SizeMB
+    }
+}
+
+function New-PageFileSetting {
+    <#
+        Creates the Win32_PageFileSetting instance. New-CimInstance on this class fails
+        with "Value out of range" (seen on the lab VM, 2026-11-02, run 70ec5b19ade0);
+        the WMI provider path accepts the same arguments. If even that refuses the
+        sizes, create the instance by name alone and size it afterwards.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][int]$SizeMB
+    )
+    try {
+        Set-WmiInstance -Class Win32_PageFileSetting `
+            -Arguments @{ Name = $Name; InitialSize = [uint32]$SizeMB; MaximumSize = [uint32]$SizeMB } `
             -ErrorAction Stop | Out-Null
+    } catch {
+        Set-WmiInstance -Class Win32_PageFileSetting -Arguments @{ Name = $Name } -ErrorAction Stop | Out-Null
+        $created = Get-PageFileSettings | Where-Object { $_.Name -ieq $Name } | Select-Object -First 1
+        if (-not $created) { throw "Win32_PageFileSetting '$Name' was not created: $($_.Exception.Message)" }
+        $created = Get-WmiObject -Class Win32_PageFileSetting -ErrorAction Stop | Where-Object { $_.Name -ieq $Name } | Select-Object -First 1
+        $created.InitialSize = [uint32]$SizeMB; $created.MaximumSize = [uint32]$SizeMB; $created.Put() | Out-Null
     }
 }
 
@@ -243,10 +270,12 @@ function Restore-PageFileBaseline {
         $existing = Get-PageFileSettings | Where-Object { $_.Name -ieq $s.Name } | Select-Object -First 1
         $props    = @{ InitialSize = [uint32]$s.InitialSize; MaximumSize = [uint32]$s.MaximumSize }
         if ($existing) {
-            $existing | Set-CimInstance -Property $props -ErrorAction SilentlyContinue
+            try {
+                $wmi = Get-WmiObject -Class Win32_PageFileSetting -ErrorAction Stop | Where-Object { $_.Name -ieq $s.Name } | Select-Object -First 1
+                $wmi.InitialSize = [uint32]$s.InitialSize; $wmi.MaximumSize = [uint32]$s.MaximumSize; $wmi.Put() | Out-Null
+            } catch { }
         } else {
-            $props['Name'] = $s.Name
-            New-CimInstance -ClassName Win32_PageFileSetting -Property $props -ErrorAction SilentlyContinue | Out-Null
+            try { New-PageFileSetting -Name $s.Name -SizeMB ([int]$s.InitialSize) } catch { }
         }
     }
 }
@@ -594,6 +623,7 @@ try {
 
 } catch {
     Write-DexStep -Status 'Failed' -Name 'Harness' -Message $_.Exception.Message
+    $state.HarnessError = "$($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
     if ($state.Overall -eq 'Incomplete') { $state.Overall = 'Failed' }
     $exitCode = 1
 }
