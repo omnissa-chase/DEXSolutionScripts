@@ -22,11 +22,14 @@
 
 .NOTES
     Script Name  : Invoke-RemediatePageFile.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-07-28
+    Last Modified: 2026-11-02 (1.0.1: advisory Warning findings exit 0 as documented
+                   instead of 1; only a Failed state that could not be repaired, or a
+                   repair that threw, exits 1. The reset message is written after the
+                   reset happens, not before it is attempted.)
     Timeout      : 30 seconds
 
 .DISCLAIMER
@@ -68,7 +71,7 @@ try {
         # Manually configured -- critical if at or near the threshold
         if ($maxPct -ge $PageFileUsageFailPercent) {
             $status  = 'Failed'
-            $message = "Page file is manually configured and near capacity: $usageDesc. Resetting to system-managed."
+            $message = "Page file is manually configured and near capacity: $usageDesc."
         } else {
             $status  = 'Warning'
             $message = "Page file is manually configured ($usageDesc). System-managed is recommended."
@@ -95,8 +98,10 @@ if ($status -eq 'Failed' -and $cs -and -not $cs.AutomaticManagedPagefile) {
     try {
         $cs | Set-CimInstance -Property @{ AutomaticManagedPagefile = $true } -ErrorAction Stop
         $remediated = $true
+        $message   += ' Reset to system-managed; takes effect after the next reboot.'
     } catch {
         $remError = $_.Exception.Message
+        $message += ' Reset to system-managed failed.'
     }
 }
 
@@ -138,8 +143,9 @@ try {
 }
 
 # -- Exit ---------------------------------------------------------------------
-# Exit 1 if an issue was detected but no remediation could be applied.
-if ($status -ne 'Passed' -and -not $remediated) { exit 1 }
+# Exit 1 only when a Failed state could not be repaired or the repair threw.
+# Warning findings (manual-but-OK, system-managed-but-high) are advisory and exit 0.
+if (($status -eq 'Failed' -and -not $remediated) -or $remError) { exit 1 }
 exit 0
 }
 

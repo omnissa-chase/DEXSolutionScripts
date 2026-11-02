@@ -45,11 +45,16 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateOneDrive.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-11-02 (1.0.2: a step 1 failure that was repaired no longer
+                   makes the script exit 1; step 2 only treats Personal and Business*
+                   keys as accounts, so the FileCoAuth helper key no longer warns "not
+                   signed in" on every machine; step 3 keeps a single returned event
+                   instead of dropping it; step 5's duplicate warning branch removed.)
+                   2026-10-28 (1.0.1)
     Timeout      : 60 seconds
 
 .DISCLAIMER
@@ -183,9 +188,12 @@ $Steps = @(
             if (-not (Test-Path $accountsBase)) {
                 return @{ Status = 'Warning'; Message = 'OneDrive Accounts registry key not found -- OneDrive may not have completed first-run setup for this user.' }
             }
-            $accounts     = Get-ChildItem $accountsBase -ErrorAction SilentlyContinue
+            # Only Personal and Business* subkeys are accounts. OneDrive also keeps helper
+            # keys here (FileCoAuth and others) that never carry UserEmail.
+            $accounts     = Get-ChildItem $accountsBase -ErrorAction SilentlyContinue |
+                            Where-Object { $_.PSChildName -eq 'Personal' -or $_.PSChildName -like 'Business*' }
             if (-not $accounts) {
-                return @{ Status = 'Warning'; Message = 'No OneDrive accounts configured for this user (OneDrive Accounts key is empty).' }
+                return @{ Status = 'Warning'; Message = 'No OneDrive accounts configured for this user (no Personal or Business key under OneDrive\Accounts).' }
             }
             $accountSummary = $accounts | ForEach-Object {
                 $props     = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
@@ -219,29 +227,31 @@ $Steps = @(
             # This is the most accessible sync health signal available from SYSTEM context
             # without OneDrive's internal COM APIs.
             $cutoff    = (Get-Date).AddHours(-24)
+            # @() on both reads: a pipeline that returns exactly one event is not an array,
+            # and += on a single object threw inside the (silent) catch, dropping the event.
             $odErrors  = @()
             try {
-                $odErrors = Get-WinEvent -FilterHashtable @{
+                $odErrors = @(Get-WinEvent -FilterHashtable @{
                     LogName   = 'Application'
                     StartTime = $cutoff
                     Level     = 2   # Error
                 } -ErrorAction SilentlyContinue |
-                Where-Object { $_.ProviderName -like '*OneDrive*' -or $_.Message -like '*OneDrive*' }
+                Where-Object { $_.ProviderName -like '*OneDrive*' -or $_.Message -like '*OneDrive*' })
             } catch { }
 
             # Also check for the dedicated OneDrive operational log if available
             try {
-                $odErrors += Get-WinEvent -FilterHashtable @{
+                $odErrors += @(Get-WinEvent -FilterHashtable @{
                     LogName   = 'Microsoft-Windows-OneDrive-Operational'
                     StartTime = $cutoff
                     Level     = 2
-                } -ErrorAction SilentlyContinue
+                } -ErrorAction SilentlyContinue)
             } catch { }   # Log may not exist on all configurations -- suppress
 
-            $errorCount = $odErrors.Count
+            $errorCount = @($odErrors).Count
             if ($errorCount -gt 0) {
                 $recent = $odErrors | Select-Object -First 3 |
-                          ForEach-Object { $_.Message -replace '\r?\n',' ' | Select-Object -First 1 }
+                          ForEach-Object { [string]$_.Message -replace '\r?\n',' ' }
                 $sample = ($recent | ForEach-Object { $_.Substring(0, [Math]::Min(80, $_.Length)) }) -join ' | '
                 return @{ Status = 'Warning'; Message = "$errorCount OneDrive error event(s) in the Application log (last 24h). Sample: $sample" }
             }
@@ -333,11 +343,8 @@ $Steps = @(
                 $bitmask = (Get-ItemProperty $_.PSPath -Name 'KfmFoldersProtectedNow' -ErrorAction SilentlyContinue).KfmFoldersProtectedNow
                 $null -ne $bitmask -and ($bitmask -band 7) -eq 7
             }
-            if ($kfmPolicySet -and $allProtected.Count -lt $bizAccounts.Count) {
+            if ($kfmPolicySet -and @($allProtected).Count -lt @($bizAccounts).Count) {
                 return @{ Status = 'Warning'; Message = "KFM policy is configured but not all folders are protected: $($kfmResults -join '; '). Check OneDrive admin center for enrollment status." }
-            }
-            if ($allProtected.Count -lt $bizAccounts.Count -and $kfmPolicySet) {
-                return @{ Status = 'Warning'; Message = "KFM not fully applied: $($kfmResults -join '; ')." }
             }
             $policyNote = if (-not $kfmPolicySet) { ' Note: no KFM policy found in HKLM -- KFM may not be deployed for this tenant.' } else { '' }
             return @{ Status = 'Passed'; Message = "$($kfmResults -join '; ').$policyNote" }
@@ -407,8 +414,9 @@ foreach ($step in $activeSteps) {
 # lone Failed step would otherwise yield $null here and the script would exit 0.
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
+# A failure that was repaired in this run is not a failure; a remediation that threw is.
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"
 Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"

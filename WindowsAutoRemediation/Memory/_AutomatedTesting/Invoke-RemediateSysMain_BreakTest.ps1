@@ -28,13 +28,11 @@
     SysMainService              Stopped (optionally also Disabled or Manual). The
                                 script's primary case.
     SysMainDisabledWhileRunning Still running, but StartType = Disabled: healthy
-                                until the next boot, then gone. The script's
-                                description says it handles a disabled startup type,
-                                but its detection only tests Status -eq 'Running', so
-                                as of 2026-11-02 this break is EXPECTED TO SURFACE A
-                                FalsePass (script exits 0 and leaves the service
-                                disabled). It is kept in the catalog on purpose: the
-                                harness exists to find exactly this gap.
+                                until the next boot, then gone. Script 1.0.0 tested
+                                only Status -eq 'Running' and would have produced a
+                                FalsePass here; 1.0.1 (2026-11-02) also requires
+                                StartType Automatic and sets it, so this break now
+                                expects a genuine repair.
     The two breaks cannot share a run: the first needs the service stopped, the
     second needs it running. When both are selected the one drawn first is kept.
 
@@ -279,8 +277,8 @@ $BreakCatalog = @(
             $svc = Get-SysMainService
             $svc -and $svc.Status -eq 'Running' -and $svc.StartType -eq 'Disabled'
         }
-        # The script promises Automatic + Running. Until its detection also looks at
-        # StartType this validation fails and the run reports FalsePass. See header.
+        # The script promises Automatic + Running; 1.0.1 detects the StartType gap and
+        # repairs it, so a genuine Remediated record is expected here. See header.
         Validate = { (Test-SysMainHealthy) -and (Test-DexRecordStatus -Expected 'Remediated') }
         Restore  = {
             param($Original)

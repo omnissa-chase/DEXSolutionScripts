@@ -21,11 +21,14 @@
 
 .NOTES
     Script Name  : Invoke-RemediateSysMain.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-07-28
+    Last Modified: 2026-11-02 (1.0.1: a running service whose startup type is not
+                   Automatic is now a finding and is set to Automatic, as the
+                   description always promised; 1.0.0 checked only that it was running
+                   and let a Disabled-but-running service vanish at the next boot.)
     Timeout      : 30 seconds
 
 .DISCLAIMER
@@ -44,9 +47,14 @@ $remError   = ''
 try {
     $svc = Get-Service -Name SysMain -ErrorAction Stop
 
-    if ($svc.Status -eq 'Running') {
+    if ($svc.Status -eq 'Running' -and $svc.StartType -eq 'Automatic') {
         $status  = 'Passed'
         $message = "SysMain is running (StartType: $($svc.StartType))"
+    } elseif ($svc.Status -eq 'Running') {
+        # Running now, but a Manual or Disabled startup type means it will not come back
+        # after the next boot. Setting Automatic is the whole repair; Start-Service is a no-op.
+        $status  = 'Failed'
+        $message = "SysMain is running but StartType is $($svc.StartType). Setting to Automatic."
     } elseif ($svc.StartType -eq 'Disabled') {
         $status  = 'Failed'
         $message = "SysMain is disabled. Setting to Automatic and starting."

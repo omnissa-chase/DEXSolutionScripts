@@ -25,11 +25,15 @@
 
 .NOTES
     Script Name  : Enable-HardwareAcceleratedGPUScheduling.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : x64 (HAGS is not applicable to x86 systems)
     Context      : System (HKLM registry write required)
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-11-02 (1.0.2: a step that was repaired no longer counts as a
+                   failure, so a successful remediation exits 0 instead of 1; the step 4
+                   "HAGS requires reboot" warning fires only in the run that changed the
+                   value, not forever after; results are written to the DEXRecords
+                   registry key like the rest of the family; unused variables removed.)
     Timeout      : 30 seconds
 
 .DISCLAIMER
@@ -44,6 +48,8 @@ $HagsRegPath  = 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers'
 $HagsRegValue = 'HwSchMode'
 $HagsEnabled  = 2   # 1 = disabled, 2 = enabled
 $MinBuild     = 19041  # Windows 10 2004 (first build with HAGS support)
+$script:HagsChangedThisRun = $false   # set by step 3's resolution, read by step 4
+$DexRecordsPath = 'HKLM:\Software\AirWatch\Extension\DEXRecords\PerformanceErrors\HAGS'
 
 # -- Step Definitions ----------------------------------------------------------
 $Steps = @(
@@ -133,6 +139,10 @@ $Steps = @(
                 New-Item -Path $HagsRegPath -Force | Out-Null
             }
             Set-ItemProperty -Path $HagsRegPath -Name $HagsRegValue -Value $HagsEnabled -Type DWord -Force
+            # Read back: the repair only counts if the value is now what we set.
+            $after = (Get-ItemProperty -Path $HagsRegPath -Name $HagsRegValue -ErrorAction Stop).$HagsRegValue
+            if ($after -ne $HagsEnabled) { throw "HwSchMode reads back as '$after' after the write." }
+            $script:HagsChangedThisRun = $true
         }
     },
 
@@ -147,14 +157,13 @@ $Steps = @(
             $wuPending    = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired' -ErrorAction SilentlyContinue) -ne $null
             $fileRename   = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations
 
-            # Check whether HAGS itself has a pending reboot (value set but not yet active)
-            $hagsValue    = (Get-ItemProperty -Path $HagsRegPath -Name $HagsRegValue -ErrorAction SilentlyContinue).$HagsRegValue
-
+            # HAGS itself needs a reboot only when this run changed the value. Reading the
+            # value back here would report "requires reboot" forever after it was enabled.
             $reasons = @()
             if ($cbsPending)            { $reasons += 'CBS component servicing' }
             if ($wuPending)             { $reasons += 'Windows Update' }
             if ($fileRename)            { $reasons += 'pending file rename operations' }
-            if ($hagsValue -eq $HagsEnabled) { $reasons += 'HAGS enabled (requires reboot to activate)' }
+            if ($script:HagsChangedThisRun) { $reasons += 'HAGS enabled by this run (requires reboot to activate)' }
 
             if ($reasons.Count -gt 0) {
                 return @{
@@ -172,7 +181,6 @@ $Steps = @(
 $activeSteps = $Steps | Where-Object { $_.Enabled } | Sort-Object Order
 
 # If OS is incompatible (step 1 fails), skip remaining steps
-$osCheck = $null
 try {
     $osResult = & ($Steps | Where-Object { $_.Order -eq 1 }).DetectionScript
     if ($osResult.Status -eq 'Failed') {
@@ -223,12 +231,6 @@ foreach ($step in $activeSteps) {
     }
 
     # -- Output ---------------------------------------------------------------
-    $color = switch ($status) {
-        'Passed'  { 'Green'  }
-        'Warning' { 'Yellow' }
-        'Failed'  { 'Red'    }
-        default   { 'White'  }
-    }
     $remNote = if ($remediated)   { '  -> Remediation ran' }
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
@@ -250,14 +252,42 @@ foreach ($step in $activeSteps) {
 # lone Failed step would otherwise yield $null here and the script would exit 0.
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
+# A failure that was repaired in this run is not a failure; a remediation that threw is.
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"
 Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
 Write-Output "`r`n----------------------------------------------------------------"
 Write-Output ''
 
-# Exit 0 even if warnings -- HAGS pending reboot (step 4 warning) is expected after enabling
+# -- Registry Reporting -------------------------------------------------------
+try {
+    if (-not (Test-Path $DexRecordsPath)) {
+        New-Item -Path $DexRecordsPath -Force -ErrorAction Stop | Out-Null
+    }
+    $existing = Get-Item -Path $DexRecordsPath -ErrorAction SilentlyContinue
+    if ($existing) {
+        $existing.GetValueNames() | ForEach-Object {
+            Remove-ItemProperty -Path $DexRecordsPath -Name $_ -ErrorAction SilentlyContinue
+        }
+    }
+    Set-ItemProperty -Path $DexRecordsPath -Name 'LastScanTime'    -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') -Type String
+    Set-ItemProperty -Path $DexRecordsPath -Name 'TotalSteps'      -Value $results.Count -Type DWord
+    Set-ItemProperty -Path $DexRecordsPath -Name 'PassedCount'     -Value $passed        -Type DWord
+    Set-ItemProperty -Path $DexRecordsPath -Name 'WarningCount'    -Value $warnings      -Type DWord
+    Set-ItemProperty -Path $DexRecordsPath -Name 'FailedCount'     -Value $failed        -Type DWord
+    Set-ItemProperty -Path $DexRecordsPath -Name 'RemediatedCount' -Value $remCount      -Type DWord
+    $results | Where-Object { $_.Status -ne 'Passed' -or $_.Remediated } | ForEach-Object {
+        $valueName = 'Step{0:D2}_{1}' -f $_.Order, ($_.Name -replace '[^A-Za-z0-9]', '')
+        $tag       = if ($_.Remediated) { '[Remediated]' } else { "[$($_.Status)]" }
+        Set-ItemProperty -Path $DexRecordsPath -Name $valueName -Value "$tag $($_.Message)" -Type String
+    }
+    Write-Output "  [Registry] Results written to $DexRecordsPath"
+} catch {
+    Write-Output "  [Registry] Write failed: $($_.Exception.Message)"
+}
+
+# Exit 0 even if warnings -- the step 4 reboot warning is expected right after enabling
 if ($failed -gt 0) { exit 1 }
 exit 0

@@ -116,9 +116,10 @@ $ErrorActionPreference = 'Stop'
 
 $ScriptUnderTest   = 'Enable-HardwareAcceleratedGPUScheduling'
 $RemediationScript = Join-Path $PSScriptRoot '..\Enable-HardwareAcceleratedGPUScheduling.ps1'
-# The script under test writes no HKLM:\Software\AirWatch\Extension\DEXRecords key
-# (see header). Kept for schema parity with the harness family; nothing reads it.
-$DexRecordsPath    = $null
+# Script 1.0.2 (2026-11-02) writes its results here like the rest of the family
+# (1.0.1 wrote no DEXRecords key). Kept for schema parity; the catalog's Validate
+# reads the registry value the script repairs, not this key.
+$DexRecordsPath    = 'HKLM:\Software\AirWatch\Extension\DEXRecords\PerformanceErrors\HAGS'
 $SelfPath          = $MyInvocation.MyCommand.Path
 
 $modulePath = Join-Path $PSScriptRoot '..\..\..\AutomatedTesting\DEXTestFramework.psm1'

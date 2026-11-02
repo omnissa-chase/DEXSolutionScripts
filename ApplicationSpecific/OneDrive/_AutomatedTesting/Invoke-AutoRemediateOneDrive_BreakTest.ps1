@@ -127,7 +127,7 @@ Import-Module $modulePath -Force
 # -- Fixture ------------------------------------------------------------------
 $FixturePrefix          = 'DEXTest'
 $FixtureServiceName     = 'FileSyncHelper'
-$FixtureAccountKeyName  = 'DEXTestAccount'            # inert subkey under the user's OneDrive\Accounts
+$FixtureAccountKeyName  = 'BusinessDEXTest'           # inert subkey under the user's OneDrive\Accounts; must match the script's Business* filter (1.0.2) and is not a name OneDrive itself reads
 $FixtureKfmPolicyPath   = 'HKLM:\SOFTWARE\Policies\Microsoft\OneDrive'
 $FixtureKfmPolicyName   = 'KFMSilentOptIn'
 # Not a GUID on purpose: OneDrive ignores a tenant id it cannot parse, the script only tests
@@ -356,8 +356,10 @@ $BreakCatalog = @(
         Name            = 'AccountNotSignedIn'
         ExpectedOutcome = 'ExpectReportedOnly'
         RequiresReboot  = $false
-        # OneDrive reads only Personal and Business<n> under Accounts; an extra DEXTestAccount
-        # subkey is invisible to it but counts as "not signed in" to the script's Step 2.
+        # OneDrive reads only Personal and Business<n> under Accounts; an extra BusinessDEXTest
+        # subkey is invisible to it but matches the script's Business* account filter (1.0.2)
+        # and counts as "not signed in" to Step 2. Step 5 also sees it as a business account
+        # without KfmFoldersProtectedNow, which only warns when a KFM policy is set.
         Methods         = @(
             @{
                 Name  = 'AddUnsignedAccountKey'
