@@ -73,11 +73,15 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateProfileBloat.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-11-02 (1.0.2: header and $SCRIPT_VERSION now agree; per-step
+                   results are also written to the DEXRecords registry key like the
+                   rest of the family, so a runbook can tell which step warned. The
+                   summary counters under Extensions\ProfileBloat\Remediation are
+                   unchanged.)
     Timeout      : 300 seconds
 
     Environment variables:
@@ -129,8 +133,9 @@ param(
     )
 )
 
-$SCRIPT_VERSION = "1.0.0"
+$SCRIPT_VERSION = "1.0.2"
 $RegPath        = "HKLM:\Software\AirWatch\Extensions\ProfileBloat\Remediation"
+$DexRecordsPath = "HKLM:\Software\AirWatch\Extension\DEXRecords\WindowsLogon\ProfileBloat"
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateProfileBloat.log"
 
 # -- WhatIf bridge -------------------------------------------------------------
@@ -567,6 +572,39 @@ if (-not $WhatIfPreference) {
         Write-Log "Results cached to $RegPath"
     } catch {
         Write-Log "Registry cache write failed: $($_.Exception.Message)" 'WARN'
+    }
+
+    # Per-step DEXRecords values (family convention), so a runbook can tell which
+    # step warned or failed. The summary counters above are left exactly as they
+    # were. Fully wrapped: a registry failure here must never change the exit code.
+    try {
+        if (-not (Test-Path $DexRecordsPath)) {
+            New-Item -Path $DexRecordsPath -Force -ErrorAction Stop | Out-Null
+        }
+        $existing = Get-Item -Path $DexRecordsPath -ErrorAction SilentlyContinue
+        if ($existing) {
+            $existing.GetValueNames() | ForEach-Object {
+                Remove-ItemProperty -Path $DexRecordsPath -Name $_ -ErrorAction SilentlyContinue
+            }
+        }
+        Set-ItemProperty -Path $DexRecordsPath -Name 'LastScanTime'    -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') -Type String
+        Set-ItemProperty -Path $DexRecordsPath -Name 'ScriptVersion'   -Value $SCRIPT_VERSION -Type String
+        Set-ItemProperty -Path $DexRecordsPath -Name 'TotalSteps'      -Value $results.Count -Type DWord
+        Set-ItemProperty -Path $DexRecordsPath -Name 'PassedCount'     -Value $passed        -Type DWord
+        Set-ItemProperty -Path $DexRecordsPath -Name 'WarningCount'    -Value $warnings      -Type DWord
+        Set-ItemProperty -Path $DexRecordsPath -Name 'FailedCount'     -Value $failed        -Type DWord
+        Set-ItemProperty -Path $DexRecordsPath -Name 'RemediatedCount' -Value $remCount      -Type DWord
+        foreach ($r in $results) {
+            $valueName = 'Step{0:D2}_{1}' -f $r.Order, ($r.Name -replace '[^A-Za-z0-9]', '')
+            $tag       = if ($r.Remediated) { '[Remediated]' } else { "[$($r.Status)]" }
+            $text      = "$tag $($r.Name): $($r.Message)"
+            if ($r.RemError) { $text += "  -> Cleanup ERROR: $($r.RemError)" }
+            if ($text.Length -gt 500) { $text = $text.Substring(0, 497) + '...' }
+            Set-ItemProperty -Path $DexRecordsPath -Name $valueName -Value $text -Type String
+        }
+        Write-Log "Per-step results written to $DexRecordsPath"
+    } catch {
+        Write-Log "DEXRecords write failed: $($_.Exception.Message)" 'WARN'
     }
 } else {
     Write-Log 'WhatIf run -- registry cache left untouched.'

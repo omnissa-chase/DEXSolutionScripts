@@ -41,11 +41,11 @@
 
 .NOTES
     Script Name  : Invoke-VpnStateCollection.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-03
+    Last Modified: 2026-11-02 (1.0.1: step 5 called Get-NetAdapterStatistics with -InterfaceIndex, a parameter it does not have, so the whole collection failed with CollectionError on any device with an active tunnel; now -Name. Found by the lab break test the first time a real tunnel (WireGuard) was present.)
     Timeout      : 30 seconds
     Schedule     : Every 15-30 minutes
 
@@ -59,7 +59,7 @@ function Invoke-VpnStateCollection {
 [CmdletBinding()]
 param()
 
-$SCRIPT_VERSION = "1.0.0"
+$SCRIPT_VERSION = "1.0.1"
 $RegPath        = "HKLM:\Software\AirWatch\Extensions\VPN"
 $LogPath        = "$env:SystemRoot\Temp\UEM_VpnStateCollection.log"
 
@@ -186,7 +186,10 @@ try {
             Write-Log "DNS configured on tunnel: $dnsConfigured"
 
             # -- 5. Discard rate ------------------------------------------------
-            $stats = Get-NetAdapterStatistics -InterfaceIndex $tunnel.ifIndex -ErrorAction SilentlyContinue
+            # Get-NetAdapterStatistics has no -InterfaceIndex parameter (only -Name and
+            # -InterfaceDescription); binding errors are terminating regardless of
+            # -ErrorAction, so 1.0.0 crashed here on every device with an active tunnel.
+            $stats = Get-NetAdapterStatistics -Name $tunnel.Name -ErrorAction SilentlyContinue
             if ($stats) {
                 $rxProp = if ($stats.PSObject.Properties['ReceivedUnicastPackets']) { [double]$stats.ReceivedUnicastPackets } else { 0 }
                 $txProp = if ($stats.PSObject.Properties['SentUnicastPackets'])     { [double]$stats.SentUnicastPackets }     else { 0 }

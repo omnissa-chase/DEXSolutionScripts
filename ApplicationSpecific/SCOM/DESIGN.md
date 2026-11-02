@@ -209,17 +209,17 @@ Everything now fits the 32,767-character limit.
 
 | Script | Original | Now | Headroom |
 |---|---:|---:|---:|
-| `Invoke-AutoRemediateSCOMAgentPart1.ps1` | — | 21,931 | 10,836 |
-| `Invoke-AutoRemediateSCOMAgentPart2.ps1` | — | 25,671 | 7,096 |
-| `Invoke-AutoRemediateSCOMAgentPart3.ps1` | — | 26,601 | 6,166 |
-| `Invoke-AutoRemediateSCOMHealthServiceCache.ps1` | 38,284 | 32,717 | 50 |
-| `Invoke-AutoRemediateSCOMClonedIdentity.ps1` | 36,185 | 31,173 | 1,594 |
-| `Invoke-AutoRemediateSCOMMonitoringHost.ps1` | 30,535 | 29,114 | 3,653 |
+| `Invoke-AutoRemediateSCOMAgentPart1.ps1` | — | 22,760 | 10,007 |
+| `Invoke-AutoRemediateSCOMAgentPart2.ps1` | — | 26,500 | 6,267 |
+| `Invoke-AutoRemediateSCOMAgentPart3.ps1` | — | 28,731 | 4,036 |
+| `Invoke-AutoRemediateSCOMHealthServiceCache.ps1` | 38,284 | 32,701 | 66 |
+| `Invoke-AutoRemediateSCOMClonedIdentity.ps1` | 36,185 | 32,642 | 125 |
+| `Invoke-AutoRemediateSCOMMonitoringHost.ps1` | 30,535 | 30,778 | 1,989 |
 | `OneTimeSensor/scom_agent_health.ps1` | 32,717 | 32,739 | 28 |
-| `Invoke-AutoRemediateSCOMAgent.ps1` | 54,369 | 48,336 | **reference only, not deployable** |
+| `Invoke-AutoRemediateSCOMAgent.ps1` | 54,369 | 48,735 | **reference only, not deployable** |
 
-`HealthServiceCache` (50) and the one-time sensor (28) are at the edge — the next edit to
-either needs space freed first.
+`HealthServiceCache` (66), `ClonedIdentity` (125) and the one-time sensor (28) are at the edge — the
+next edit to any of them needs space freed first. Figures re-measured 2026-11-02 (`(Get-Content -Raw).Length`).
 
 ### The three-way split
 
