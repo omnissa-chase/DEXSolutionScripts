@@ -218,7 +218,13 @@ function Get-DexAllTasks {
         The Schedule.Service COM API lists folders and names without that failure
         mode; each task is then fetched individually and unreadable ones are skipped.
     #>
+    # Run 870d6373af80 (2026-11-02) then showed the per-task CIM reads also coming back
+    # empty inside the elevated harness (fixtures=8 by -TaskPath, qualifying=0), so the
+    # task shape the filters need (path, name, state, logon-trigger delays) is now read
+    # from the COM definition itself and CIM is not involved. $script:DexEnumDiag keeps
+    # the counts for the Verify diagnostic line.
     $out = New-Object System.Collections.ArrayList
+    $folders = 0; $raw = 0; $errors = 0; $fallback = $false
     try {
         $svc = New-Object -ComObject 'Schedule.Service'
         $svc.Connect()
@@ -227,19 +233,40 @@ function Get-DexAllTasks {
         while ($queue.Count -gt 0) {
             $folder = $queue.Dequeue()
             if ($folder.Path -like '\Microsoft*') { continue }
+            $folders++
             foreach ($sub in @($folder.GetFolders(0))) { $queue.Enqueue($sub) }
+            $path = if ($folder.Path -eq '\') { '\' } else { $folder.Path.TrimEnd('\') + '\' }
             foreach ($t in @($folder.GetTasks(1))) {
-                $path = if ($folder.Path -eq '\') { '\' } else { $folder.Path.TrimEnd('\') + '\' }
+                $raw++
                 try {
-                    $task = Get-ScheduledTask -TaskPath $path -TaskName $t.Name -ErrorAction Stop
-                    if ($task) { [void]$out.Add($task) }
-                } catch { }
+                    $triggers = @()
+                    foreach ($tr in @($t.Definition.Triggers)) {
+                        if ($tr.Type -eq 9) {   # TASK_TRIGGER_LOGON
+                            $triggers += [PSCustomObject]@{ Delay = [string]$tr.Delay; Enabled = [bool]$tr.Enabled }
+                        }
+                    }
+                    [void]$out.Add([PSCustomObject]@{
+                        TaskPath      = $path
+                        TaskName      = [string]$t.Name
+                        State         = if ($t.State -eq 1 -or -not $t.Enabled) { 'Disabled' } else { 'Ready' }
+                        LogonTriggers = @($triggers)
+                    })
+                } catch { $errors++ }
             }
         }
     } catch {
-        # COM unavailable: fall back to the single call, which is all the script has.
-        foreach ($task in @(Get-ScheduledTask -ErrorAction SilentlyContinue)) { [void]$out.Add($task) }
+        # COM unavailable: fall back to the single CIM call, which is all the script has.
+        $fallback = $true
+        foreach ($task in @(Get-ScheduledTask -ErrorAction SilentlyContinue)) {
+            [void]$out.Add([PSCustomObject]@{
+                TaskPath      = $task.TaskPath
+                TaskName      = $task.TaskName
+                State         = [string]$task.State
+                LogonTriggers = @($task.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' } | ForEach-Object { [PSCustomObject]@{ Delay = [string]$_.Delay; Enabled = [bool]$_.Enabled } })
+            })
+        }
     }
+    $script:DexEnumDiag = "folders=$folders rawTasks=$raw readErrors=$errors comFallback=$fallback"
     @($out)
 }
 
@@ -252,7 +279,7 @@ function Get-DexQualifyingLogonTasks {
             Where-Object {
                 $_.State -ne 'Disabled' -and
                 $_.TaskPath -notlike '\Microsoft\*' -and
-                (Get-DexLogonTriggers -Task $_).Count -gt 0
+                @($_.LogonTriggers).Count -gt 0
             }
     )
 }
@@ -387,7 +414,7 @@ $BreakCatalog = @(
         Verify   = {
             $fixtures   = @(Get-DexFixtureVolumeTasks)
             $qualifying = @(Get-DexQualifyingLogonTasks)
-            Write-DexNote -Name 'Verify AtLogOnTaskVolume' -Message "fixtures=$($fixtures.Count) qualifying=$($qualifying.Count) threshold=$ScriptVolumeWarnCount; qualifying: $(($qualifying | ForEach-Object { "$($_.TaskPath)$($_.TaskName)" }) -join ', ')"
+            Write-DexNote -Name 'Verify AtLogOnTaskVolume' -Message "fixtures=$($fixtures.Count) qualifying=$($qualifying.Count) threshold=$ScriptVolumeWarnCount; enumeration $script:DexEnumDiag; qualifying: $(($qualifying | ForEach-Object { "$($_.TaskPath)$($_.TaskName)" }) -join ', ')"
             ($fixtures.Count -gt 0) -and ($qualifying.Count -ge $ScriptVolumeWarnCount)
         }
         # Correct behaviour is to report and leave alone: every volume fixture must

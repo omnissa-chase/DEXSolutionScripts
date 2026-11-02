@@ -274,8 +274,13 @@ function Remove-Fixture {
 function Resolve-DexFixturePaths {
     param([string[]]$RelativePaths)
     $root = Get-FixtureProfilePath
-    if (-not $root) { return @() }
-    return @($RelativePaths | ForEach-Object { Join-Path $root $_ })
+    if (-not $root) { return ,@() }
+    # The leading comma keeps a one-element result an array. Without it PowerShell unrolls
+    # `return @(x)` to a bare string, and callers that index `[0]` get its first character:
+    # runs c5f156390a70 and 259114dfef14 (2026-11-02) wrote 601 fixture shortcuts to a folder
+    # named `C` under the harness's working directory (System32) and then found none in the
+    # profile's Recent folder.
+    return ,[string[]]@($RelativePaths | ForEach-Object { Join-Path $root $_ })
 }
 
 function New-DexBloatFile {
@@ -561,6 +566,11 @@ $BreakCatalog = @(
                         New-DexBloatFile -Path (Join-Path $dir ('DEXTest_{0:D4}.lnk' -f $i)) -SizeBytes 1KB -AgeDays $BloatAgeDays
                     }
                     New-DexBloatFile -Path (Join-Path $dir 'DEXTest_control-fresh.lnk') -SizeBytes 1KB -AgeDays 0
+                    # Run c5f156390a70 (2026-11-02) applied this without error and Verify then
+                    # counted no aged shortcuts; the same code counts 600 of 600 in a scratch
+                    # folder, so report what is on disk right after writing.
+                    $now = @(Get-ChildItem -LiteralPath $dir -Filter 'DEXTest_*.lnk' -Force -ErrorAction SilentlyContinue)
+                    Write-Host "  [Info   ] Break RecentItems: wrote $($ScriptRecentWarnCount + 101) files to '$dir'; on disk now $($now.Count), oldest LastWriteTime $(($now | Sort-Object LastWriteTime | Select-Object -First 1).LastWriteTime)" -ForegroundColor Gray
                 }
             },
             @{
@@ -574,8 +584,12 @@ $BreakCatalog = @(
         }
         Verify   = {
             $recent = Resolve-DexFixturePaths -RelativePaths @($RelRecentDir)
-            if ($recent.Count -eq 0) { return $false }
+            if ($recent.Count -eq 0) { Write-Host '  [Info   ] Verify RecentItems: fixture profile path could not be resolved' -ForegroundColor Gray; return $false }
             $lnk = Measure-DexAgedFiles -Path $recent -Include @('DEXTest_*.lnk')
+            # Host-stream diagnostic only: the harness casts this block's output to [bool].
+            $all = @(Get-ChildItem -LiteralPath $recent[0] -Recurse -File -Force -ErrorAction SilentlyContinue)
+            $mine = @($all | Where-Object { $_.Name -like 'DEXTest_*.lnk' })
+            Write-Host "  [Info   ] Verify RecentItems: path '$($recent[0])' exists=$(Test-Path -LiteralPath $recent[0]); files=$($all.Count) DEXTest=$($mine.Count) aged=$($lnk.Count) (cut-off $ScriptMinFileAgeDays days); sample LastWriteTime $(($mine | Select-Object -First 1).LastWriteTime)" -ForegroundColor Gray
             ($lnk.Count -ge $ScriptRecentWarnCount) -or (Test-DexCacheBloatPresent -RelativeDirs @($RelJumpLists))
         }
         Validate = {
