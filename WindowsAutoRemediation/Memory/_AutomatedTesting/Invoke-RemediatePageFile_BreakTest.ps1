@@ -192,26 +192,55 @@ function Set-PageFileAutomatic {
     Get-PageFileComputerSystem | Set-CimInstance -Property @{ AutomaticManagedPagefile = $Enabled } -ErrorAction Stop
 }
 
+$MemoryManagementKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management'
+
+function Get-PagingFilesRegistry {
+    # The PagingFiles multi-string that Win32_PageFileSetting is a view of.
+    @((Get-ItemProperty -LiteralPath $MemoryManagementKey -Name 'PagingFiles' -ErrorAction SilentlyContinue).PagingFiles)
+}
+
+function Set-PagingFilesRegistry {
+    param([Parameter(Mandatory = $true)][string[]]$Value)
+    Set-ItemProperty -LiteralPath $MemoryManagementKey -Name 'PagingFiles' -Value ([string[]]$Value) -Type MultiString -ErrorAction Stop
+}
+
 function Set-PageFileFixedSize {
     <#
         Clears automatic management, then pins the system-drive page file to a
         fixed Initial = Maximum size. Win32_PageFileSetting may be empty right after
         the flag is cleared, in which case the setting is created.
+
+        Every WMI route to the sizes -- Set-CimInstance, New-CimInstance,
+        Set-WmiInstance and the object's own Put() -- answered "Value out of range"
+        for 2048/2048 on the lab VM (runs 4e166254f72d, 70ec5b19ade0, c845854c3e7e,
+        5e9fa8a3e6c3, 2026-11-02) with 9 GB free and 8 GB of RAM. The class is only a
+        view of the PagingFiles registry value, so when WMI refuses, that value is
+        written directly. Either way the new size applies at the next boot; the
+        script under test reads the AutomaticManagedPagefile flag and the live
+        Win32_PageFileUsage figures, neither of which depends on the size taking hold.
     #>
     param([Parameter(Mandatory = $true)][int]$SizeMB)
 
     Set-PageFileAutomatic -Enabled $false
     $name     = Join-Path $env:SystemDrive 'pagefile.sys'
     $existing = Get-PageFileSettings | Where-Object { $_.Name -ieq $name } | Select-Object -First 1
-    if ($existing) {
-        # Set-CimInstance on this class returns "Value out of range" (run 4e166254f72d, 2026-11-02);
-        # the WMI object's Put() accepts the same sizes.
-        $wmi = Get-WmiObject -Class Win32_PageFileSetting -ErrorAction Stop | Where-Object { $_.Name -ieq $name } | Select-Object -First 1
-        $wmi.InitialSize = [uint32]$SizeMB
-        $wmi.MaximumSize = [uint32]$SizeMB
-        $wmi.Put() | Out-Null
-    } else {
-        New-PageFileSetting -Name $name -SizeMB $SizeMB
+    try {
+        if ($existing) {
+            $wmi = Get-WmiObject -Class Win32_PageFileSetting -ErrorAction Stop | Where-Object { $_.Name -ieq $name } | Select-Object -First 1
+            $wmi.InitialSize = [uint32]$SizeMB
+            $wmi.MaximumSize = [uint32]$SizeMB
+            $wmi.Put() | Out-Null
+        } else {
+            New-PageFileSetting -Name $name -SizeMB $SizeMB
+        }
+    } catch {
+        Write-Host "  [Info   ] Fixture: WMI refused the page-file size ($($_.Exception.Message.Trim())); writing the PagingFiles registry value instead" -ForegroundColor Gray
+        Set-PagingFilesRegistry -Value @("$name $SizeMB $SizeMB")
+    }
+
+    $check = Get-PageFileSettings | Where-Object { $_.Name -ieq $name } | Select-Object -First 1
+    if (-not $check -or [int]$check.InitialSize -ne $SizeMB -or [int]$check.MaximumSize -ne $SizeMB) {
+        throw "The fixed page-file size did not take: Win32_PageFileSetting shows Initial=$($check.InitialSize) Maximum=$($check.MaximumSize), PagingFiles='$((Get-PagingFilesRegistry) -join '; ')'"
     }
 }
 
@@ -240,10 +269,13 @@ function New-PageFileSetting {
 }
 
 function Get-PageFileBaseline {
-    # Shared Capture body for both breaks.
+    # Shared Capture body for both breaks. PagingFiles is the raw registry value,
+    # kept so Restore can put back exactly what was there (and so the result file
+    # records what the host looked like before the break).
     @{
-        Automatic = (Get-PageFileAutomatic)
-        Settings  = @(Get-PageFileSettings | ForEach-Object {
+        Automatic   = (Get-PageFileAutomatic)
+        PagingFiles = @(Get-PagingFilesRegistry)
+        Settings    = @(Get-PageFileSettings | ForEach-Object {
             @{ Name = $_.Name; InitialSize = [int]$_.InitialSize; MaximumSize = [int]$_.MaximumSize }
         })
     }
@@ -257,6 +289,13 @@ function Restore-PageFileBaseline {
     #>
     param($Original)
 
+    $raw = @([string[]]@($Original.PagingFiles) | Where-Object { $_ })
+    if ($raw.Count -gt 0) {
+        # Verbatim registry restore first; the flag write below then either leaves
+        # it (manual) or supersedes it (automatic rewrites PagingFiles itself).
+        try { Set-PagingFilesRegistry -Value $raw } catch { }
+    }
+
     if ([bool]$Original.Automatic) {
         # Turning automatic management back on makes Windows rewrite PagingFiles
         # itself; any fixed sizes written by the break are superseded.
@@ -265,6 +304,7 @@ function Restore-PageFileBaseline {
     }
 
     Set-PageFileAutomatic -Enabled $false
+    if ($raw.Count -gt 0) { return }
     foreach ($s in @($Original.Settings)) {
         if (-not $s) { continue }
         $existing = Get-PageFileSettings | Where-Object { $_.Name -ieq $s.Name } | Select-Object -First 1

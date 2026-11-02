@@ -195,6 +195,20 @@ function Get-DexLogonTriggers {
     @($Task.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' })
 }
 
+function Write-DexNote {
+    # Host-stream diagnostic for use inside Verify/Validate blocks, whose output
+    # stream the harness casts to [bool]; Write-DexStep would pollute that stream.
+    param([Parameter(Mandatory = $true)][string]$Name, [string]$Message = '')
+    Write-Host "  [Info   ] $Name$(if ($Message) { ": $Message" })" -ForegroundColor Gray
+}
+
+function Get-DexRecordValue {
+    # One value from the script's summary key (null when the key or value is absent).
+    param([Parameter(Mandatory = $true)][string]$Name)
+    if (-not (Test-Path -LiteralPath $DexRecordsPath)) { return $null }
+    (Get-ItemProperty -LiteralPath $DexRecordsPath -Name $Name -ErrorAction SilentlyContinue).$Name
+}
+
 function Get-DexAllTasks {
     <#
         Every task outside \Microsoft\, read one at a time. A bare Get-ScheduledTask
@@ -367,29 +381,41 @@ $BreakCatalog = @(
                 FixtureCount          = (Get-DexFixtureVolumeTasks).Count
             }
         }
+        # Diagnostics in Verify and Validate go through Write-DexNote (host stream), never
+        # Write-DexStep: the harness casts the block's output with [bool], so a second
+        # object in the output stream turns a $false verdict into $true (run b96db5bec056).
         Verify   = {
             $fixtures   = @(Get-DexFixtureVolumeTasks)
             $qualifying = @(Get-DexQualifyingLogonTasks)
-            Write-DexStep -Status 'Info' -Name 'Verify AtLogOnTaskVolume' -Message "fixtures=$($fixtures.Count) qualifying=$($qualifying.Count) threshold=$ScriptVolumeWarnCount; qualifying: $(($qualifying | ForEach-Object { "$($_.TaskPath)$($_.TaskName)" }) -join ', ')"
+            Write-DexNote -Name 'Verify AtLogOnTaskVolume' -Message "fixtures=$($fixtures.Count) qualifying=$($qualifying.Count) threshold=$ScriptVolumeWarnCount; qualifying: $(($qualifying | ForEach-Object { "$($_.TaskPath)$($_.TaskName)" }) -join ', ')"
             ($fixtures.Count -gt 0) -and ($qualifying.Count -ge $ScriptVolumeWarnCount)
         }
         # Correct behaviour is to report and leave alone: every volume fixture must
         # still be registered, enabled and carrying its original delay, the host must
         # still be at or over the threshold, and the finding must have been recorded.
         Validate = {
-            $fixtures = Get-DexFixtureVolumeTasks
-            if ($fixtures.Count -eq 0) { return $false }
-            $untouched = $true
-            foreach ($t in $fixtures) {
-                if ($t.State -eq 'Disabled') { $untouched = $false; break }
-                $triggers = Get-DexLogonTriggers -Task $t
-                if ($triggers.Count -eq 0) { $untouched = $false; break }
-                foreach ($tr in $triggers) {
-                    if ((Get-DexDelaySeconds $tr.Delay) -ne $VolumeTaskDelaySeconds) { $untouched = $false; break }
-                }
+            $fixtures = @(Get-DexFixtureVolumeTasks)
+            if ($fixtures.Count -eq 0) {
+                Write-DexNote -Name 'Validate AtLogOnTaskVolume' -Message 'no volume fixtures are registered any more'
+                return $false
             }
-            $stillOver = (Get-DexQualifyingLogonTasks).Count -ge $ScriptVolumeWarnCount
-            $reported  = Test-DexStepReported -StepName 'AtLogOn Task Volume'
+            $untouched = $true
+            $touched   = ''
+            foreach ($t in $fixtures) {
+                if ($t.State -eq 'Disabled') { $untouched = $false; $touched = "$($t.TaskName) is disabled"; break }
+                $triggers = Get-DexLogonTriggers -Task $t
+                if ($triggers.Count -eq 0) { $untouched = $false; $touched = "$($t.TaskName) lost its AtLogOn trigger"; break }
+                foreach ($tr in $triggers) {
+                    $secs = Get-DexDelaySeconds $tr.Delay
+                    if ($secs -ne $VolumeTaskDelaySeconds) { $untouched = $false; $touched = "$($t.TaskName) delay is '$($tr.Delay)' ($secs s), expected $VolumeTaskDelaySeconds s"; break }
+                }
+                if (-not $untouched) { break }
+            }
+            $qualifying = @(Get-DexQualifyingLogonTasks)
+            $stillOver  = $qualifying.Count -ge $ScriptVolumeWarnCount
+            $reported   = Test-DexStepReported -StepName 'AtLogOn Task Volume'
+            $scriptSaw  = Get-DexRecordValue -Name 'QualifyingTaskCount'
+            Write-DexNote -Name 'Validate AtLogOnTaskVolume' -Message "fixtures=$($fixtures.Count) untouched=$untouched$(if ($touched) { " ($touched)" }) qualifying=$($qualifying.Count) threshold=$ScriptVolumeWarnCount stillOver=$stillOver reported=$reported scriptQualifyingTaskCount=$scriptSaw"
             $untouched -and $stillOver -and $reported
         }
         Restore  = {

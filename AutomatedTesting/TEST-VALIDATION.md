@@ -134,23 +134,23 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 5 | `Invoke-AutoRemediateWindowsUpdates.ps1` | Device / driver | Tested | Medium | Break test (4 breaks) | `PASS - LAB` + UEM `6c8405` |
 | 6 | `Invoke-AutoRemediatePrinter.ps1` | Device / driver | Tested | Low | Break test (4 breaks incl. reboot) | `PASS - LAB` + UEM `6c8405` |
 | 7 | `Invoke-AutoRemediateWiFiSignalIssues.ps1` | Windows remediation | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
-| 8 | `Invoke-DriverUpdates.ps1` | Windows remediation | Needs Testing | Medium | Break test (1 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run f6feb1b31416 on 2026-11-02: WuauservStopped (service stopped, script started it; driver discovery itself is not injectable on a VM); result `C:\Temp\FixReport\Invoke-DriverUpdates\f6feb1b31416.json`; UEM sweep `6c8405`) |
-| 9 | `Invoke-RemediateMemoryCompression.ps1` | Windows remediation | Needs Testing | Low | Break test (1 break) | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run 075ce256c2af on 2026-11-02, memory compression disabled and re-enabled, result `C:\Temp\FixReport\Invoke-RemediateMemoryCompression\075ce256c2af.json`) |
-| 10 | `Invoke-RemediatePageFile.ps1` | Windows remediation | Needs Testing | Medium | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) ; defect 13.2.b fixed 2026-11-02, parse-checked, break test adjusted |
-| 11 | `Invoke-RemediateSysMain.ps1` | Windows remediation | Needs Testing | Low | Break test (2 breaks) | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run a1b442690696 on 2026-11-02, SysMainService stopped and repaired, result `C:\Temp\FixReport\Invoke-RemediateSysMain\a1b442690696.json`; second run 90575d8adf92 covered SysMainDisabledWhileRunning, the gap 1.0.1 closed; script 1.0.1) |
+| 8 | `Invoke-DriverUpdates.ps1` | Windows remediation | Tested | Medium | Break test (1 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run f6feb1b31416 on 2026-11-02: WuauservStopped (service stopped, script started it; driver discovery itself is not injectable on a VM); result `C:\Temp\FixReport\Invoke-DriverUpdates\f6feb1b31416.json`; UEM sweep `6c8405`) |
+| 9 | `Invoke-RemediateMemoryCompression.ps1` | Windows remediation | Tested | Low | Break test (1 break) | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run 075ce256c2af on 2026-11-02, memory compression disabled and re-enabled, result `C:\Temp\FixReport\Invoke-RemediateMemoryCompression\075ce256c2af.json`) |
+| 10 | `Invoke-RemediatePageFile.ps1` | Windows remediation | Needs Testing | Medium | Break test (2 breaks; reported-only break passed, fixed break pending) | `PASS - UEM`, plus `PASS - LAB` for the reported-only branch only (run c845854c3e7e, 2026-11-02: `AutomaticManagedPagefile` cleared, usage 9.9 %, script 1.0.1 warned "manually configured" and changed nothing, exit 0; result `C:\Temp\FixReport\Invoke-RemediatePageFile\c845854c3e7e.json`). The fixed branch (PageFileManualNearCapacity) has not run: attempts 70ec5b19ade0, 9e2d8e9b803e, f4b3611eecf8, 4e166254f72d and 5e9fa8a3e6c3 stopped inside the harness because every WMI route to the `Win32_PageFileSetting` sizes answered "Value out of range" (13.5); the test now writes the `PagingFiles` registry value when WMI refuses. Rerun with `-BreakName PageFileManualNearCapacity` pending; not Full Pass until then. Defect 13.2.b fixed 2026-11-02 in 1.0.1 |
+| 11 | `Invoke-RemediateSysMain.ps1` | Windows remediation | Tested | Low | Break test (2 breaks) | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run a1b442690696 on 2026-11-02, SysMainService stopped and repaired, result `C:\Temp\FixReport\Invoke-RemediateSysMain\a1b442690696.json`; second run 90575d8adf92 covered SysMainDisabledWhileRunning, the gap 1.0.1 closed; script 1.0.1) |
 | 12 | `Disable-NonEssentialStartupApps.ps1` | Windows remediation | Needs Testing | Medium | none | `TESTED - MANUAL` + UEM `6c8405` |
-| 13 | `Enable-HardwareAcceleratedGPUScheduling.ps1` | Windows remediation | Needs Testing | Medium | Break test (1 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run 61f9d608ba6d on 2026-11-02: HagsRegistryState (HwSchMode set to 1, script 1.0.2 set it back to 2 and exited 0); result `C:\Temp\FixReport\Enable-HardwareAcceleratedGPUScheduling\61f9d608ba6d.json`; UEM sweep `6c8405`) |
-| 14 | `Restart-WindowsUpdateServices.ps1` | Windows remediation | Needs Testing | Medium | Break test (4 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run 3cbd00c57db4 on 2026-11-02: BitsStopped and WuauservStopped (both services stopped, script restarted both); result `C:\Temp\FixReport\Restart-WindowsUpdateServices\3cbd00c57db4.json`; UEM sweep `6c8405`) |
+| 13 | `Enable-HardwareAcceleratedGPUScheduling.ps1` | Windows remediation | Tested | Medium | Break test (1 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run 61f9d608ba6d on 2026-11-02: HagsRegistryState (HwSchMode set to 1, script 1.0.2 set it back to 2 and exited 0); result `C:\Temp\FixReport\Enable-HardwareAcceleratedGPUScheduling\61f9d608ba6d.json`; UEM sweep `6c8405`) |
+| 14 | `Restart-WindowsUpdateServices.ps1` | Windows remediation | Tested | Medium | Break test (4 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run 3cbd00c57db4 on 2026-11-02: BitsStopped and WuauservStopped (both services stopped, script restarted both); result `C:\Temp\FixReport\Restart-WindowsUpdateServices\3cbd00c57db4.json`; UEM sweep `6c8405`) |
 | 15 | `Restart-WinProcess.ps1` | Windows remediation | Needs Testing | High | uem-tests.json (Chrome variables) | `TESTED - MANUAL` (fixed and verified 2026-10-29) + UEM `17a0a0` on one device; relaunch lands in session 0 |
 | 16 | `Restart-WinProcessGraceful.ps1` | Windows remediation | Needs Testing | High | uem-tests.json (Chrome variables) | `PASS - UEM` (one device, run `fb2f21`; watchdog closed and restarted Chrome; break steps still `NEEDS TEST`) |
 | 17 | `Restart-WinProcessGracefulEx.ps1` | Windows remediation | Needs Testing | Medium | UEM via `Test_JSpencerOnly` | `NEEDS TEST` (prototype); UEM run `6caa9a` (2026-11-02) ended `Failed (ScriptTimedOut 12007)` at the 30 s default: it waits the full graceful timeout inline, then force-kills and relaunches, and Chrome in the user session cannot be signalled from session 0. Prototype superseded by `Restart-WinProcessGraceful.ps1`, which dispatches the same work detached and passed; not for publication, no fix planned |
 | 18 | `Restart-WinService.ps1` | Windows remediation | Needs Testing | Medium | UEM entry (Spooler) | `PASS - UEM` (break steps still `NEEDS TEST`) |
-| 19 | `Invoke-AutoRemediateAppXBloat.ps1` | Windows logon | Needs Testing | Medium | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 19 | `Invoke-AutoRemediateAppXBloat.ps1` | Windows logon | Tested | Medium | Break test (1 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run da4f55c3d6f8 on 2026-11-02: InstalledDenyListedPackage (loose `DEXTest.BloatProbe` full-trust package registered under Developer Mode with `DenyListExtra=DEXTest.*`; script 1.0.0 removed it and exited 0, and as 13.3 predicted also removed ten inbox consumer packages for every user on the VM; the first attempt f3daf194e657 failed in the fixture because Windows will not register a framework package that way); result `C:\Temp\FixReport\Invoke-AutoRemediateAppXBloat\da4f55c3d6f8.json`; UEM sweep `6c8405` (2026-10-29) `Completed` on both devices) |
 | 20 | `Invoke-AutoRemediateFSLogixExclusions.ps1` | Windows logon | Needs Testing | None | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
-| 21 | `Invoke-AutoRemediateLogonTaskContention.ps1` | Windows logon | Needs Testing | Low | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) |
-| 22 | `Invoke-AutoRemediateProfileBloat.ps1` | Windows logon | Needs Testing | Low | Break test written 2026-11-02 (13.1), not run | `PASS - UEM` (break steps still `NEEDS TEST`) |
+| 21 | `Invoke-AutoRemediateLogonTaskContention.ps1` | Windows logon | Needs Testing | Low | Break test (2 breaks), rerun pending | `PASS - UEM` (break steps still `NEEDS TEST`). Break test runs 4b1fd3dc15d5 and b96db5bec056 (2026-11-02) gave no usable verdict, both for harness reasons (13.5): the first could not see any scheduled task under elevation, the second had its Verify result masked by a diagnostic line. The script itself behaved as its header says in b96db5bec056: delayed the one fixture that needed it (+60 s), reported 19 AtLogOn tasks against the warn threshold of 8 and changed none of them. Diagnostics now go to the host stream; rerun pending |
+| 22 | `Invoke-AutoRemediateProfileBloat.ps1` | Windows logon | Needs Testing | Low | Break test (9 breaks), rerun pending | `PASS - UEM` (break steps still `NEEDS TEST`). Break test run a70511beb91d (2026-11-02) stopped in the fixture: `CreateProfile` returned 0x800706F7 (13.5); the fixture now loads the profile through a hidden logon as the test user instead. Rerun pending |
 | 23 | `Invoke-CrowdStrikeServiceRemediation.ps1` | Antivirus | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
-| 24 | `Invoke-DefenderDynamicPerformance.ps1` | Antivirus | Needs Testing | Low | Break test (2 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run acd1081436f9 on 2026-11-02: CpuProfileDrift and ScoreCacheCorrupt (load factor drifted to 5 with a stale marker, score cache set to a non-number; script recomputed the score and re-applied the profile); result `C:\Temp\FixReport\Invoke-DefenderDynamicPerformance\acd1081436f9.json`; UEM sweep `6c8405`) |
+| 24 | `Invoke-DefenderDynamicPerformance.ps1` | Antivirus | Tested | Low | Break test (2 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run acd1081436f9 on 2026-11-02: CpuProfileDrift and ScoreCacheCorrupt (load factor drifted to 5 with a stale marker, score cache set to a non-number; script recomputed the score and re-applied the profile); result `C:\Temp\FixReport\Invoke-DefenderDynamicPerformance\acd1081436f9.json`; UEM sweep `6c8405`) |
 | 25 | `Invoke-DefenderEnableCloudBlock_BAFS.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 26 | `Invoke-DefenderPauseScan.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 27 | `Invoke-DefenderServiceRemediation.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
@@ -161,8 +161,8 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 32 | `Invoke-TrellixLocalUpdate.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 33 | `Invoke-TrellixRefreshPolicies.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 34 | `Invoke-TrendMicroServiceRemediation.ps1` | Antivirus | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
-| 35 | `Invoke-AutoRemediateChrome.ps1` | Application | Needs Testing | Low | Break test (4 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run ea3f7e8bbf4f on 2026-11-02: CacheBloat (80 MB planted in Cache and Code Cache, cleared) and OrphanedNativeMessagingHost (WOW6432Node key pointing at a missing manifest, pruned); result `C:\Temp\FixReport\Invoke-AutoRemediateChrome\ea3f7e8bbf4f.json`; UEM sweep `6c8405`) |
-| 36 | `Invoke-AutoRemediateOneDrive.ps1` | Application | Needs Testing | Medium | Break test (5 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run 2dd3df491bfa on 2026-11-02: AutoStartAndProcess (OneDrive.exe stopped, script 1.0.2 relaunched it in the user session and exited 0) and KfmPolicyDrift (reported only, as designed); result `C:\Temp\FixReport\Invoke-AutoRemediateOneDrive\2dd3df491bfa.json`; UEM sweep `6c8405`) |
+| 35 | `Invoke-AutoRemediateChrome.ps1` | Application | Tested | Low | Break test (4 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run ea3f7e8bbf4f on 2026-11-02: CacheBloat (80 MB planted in Cache and Code Cache, cleared) and OrphanedNativeMessagingHost (WOW6432Node key pointing at a missing manifest, pruned); result `C:\Temp\FixReport\Invoke-AutoRemediateChrome\ea3f7e8bbf4f.json`; UEM sweep `6c8405`) |
+| 36 | `Invoke-AutoRemediateOneDrive.ps1` | Application | Tested | Medium | Break test (5 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run 2dd3df491bfa on 2026-11-02: AutoStartAndProcess (OneDrive.exe stopped, script 1.0.2 relaunched it in the user session and exited 0) and KfmPolicyDrift (reported only, as designed); result `C:\Temp\FixReport\Invoke-AutoRemediateOneDrive\2dd3df491bfa.json`; UEM sweep `6c8405`) |
 | 37 | `Invoke-AutoRemediateOutlook.ps1` | Application | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 38 | `Invoke-AutoRemediateTeams.ps1` | Application | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 39 | `Invoke-AutoRemediateZoom.ps1` | Application | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
@@ -180,7 +180,7 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 51 | `Invoke-AutoRemediateSCOMMonitoringHost.ps1` | Application (SCOM) | Needs Testing | Medium | none | `DEFERRED` (SCOM approach under review since 2026-10-30; was `NEEDS TEST - PRODUCT VM` (UEM `6c8405`: `UnknownScriptError`; four launcher defects fixed in 1.0.2; final re-run 2026-10-30 ran the payload to `Skipped:NoAgent` on the lab VM)) |
 | 52 | `Start-ClearRecycleBin.ps1` | Disk cleanup | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 53 | `Start-DiskCleanup.ps1` | Disk cleanup | Tested | Low | none | `TESTED - MANUAL` (UEM `6c8405`: `ScriptTimedOut` on one device; fixed in 1.2.1, `Completed` on both in re-run `0501f4`) |
-| 54 | `Start-UserProfileCleanup.ps1` | Disk cleanup | Needs Testing | High | UEM via `Test_JSpencerOnly`, break test written 2026-11-02 (13.1), not run | `PASS - UEM` for the enumerate and no-delete path (single-VM group, run `bbf07f`, 2026-10-30); the delete path still needs manual steps 1 to 5 with a planted old profile |
+| 54 | `Start-UserProfileCleanup.ps1` | Disk cleanup | Tested | High | Break test (3 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test runs 28180d46896e and 7027f9afc870 on 2026-11-02: StaleOversizedProfile (`DEXTestProfile`, 98.71 MB and idle 60 days against the scratch copy's 0-day, 32 MB thresholds, deleted in both runs), EnrollmentUserProfileKept (first run) and UnderThresholdProfileKept (`DEXTestKeep`, 2.71 MB, second run), both examined and left in place; the delete path that was manual is now exercised by the harness; results `C:\Temp\FixReport\Start-UserProfileCleanup\28180d46896e.json` and `7027f9afc870.json`; UEM run `bbf07f` (2026-10-30, single-VM group `Test_JSpencerOnly`) `Completed` on `CHASEWIN11_2`) |
 | 55 | `Get-AppVolumesMountProbe.ps1` | Generic troubleshooting | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` |
 | 56 | `Enable-LogonAuditLogs.ps1` | Generic troubleshooting | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 57 | `Measure-LogonDuration.ps1` | Generic troubleshooting | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
@@ -196,7 +196,7 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 67 | `Invoke-SimpleReboot.ps1` | Reboot | Tested | High | UEM via `Test_JSpencerOnly` | `PASS - UEM` (single-VM group, run `f3996a`, 2026-10-30; device rebooted and came back). 1.0.1 defers the no-user reboot by 10 s, parse-checked, that branch not re-run |
 | 68 | `SmartReboot.ps1` | Reboot | Tested | Low | none | `TESTED - MANUAL` |
 
-Counts after the 2026-10-29 fixes, the UEM sweeps, the 2026-10-30 SCOM deferral and the single-VM group runs: 14 `PASS - LAB` (every one of them also `PASS - UEM`, so 14 Full Pass as of 2026-11-02), 16 `PASS - UEM`, 12 `TESTED - MANUAL`, 0 `FIX FIRST` (the four defects found by the 2026-11-02 break-test reviews, 13.2 a to d, were fixed the same day), 0 `MANUAL ONLY`, 7 `DEFERRED`, 0 reference-only copy, 17 `NEEDS TEST - PRODUCT VM`, 2 `NEEDS TEST` (`Restart-WinProcessGracefulEx.ps1`, a superseded prototype whose UEM run timed out, and `Measure-LogonDurationMultiSession.ps1`, too large for UEM and needing an elevated manual run) (plus the SYSTEM path of `Disable-NonEssentialStartupApps.ps1`). The 8 scripts that had no inventory row were added to the CSV on 2026-11-02 as `3) Complete - Needs Testing`, and the 6 `PASS - LAB` scripts were promoted to `4) Complete - Tested` under the Full Pass rule in 1.1. `Restart-WinProcessSoft.ps1` (0 bytes) is excluded from the count.
+Counts after the 2026-10-29 fixes, the UEM sweeps, the 2026-10-30 SCOM deferral and the single-VM group runs: 16 `PASS - LAB` (every one of them also `PASS - UEM`, so 16 Full Pass as of 2026-11-02; `Invoke-RemediatePageFile.ps1` has a partial `PASS - LAB` and stays in the `PASS - UEM` count), 14 `PASS - UEM`, 12 `TESTED - MANUAL`, 0 `FIX FIRST` (the four defects found by the 2026-11-02 break-test reviews, 13.2 a to d, were fixed the same day), 0 `MANUAL ONLY`, 7 `DEFERRED`, 0 reference-only copy, 17 `NEEDS TEST - PRODUCT VM`, 2 `NEEDS TEST` (`Restart-WinProcessGracefulEx.ps1`, a superseded prototype whose UEM run timed out, and `Measure-LogonDurationMultiSession.ps1`, too large for UEM and needing an elevated manual run) (plus the SYSTEM path of `Disable-NonEssentialStartupApps.ps1`). The 8 scripts that had no inventory row were added to the CSV on 2026-11-02 as `3) Complete - Needs Testing`, and every Full Pass script is promoted to `4) Complete - Tested` under the Full Pass rule in 1.1 (16 so far; 30 scripts carry that status). `Restart-WinProcessSoft.ps1` (0 bytes) is excluded from the count.
 
 ---
 
@@ -808,7 +808,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 | Inventory | `3) Complete - Needs Testing`, impact Low |
 | Inputs | none |
 | Prerequisites | `Get-MMAgent`/`Enable-MMAgent` (Windows 10 or later) |
-| Automated coverage | `Memory_AutomatedTestingInvoke-RemediateMemoryCompression_BreakTest.ps1` (1 break) |
+| Automated coverage | `Memory\_AutomatedTesting\Invoke-RemediateMemoryCompression_BreakTest.ps1` (1 break) |
 
 **Purpose.** Re-enables memory compression when `Get-MMAgent` reports it disabled and records the result under `HKLM:\Software\AirWatch\Extension\DEXRecords\MemoryErrors\MemoryCompression`.
 
@@ -833,7 +833,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 | Inventory | `3) Complete - Needs Testing`, impact Medium |
 | Inputs | `$env:PageFileUsageFailPercent` (default 80) |
 | Prerequisites | `Win32_ComputerSystem`, `Win32_PageFileUsage` |
-| Automated coverage | `Memory_AutomatedTestingInvoke-RemediatePageFile_BreakTest.ps1` (2 breaks; first run 70ec5b19ade0 on 2026-11-02 failed inside the harness, `New-CimInstance` on `Win32_PageFileSetting` returned "Value out of range"; the test now creates the setting through `Set-WmiInstance`, rerun pending) |
+| Automated coverage | `Memory\_AutomatedTesting\Invoke-RemediatePageFile_BreakTest.ps1` (2 breaks; the reported-only break passed in run c845854c3e7e, the fixed break is pending a rerun after the harness WMI failure, see 13.5) |
 
 **Purpose.** When the page file is manually sized and usage is at or above the threshold, resets it to system-managed. Reports high usage otherwise. Writes `RebootRequired = True` to `...\DEXRecords\MemoryErrors\PageFile` after a fix.
 
@@ -850,7 +850,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 4. Verify `(Get-CimInstance Win32_ComputerSystem).AutomaticManagedPagefile` is `True`; registry `Status = Remediated`, `RebootRequired = True`. Reboot, then rerun with no override and expect `[Passed] Page file is system-managed, ...`.
 5. Without the override and a manual-but-healthy page file, expect `[Warning]` and exit `1` with no change.
 
-**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
+**Status:** `PASS - UEM`, plus `PASS - LAB` for the reported-only branch. Break test run c845854c3e7e on 2026-11-02 (elevated, lab VM `CBRADLEYSWIN11`): `AutomaticManagedPagefile` cleared with system-managed sizes left in place, usage 9.9 %, script 1.0.1 reported Warning "Page file is manually configured" and changed nothing, exit 0, `Status = Warning` in DEXRecords; machine restored. Result `C:\Temp\FixReport\Invoke-RemediatePageFile\c845854c3e7e.json`. The fixed branch (PageFileManualNearCapacity, threshold override 0) has not run: five attempts failed inside the harness because every WMI route to the `Win32_PageFileSetting` sizes answered "Value out of range" (13.5); the harness now writes the `PagingFiles` registry value directly when WMI refuses and restores it verbatim. Rerun pending; not Full Pass until the fixed branch has been exercised. UEM sweep `6c8405` (2026-10-29) `Completed` on both devices.
 
 **Review notes.** Both advisory Warning states exit `1`, which UEM reports as Failed with nothing to fix. A malformed threshold variable throws in the param block and the script falls through to `Exit 0`.
 
@@ -862,7 +862,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 | Inventory | `3) Complete - Needs Testing`, impact Low |
 | Inputs | none |
 | Prerequisites | `SysMain` service |
-| Automated coverage | `Memory_AutomatedTestingInvoke-RemediateSysMain_BreakTest.ps1` (2 breaks) |
+| Automated coverage | `Memory\_AutomatedTesting\Invoke-RemediateSysMain_BreakTest.ps1` (2 breaks) |
 
 **Purpose.** Sets SysMain (Superfetch) to Automatic and starts it. Records to `...\DEXRecords\MemoryErrors\SysMain`.
 
@@ -1050,7 +1050,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 | Inventory | `3) Complete - Needs Testing`, impact Medium |
 | Inputs | `$env:DenyListExtra` (comma-separated patterns), `$env:RemoveForExistingUsers` (`true|1|yes|y`), `$env:WhatIf` |
 | Prerequisites | DISM AppX cmdlets; SYSTEM |
-| Automated coverage | none |
+| Automated coverage | `_AutomatedTesting\Invoke-AutoRemediateAppXBloat_BreakTest.ps1` (1 breaks) |
 
 **Purpose.** Two steps: deprovision a curated deny list of consumer inbox AppX packages for future users; optionally remove them for existing users. A safelist (Calculator, Store, Photos, Terminal, Notepad, shell components, runtime frameworks) cannot be overridden.
 
@@ -1063,7 +1063,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 5. Verify the packages are gone from both cmdlets; `HKLM:\Software\AirWatch\Extensions\AppXBloat\Remediation` shows `RemediationsRun = 1`, `RemediationErrors = 0`. Rerun prints `No matching packages are provisioned for new users`.
 6. Re-arm for another run: revert the snapshot or point `$env:DenyListExtra='Microsoft.WindowsAlarms'` at a still-provisioned package.
 
-**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
+**Status:** `PASS - LAB` + `PASS - UEM`, Full Pass. Break test run da4f55c3d6f8 on 2026-11-02 (elevated, lab VM `CBRADLEYSWIN11`): InstalledDenyListedPackage (loose `DEXTest.BloatProbe` full-trust package registered under Developer Mode with `DenyListExtra=DEXTest.*`; script 1.0.0 removed it and exited 0, and as 13.3 predicted also removed ten inbox consumer packages for every user on the VM; the first attempt f3daf194e657 failed in the fixture because Windows will not register a framework package that way); machine restored. Result `C:\Temp\FixReport\Invoke-AutoRemediateAppXBloat\da4f55c3d6f8.json`. UEM sweep `6c8405` (2026-10-29) `Completed` on both devices.
 
 **Review notes.** `Remove-AppxPackage -AllUsers` commonly fails for in-use packages (0x80073CFA) and then the script exits `1`. Enumeration plus removal can exceed the 90-second header timeout. Version constant and header disagree. The Store can reinstall removed apps.
 
@@ -1105,7 +1105,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 | Inventory | `3) Complete - Needs Testing`, impact Low |
 | Inputs | `$env:MinDelaySeconds` (60), `$env:StaggerSeconds` (30), `$env:TaskVolumeWarnCount` (8), `$env:WhatIf` |
 | Prerequisites | ScheduledTasks module |
-| Automated coverage | none |
+| Automated coverage | `_AutomatedTesting\Invoke-AutoRemediateLogonTaskContention_BreakTest.ps1` (2 breaks; runs 4b1fd3dc15d5 and b96db5bec056 on 2026-11-02 are not evidence, see 13.5; rerun pending) |
 
 **Purpose.** Two steps: raise and stagger the `Delay` on AtLogOn triggers of enabled non-Microsoft tasks (`PT1M`, `PT1M30S`, ...); warn when too many such tasks exist.
 
@@ -1124,7 +1124,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 4. Verify `(Get-ScheduledTask -TaskPath '\LabVendor\').Triggers | Select Delay` shows `PT1M` and `PT1M30S`; registry `HKLM:\Software\AirWatch\Extensions\LogonTaskContention\Remediation` has `TasksDelayed = 2`. Rerun prints `All 2 qualifying task(s) already have at least a 60 second delay`.
 5. Restore: `Get-ScheduledTask -TaskPath '\LabVendor\' | Unregister-ScheduledTask -Confirm:$false`.
 
-**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
+**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`. Break test runs 4b1fd3dc15d5 and b96db5bec056 (2026-11-02) produced no usable verdict because of two harness defects (13.5); the script's own output in b96db5bec056 matches the header: one fixture delayed +60 s, 19 AtLogOn tasks reported against the warn threshold of 8 and left alone. Rerun pending.
 
 **Review notes.** The ISO 8601 parser handles only `PT#H#M#S`; a delay stored as `P0DT0H1M0S` or `P1D` parses as 0 and can be lowered. `Set-ScheduledTask` fails for tasks with a stored password. Delaying vendor agents is user-visible.
 
@@ -1136,7 +1136,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 | Inventory | `3) Complete - Needs Testing`, impact Low |
 | Inputs | `$env:MinFileAgeDays` (7), `$env:MinSizeThresholdMB` (50), `$env:RoamingWarnMB` (500), `$env:HiveWarnMB` (100), `$env:WhatIf` |
 | Prerequisites | `Win32_UserProfile`; SYSTEM to reach every profile |
-| Automated coverage | none |
+| Automated coverage | `_AutomatedTesting\Invoke-AutoRemediateProfileBloat_BreakTest.ps1` (9 breaks; run a70511beb91d on 2026-11-02 failed in the fixture, fixed, rerun pending) |
 
 **Purpose.** Nine steps across every non-special local profile: delete aged files from user Temp, browser caches, Teams caches, Explorer thumbnail and icon caches, crash dumps and WER reports, RDP and shader caches, Recent items and Jump Lists; report oversized Roaming AppData and oversized registry hives.
 
@@ -1154,7 +1154,7 @@ Also present in `ProcessManagement\`: `Restart-WinProcessSoft.ps1` is a 0-byte p
 4. Verify the `labbloat` files and `lab*.lnk` are gone; `HKLM:\Software\AirWatch\Extensions\ProfileBloat\Remediation` shows `ReclaimedMB = 60`, `CleanupsRun = 2`; log at `C:\Windows\Temp\UEM_AutoRemediateProfileBloat.log`.
 5. Restore: clear the two env overrides.
 
-**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`.
+**Status:** `PASS - UEM` for the healthy-machine run (UEM sweep `6c8405`, 2026-10-29: `Completed` on `CBRADLEYSWIN11` and `CHASEWIN11_2`, result file `test-result-scripts.json` in the connector folder); the break steps above are still `NEEDS TEST`. Break test run a70511beb91d (2026-11-02) stopped in the fixture (`CreateProfile` 0x800706F7, 13.5); the fixture now loads the profile through a logon, rerun pending.
 
 **Review notes.** Step 7 deletes `CustomDestinations` and `AutomaticDestinations`, which hold user-pinned Jump List items (not pure cache). Deleting `WER\ReportQueue` discards un-uploaded crash reports. Large profiles can exceed the 300-second header timeout because each step walks its tree twice.
 
@@ -1661,7 +1661,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 | Inventory | `3) Complete - Needs Testing`, impact High |
 | Inputs | none; hard-coded `$ENROLLMENTUSER = "Administrator"`, `$DAYS_INACTIVE = 30`, `$SIZE_THRESHOLD_MB = 500` |
 | Prerequisites | PS 5.1 (`Get-WmiObject`), SYSTEM |
-| Automated coverage | `uem-tests.json` skip |
+| Automated coverage | `_AutomatedTesting\Start-UserProfileCleanup_BreakTest.ps1` (3 breaks); `uem-tests.json` skip |
 
 **Purpose.** Deletes whole local profiles that are both inactive beyond the threshold and larger than the size threshold, via `Remove-WmiObject` on `Win32_UserProfile`.
 
@@ -1673,7 +1673,7 @@ Only Chrome and OneDrive are installed on the lab VM. Outlook, Teams and Zoom ar
 4. Verify `Test-Path C:\Users\dexprobe` false; `Get-CimInstance Win32_UserProfile | Where-Object LocalPath -like '*dexprobe*'` empty; the `ProfileList` SID key gone.
 5. Restore: `net user dexprobe /delete`; discard the scratch copy.
 
-**Status:** `PASS - UEM` for the enumerate and no-delete path. Ran through UEM as SYSTEM against the single-VM group `Test_JSpencerOnly` on 2026-10-30 (run `bbf07f`, `Completed` on `CHASEWIN11_2`, exit `0`). No profile on that VM is both idle for over 30 days and over 500 MB, so nothing was deleted, which is the expected outcome on a fresh VM. The delete path (steps 1 to 5 above, with a planted old profile) remains manual. Never add it to a group that contains the observing machine.
+**Status:** `PASS - LAB` + `PASS - UEM`, Full Pass. Break test runs 28180d46896e and 7027f9afc870 on 2026-11-02 (elevated, lab VM `CBRADLEYSWIN11`): StaleOversizedProfile (`DEXTestProfile`, 98.71 MB and idle 60 days against the scratch copy's 0-day, 32 MB thresholds, deleted in both runs), EnrollmentUserProfileKept (first run) and UnderThresholdProfileKept (`DEXTestKeep`, 2.71 MB, second run), both examined and left in place; the delete path that was manual is now exercised by the harness; machine restored. Results `C:\Temp\FixReport\Start-UserProfileCleanup\28180d46896e.json` and `7027f9afc870.json`. UEM run `bbf07f` (2026-10-30, single-VM group `Test_JSpencerOnly`) `Completed` on `CHASEWIN11_2`.
 
 **Review notes.** No dry run. `Deleted profile:` prints before the delete is attempted, so a failed delete still shows the line. `$LOG_PATH` is declared but never written; the README and testing guide say otherwise. `Win32_UserAccount` enumeration on a domain-joined machine queries the whole domain and can time out. `LastUseTime` is unreliable on recent Windows 11 builds.
 
@@ -2039,9 +2039,9 @@ The first three end or weaken the console session and must never be run through 
 
 ---
 
-## 13. Break tests written 2026-11-02 (not yet run)
+## 13. Break tests written 2026-11-02 (first runs the same day)
 
-Thirteen `<Script>_BreakTest.ps1` files were added in the same pattern as the six driver and device tests (one `_AutomatedTesting` folder beside each target, `Invoke-AllBreakTests.ps1` discovers them by name, results go to `C:\Temp\FixReport\<ScriptUnderTest>\`). All thirteen parse-check clean under Windows PowerShell 5.1. None has been executed: they are destructive by design and run only elevated on the marked, snapshotted lab VM with `-Force -RemediationTest`. Each one was written after a full read of its target, and that reading produced the defect list in 13.2.
+Thirteen `<Script>_BreakTest.ps1` files were added in the same pattern as the six driver and device tests (one `_AutomatedTesting` folder beside each target, `Invoke-AllBreakTests.ps1` discovers them by name, results go to `C:\Temp\FixReport\<ScriptUnderTest>\`). All thirteen parse-check clean under Windows PowerShell 5.1. They are destructive by design and run only elevated on the marked, snapshotted lab VM with `-Force -RemediationTest`. All thirteen were run on 2026-11-02 (13.5): ten passed, one passed on its reported-only break and still owes its fixed break, and two gave no verdict because of harness or fixture faults that have since been fixed; those three are being rerun. Each one was written after a full read of its target, and that reading produced the defect list in 13.2.
 
 ### 13.1 Files and coverage
 
@@ -2055,15 +2055,15 @@ Thirteen `<Script>_BreakTest.ps1` files were added in the same pattern as the si
 | `Invoke-DriverUpdates.ps1` | `WindowsAutoRemediation\DriverUpdates\_AutomatedTesting\` | WuauservStopped (fixed) | driver discovery and install (a lab VM has no missing driver to inject), reboot signals, policy keys (script does not read them) |
 | `Invoke-DefenderDynamicPerformance.ps1` | `AntiVirusResolutionScripts\MicrosoftDefender\_AutomatedTesting\` | CpuProfileDrift, ScoreCacheCorrupt (both fixed; two methods each) | silent drift while the profile marker matches (script skips by design, see 13.2.e) |
 | `Invoke-AutoRemediateLogonTaskContention.ps1` | `WindowsAutoRemediation\WindowsLogon\_AutomatedTesting\` | AtLogOnTriggerDelay (fixed), AtLogOnTaskVolume (reported only; registers up to 10 `DEXTest` logon tasks) | none |
-| `Invoke-AutoRemediateProfileBloat.ps1` | same folder | nine breaks, one per step, in a `DEXTestBloat` profile created through `CreateProfile`: UserTempFiles, BrowserCaches, TeamsCache, ExplorerIconCache, CrashDumps, ShaderCaches, RecentItems (fixed; each also plants a fresh control file that must survive), OversizedRoamingAppData, OversizedRegistryHive (reported only) | none |
-| `Invoke-AutoRemediateAppXBloat.ps1` | same folder | InstalledDenyListedPackage (fixed; a loose-file `DEXTest.BloatProbe` framework package registered under Developer Mode with `DenyListExtra=DEXTest.*`) | step 1 deprovisioning (needs a signed package) |
+| `Invoke-AutoRemediateProfileBloat.ps1` | same folder | nine breaks, one per step, in a `DEXTestBloat` profile created through `CreateProfile`, or through a hidden logon when that call fails (0x800706F7 on the lab VM): UserTempFiles, BrowserCaches, TeamsCache, ExplorerIconCache, CrashDumps, ShaderCaches, RecentItems (fixed; each also plants a fresh control file that must survive), OversizedRoamingAppData, OversizedRegistryHive (reported only) | none |
+| `Invoke-AutoRemediateAppXBloat.ps1` | same folder | InstalledDenyListedPackage (fixed; a loose-file `DEXTest.BloatProbe` full-trust main package registered under Developer Mode with `DenyListExtra=DEXTest.*`; a framework package cannot be registered that way (0x80073CF9)) | step 1 deprovisioning (needs a signed package) |
 | `Invoke-AutoRemediateChrome.ps1` | `ApplicationSpecific\Chrome\_AutomatedTesting\` | CacheBloat (fixed), ExtensionCount (reported only), CrashLoop (reported only), OrphanedNativeMessagingHost (fixed; HKCU, HKLM, WOW6432Node variants) | Google Update service (no such service on the VM), enterprise policy (see 13.2.g) |
 | `Invoke-AutoRemediateOneDrive.ps1` | `ApplicationSpecific\OneDrive\_AutomatedTesting\` | AutoStartAndProcess (fixed), AccountNotSignedIn, FilesOnDemandServiceDisabled, KfmPolicyDrift (reported only), FilesOnDemandServiceStopped (fixed) | sync-error detection (needs an event-log record that Restore cannot remove) |
 | `Start-UserProfileCleanup.ps1` | `DiskCleanup\_AutomatedTesting\` | StaleOversizedProfile (fixed: `DEXTestProfile` deleted), UnderThresholdProfileKept, EnrollmentUserProfileKept (reported only). Runs a scratch copy with the constants set to 0 days, 32 MB, enrollment user `DEXTestEnroll`, and an added SID allow-list so only `DEXTest*` accounts are ever candidates | domain-joined behaviour, loaded-profile error path |
 
 Where a target writes no per-step `DEXRecords` value, the report-only validation reads the script's summary counters and its captured stdout instead; the file header says which.
 
-### 13.2 Defects found while writing the break tests (not yet fixed)
+### 13.2 Defects found while writing the break tests
 
 Items a to d would have made the break test's result meaningless or made UEM report the wrong status; they were fixed on 2026-11-02 (versions in each entry) and the affected break tests were adjusted. The rest are open.
 
@@ -2081,7 +2081,9 @@ k. **`Start-UserProfileCleanup.ps1`.** `ConvertToDateTime` on a null `LastUseTim
 l. **`Invoke-DriverUpdates.ps1`.** Does not read the driver-exclusion policy keys, so a policy-blocked search fails with a generic error. A pre-existing pending reboot is never reported in detect mode.
 m. **All three WindowsLogon scripts.** Header says 1.0.1, `$SCRIPT_VERSION` logs 1.0.0. Findings go to summary counters under `AirWatch\Extensions\<Name>\Remediation`, not per-step `DEXRecords` values, so a runbook cannot tell which step warned.
 
-### 13.3 Decisions needed before the runs
+### 13.3 Collateral decisions
+
+Decision taken 2026-11-02: run all three on the snapshotted lab VM `CBRADLEYSWIN11` and revert the snapshot afterwards. The AppX run (da4f55c3d6f8) did remove the inbox consumer apps for every user on that VM, as predicted below.
 
 1. **AppX bloat.** The target script applies its default consumer-app deny list on every run with no off switch, and the break test must set `RemoveForExistingUsers=true` to reach the step it tests, so a run deprovisions and removes the inbox consumer apps (Xbox, Bing Weather and News, Solitaire, Feedback Hub, Get Help, Maps, Clipchamp and others) for every user on the lab VM, including the signed-in one. Not reversible from the harness. Options: run it on the snapshotted VM and revert; or first add a `DenyListOverride` input to the script so the test (and customers) can supply a curated list.
 2. **Profile bloat.** The script processes every non-special profile, so a run also deletes the signed-in user's own aged temp, browser, Teams, crash-dump and Recent items. Fine on the snapshotted VM; not on a working machine.
@@ -2097,5 +2099,29 @@ Elevated, on the marked lab VM, after a snapshot:
 .\<Script>_BreakTest.ps1 -Force -Restore                     # undo an in-flight run
 ```
 
-`-Environment Snapshot` skips the restore phase when the host will revert anyway. Breaks flagged `RequiresReboot` need `-IncludeRebootBreaks`; none of the thirteen new tests has one.
+`-Environment Snapshot` skips the restore phase when the host will revert anyway. Breaks flagged `RequiresReboot` need `-IncludeRebootBreaks`; none of the thirteen new tests has one. An elevated prompt opens in `C:\Windows\System32`, so the practical form is `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<absolute path to the test>" -Force -RemediationTest`.
+
+### 13.5 Run log, 2026-11-02
+
+Elevated, lab VM `CBRADLEYSWIN11`, snapshot taken first. Result files are `C:\Temp\FixReport\<ScriptUnderTest>\<run id>.json`, copied to the evidence bundle under `lab-results/`. "Passed" means every break was verified before the remediation ran and every validation matched its expected outcome; the per-script rows in 1.2 carry the detail and the Full Pass status.
+
+| Break test | Run id(s) | Outcome | Reading |
+|---|---|---|---|
+| `Invoke-RemediateMemoryCompression` | 075ce256c2af | Passed | |
+| `Invoke-RemediatePageFile` | 70ec5b19ade0, 9e2d8e9b803e, f4b3611eecf8, 4e166254f72d, c845854c3e7e, 5e9fa8a3e6c3 | Passed for the reported-only break (c845854c3e7e); fixed break pending | The five failures are all the same harness fault: `New-CimInstance`, `Set-CimInstance`, `Set-WmiInstance` and the WMI object's own `Put()` each answered "Value out of range" when writing a 2048 MB fixed page file, with 9 GB free on `C:` and 8 GB of RAM; the cause was not found. `Win32_PageFileSetting` is a view of the `PagingFiles` registry value, so the test now writes that value directly when WMI refuses, records it verbatim before the break and restores it verbatim. The one run that drew the ClearAutomaticFlagOnly method needed no size write and passed. |
+| `Invoke-RemediateSysMain` | a1b442690696, 90575d8adf92 | Passed | Second run named the SysMainDisabledWhileRunning break. |
+| `Enable-HardwareAcceleratedGPUScheduling` | 61f9d608ba6d | Passed | |
+| `Restart-WindowsUpdateServices` | 3cbd00c57db4 | Passed | |
+| `Invoke-DriverUpdates` | f6feb1b31416 | Passed | |
+| `Invoke-DefenderDynamicPerformance` | acd1081436f9 | Passed | |
+| `Invoke-AutoRemediateLogonTaskContention` | 4b1fd3dc15d5, b96db5bec056 | No verdict; rerun pending | First run: the harness counted zero qualifying tasks under elevation, its own ten fixtures included, and refused to run the remediation; its task enumeration now walks the Task Scheduler COM folders and reads each task individually. Second run ended `FalsePass` on the volume break, but the diagnostic line added to Verify went to the output stream, which the harness casts to `[bool]`, so Verify could not have returned false and the Validate failure has no diagnosis. Diagnostics now go to the host stream and Validate prints each component (fixtures untouched, still over threshold, reported). The script itself did what its header says: delayed the one fixture that needed it (+60 s), reported 19 AtLogOn tasks against the warn threshold of 8 and changed none of them. |
+| `Invoke-AutoRemediateProfileBloat` | a70511beb91d | Fixture failure; rerun pending | `CreateProfile` returned 0x800706F7 (RPC_X_BAD_STUB_DATA). The fixture now falls back to a hidden process started as the test user with `-LoadUserProfile`, the method the profile-cleanup test already uses. |
+| `Invoke-AutoRemediateAppXBloat` | f3daf194e657, da4f55c3d6f8 | Passed (second run) | First run: Windows will not register a framework package in Developer Mode (0x80073CF9); the fixture is now a main package with one full-trust application whose executable is a copy of `cmd.exe`, never launched. Second run: the script removed the probe and, as 13.3 predicted, ten inbox consumer packages for every user on the VM. |
+| `Invoke-AutoRemediateChrome` | ea3f7e8bbf4f | Passed | |
+| `Invoke-AutoRemediateOneDrive` | 2dd3df491bfa | Passed | |
+| `Start-UserProfileCleanup` | b2ca8814334e, 0c7bf67c2b55, 28180d46896e, 7027f9afc870 | Passed (third and fourth runs) | First two runs: the `0xFFFFFFFF` SID mask literal is an `[int32]` -1 in PowerShell 5.1 and the `[uint32]` cast failed on a real SID component; fixed with an `[int64]` mask. The passing runs deleted the 98.71 MB `DEXTestProfile` and left `DEXTestKeep` (2.71 MB) and the enrollment-user fixture in place, which together cover all three breaks. |
+
+Two harness rules came out of these runs and apply to every break test from now on: a Verify or Validate block writes nothing to the output stream except its verdict (the harness casts the block output with `[bool]`, and a two-element array is always true), and every catch block records the exception and line in the result file's `HarnessError` field so a failed run can be read without a console paste. Both are in place in all nineteen tests.
+
+Page-file note for the operator: the failed PageFile runs each cleared `AutomaticManagedPagefile` before the WMI write failed, and Restore wrote the captured flag back. The run that passed (11:18) captured the flag already off with system-managed sizes (`C:\pagefile.sys 0 0`), and the host shows the same today; whether the flag was on before the first attempt at 10:44 was not recorded. If it was, re-enable it in System Properties (Advanced, Performance, Virtual memory, "Automatically manage paging file size for all drives"). The test now records the exact `PagingFiles` value before each break so this question does not come up again.
 
