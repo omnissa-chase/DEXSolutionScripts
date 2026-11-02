@@ -1,5 +1,4 @@
 /_RAWDATA
-/_vector_db
 WindowsReboot/.DS_Store
 WindowsAutoRemediation/.DS_Store
 TroubleshootingWizard/.DS_Store
@@ -7,3 +6,5 @@ GenericTroubleshooting/.DS_Store
 ApplicationSpecific/.DS_Store
 AntiVirusResolutionScripts/.DS_Store
 .DS_Store
+/_vector_db
+/_resolutionresults

@@ -28,10 +28,23 @@
     "note": "Positive path: CHASEWIN11_2 has BitLocker on C: with a password protector (enabled 2026-10-30, no TPM, policy EnableBDEWithNoTPM). From v1.3.0 the script suspends the protectors, schedules the power-off 15 s out through shutdown.exe and exits 0, so Hub reports Completed with the manage-bde output before the device goes down. Afterwards boot the VM (no password prompt while suspended), confirm manage-bde -status C: shows Protection Off, then manage-bde -protectors -enable C:. On a device whose protection is not On, the script throws and exits 1 (Failed) without powering off; set expect to Failed to prove that guard (run c8e0dd on 1.1.0 showed the exit-code-only guard did not hold; run 534500 on 1.2.0 could only be judged as no result because of the in-process /t 0)."
   },
   "DEX_Stop-WindowsUpdate.ps1": {
-    "skip": "Disables Windows Update and sets a 35-day pause on the test device. Validate by hand per TEST-VALIDATION.md 9.4."
+    "onlyInGroup": "Test_JSpencerOnly",
+    "timeoutMinutes": 5,
+    "note": "Disables Windows Update and sets a 35-day pause on the device, so it only runs against the single-VM group after a snapshot. Revert the VM afterwards. Manual steps in TEST-VALIDATION.md 9.4."
   },
   "DEX_Start-WindowsUpdate.ps1": {
-    "skip": "Forces an update install on the test device, which can leave it pending a restart mid-sweep. Validate by hand per TEST-VALIDATION.md 9.5."
+    "onlyInGroup": "Test_JSpencerOnly",
+    "timeoutMinutes": 10,
+    "note": "Re-enables Windows Update and forces a scan/install through a scheduled task; the device may end up pending a restart. Single-VM group after a snapshot, run it last. Manual steps in TEST-VALIDATION.md 9.5."
+  },
+  "Restart-WinProcessGracefulEx.ps1": {
+    "onlyInGroup": "Test_JSpencerOnly",
+    "timeoutMinutes": 5,
+    "variables": { "FileDescription": "Google Chrome", "Restart": "true", "GracefulTimeoutSec": "15" },
+    "note": "Prototype 0.9.1 of the graceful restart, kept for reference. Same Chrome target as Restart-WinProcessGraceful.ps1; needs Chrome open in the signed-in session on CHASEWIN11_2. Single-VM group because it closes the user's browser."
+  },
+  "Measure-LogonDurationMultiSession.ps1": {
+    "skip": "87,435 characters, far over the UEM 32,767 limit, so the create call is refused. Test it by hand as SYSTEM on the lab VM (RunNow mode) per TEST-VALIDATION.md."
   },
   "Start-UserProfileCleanup.ps1": {
     "onlyInGroup": "Test_JSpencerOnly",
@@ -44,7 +57,9 @@
     "note": "Resets adapters and Winsock on the target, which drops its network for a while; Hub reports once connectivity returns, hence the longer wait. Only against the single-VM group. Also covered by its break test on the lab VM."
   },
   "Start-DefenderFullScan.ps1": {
-    "skip": "Starts a multi-hour Defender full scan on the test device and slows every later case. Validate by hand per TEST-VALIDATION.md 4.7."
+    "onlyInGroup": "Test_JSpencerOnly",
+    "timeoutMinutes": 5,
+    "note": "Start-MpScan -AsJob returns at once, so the script completes in seconds, but the full scan then runs for hours on the device. Single-VM group after a snapshot so the sweep devices are not slowed. Manual steps in TEST-VALIDATION.md 4.7."
   },
   "Invoke-AutoRemediateSCOMAgent.ps1": {
     "skip": "Reference copy only: 48,336 characters exceeds the UEM 32,767 limit and the create call will be refused. Parts 1-3 are the deployable split."
