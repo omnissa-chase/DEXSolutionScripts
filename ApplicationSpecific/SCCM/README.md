@@ -17,6 +17,7 @@
 8. [Suggested Rollout Rings](#8-suggested-rollout-rings)
 9. [Tunable Reference](#9-tunable-reference)
 10. [Troubleshooting](#10-troubleshooting)
+11. [Testing on a Lab Client](#11-testing-on-a-lab-client)
 
 ---
 
@@ -464,6 +465,17 @@ providers. In most cases, restarting CcmExec (`sc.exe start CcmExec`) resolves t
 script attempts this automatically. If the namespace is still absent after a restart, a full
 client repair (`ccmsetup /forceinstall`) is required. Trigger this from the CM console
 client push rather than from this script.
+
+---
+
+## 11. Testing on a Lab Client
+
+`_AutomatedTesting\Invoke-SCCMLabRun.ps1` runs all five scripts on one ConfigMgr lab client
+without UEM, checks each one's output, exit code, scheduled-task cleanup and registry
+record, optionally applies five reversible scenarios, and zips the evidence to send back.
+`_AutomatedTesting\LAB-RUN-SCCM.md` is the runbook, written for someone who has never seen
+this repo. The cache purge, ccmsetup retry loop and WMI salvage paths are not simulated by
+the harness; the runbook describes how to exercise the first two by hand on a throwaway VM.
 
 ---
 

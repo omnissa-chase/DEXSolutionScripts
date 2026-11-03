@@ -34,18 +34,33 @@
     | 12 | DiscardRatePpm           | String  | vpn_discard_rate_ppm  (Integer)  |
     | 13 | ClientCount              | String  | vpn_client_count      (Integer)  |
     +----+--------------------------+---------+----------------------------------+
+    Plus, for the sensors' self-refreshing gate (1.1.0): LastRun and LastChecked
+    (both 'o' format), StateFingerprint, CollectorPath and CollectorHash (SHA-256).
 
     A HealthScore of -1 means no VPN client is present on the device. This is
     deliberately distinct from a low score, which means a VPN client is present and
     unhealthy. Collapsing the two would make fleet reporting meaningless.
 
+    SELF-REFRESHING CACHE (1.1.0)
+    Every sensor carries a verbatim copy of Get-VpnStateFingerprint. When LastChecked
+    is older than 15 minutes a sensor recomputes the fingerprint; if it still matches
+    StateFingerprint it only stamps LastChecked, otherwise it reruns this script from
+    the copy persisted at CollectorPath, after checking the file's SHA-256 against
+    CollectorHash. The persisted folder is locked to SYSTEM/Administrators Full and
+    Users ReadAndExecute, owner Administrators, inheritance disabled.
+
+    VPN_COLLECTOR_QUIET
+    Set to 1 by the sensors when they launch this script. The log file is written as
+    usual but nothing goes to the output or error streams, so the sensor's single
+    line of output stays clean. Unset (Hub, console) behaviour is unchanged.
+
 .NOTES
     Script Name  : Invoke-VpnStateCollection.ps1
-    Version      : 1.0.1
+    Version      : 1.1.0
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-02 (1.0.1: step 5 called Get-NetAdapterStatistics with -InterfaceIndex, a parameter it does not have, so the whole collection failed with CollectionError on any device with an active tunnel; now -Name. Found by the lab break test the first time a real tunnel (WireGuard) was present.)
+    Last Modified: 2026-11-02 (1.1.0: self-refreshing cache. Writes StateFingerprint, LastChecked, CollectorPath and CollectorHash; persists its own text to C:\ProgramData\AirWatch\Extensions\VPN with a locked ACL so sensors can rerun it when the adapter state changes; honours VPN_COLLECTOR_QUIET=1. Detection and scoring unchanged. 1.0.1: step 5 called Get-NetAdapterStatistics with -InterfaceIndex, a parameter it does not have, so the whole collection failed with CollectionError on any device with an active tunnel; now -Name. Found by the lab break test the first time a real tunnel (WireGuard) was present.)
     Timeout      : 30 seconds
     Schedule     : Every 15-30 minutes
 
@@ -55,18 +70,32 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
+# Captured at script scope on purpose: inside the function below, ScriptBlock is only
+# the function body. Hub feeds scripts through stdin, so $PSCommandPath is empty and
+# this string is the only copy of the full text we can persist for the sensors.
+$script:SelfText = $MyInvocation.MyCommand.ScriptBlock.ToString()
+
 function Invoke-VpnStateCollection {
 [CmdletBinding()]
 param()
 
-$SCRIPT_VERSION = "1.0.1"
+$SCRIPT_VERSION = "1.1.0"
 $RegPath        = "HKLM:\Software\AirWatch\Extensions\VPN"
 $LogPath        = "$env:SystemRoot\Temp\UEM_VpnStateCollection.log"
+$PersistDir     = "C:\ProgramData\AirWatch\Extensions\VPN"
+$PersistPath    = Join-Path $PersistDir "Invoke-VpnStateCollection.ps1"
+$Quiet          = ($env:VPN_COLLECTOR_QUIET -eq '1')
 
 $RunEventId = ([Random]::new()).Next(1000, 9999)
 $HEAD       = "`r`n[$RunEventId]"
 
-Write-Output "[$RunEventId] Executing Invoke-VpnStateCollection, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'"
+function Write-Out {
+    # Output stream unless a sensor launched us with VPN_COLLECTOR_QUIET=1.
+    param([string]$Message)
+    if (-not $Quiet) { Write-Output $Message }
+}
+
+Write-Out "[$RunEventId] Executing Invoke-VpnStateCollection, $SCRIPT_VERSION. Started @ '$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))'"
 
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
@@ -131,6 +160,73 @@ function Test-EventMatchesTunnel {
     return $false
 }
 
+# -- State fingerprint ----------------------------------------------------------
+# Copied VERBATIM into every vpn_* sensor; change both or neither. Same candidate
+# rules as Get-CandidateTunnelAdapter (non-hardware, not excluded, Up or not).
+# One entry per candidate: ifIndex|Status|IPv4 NlMtu|IPv4 DNS servers joined by ','.
+# Entries sorted and joined by ';'. Empty string when there are no candidates.
+function Get-VpnStateFingerprint {
+    $x = '(?i)(vEthernet|Hyper-V|WSL|Docker|VMware|VirtualBox|Bluetooth|Loopback|Npcap|Wi-Fi Direct|Kernel Debug|Teredo|ISATAP|6to4|VirtualPCNet|TeamViewer|Parsec)'
+    $e = foreach ($a in @(Get-NetAdapter -ErrorAction SilentlyContinue)) {
+        $hw = $true
+        if ($a.PSObject.Properties['HardwareInterface']) { $hw = [bool]$a.HardwareInterface }
+        elseif ($a.PSObject.Properties['ConnectorPresent']) { $hw = [bool]$a.ConnectorPresent }
+        if ($hw -or $a.Name -match $x -or $a.InterfaceDescription -match $x) { continue }
+        $m = (Get-NetIPInterface -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1).NlMtu
+        $d = @((Get-DnsClientServerAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).ServerAddresses) -join ','
+        "$($a.ifIndex)|$($a.Status)|$m|$d"
+    }
+    return ((@($e) | Sort-Object) -join ';')
+}
+
+# -- Persist a copy of this script for the sensors' gate -------------------------
+# Own try/catch; never changes the exit code. On any failure CollectorHash is written
+# empty so the sensors fall back to the cache instead of running an unverified file.
+function Save-CollectorCopy {
+    $hash = ''
+    try {
+        if ([string]::IsNullOrWhiteSpace($script:SelfText)) { throw "Script text unavailable; nothing to persist." }
+        if (-not (Test-Path -LiteralPath $PersistDir)) { New-Item -ItemType Directory -Path $PersistDir -Force -ErrorAction Stop | Out-Null }
+
+        # SYSTEM Full, Administrators Full, Users ReadAndExecute; inheritance disabled; owner
+        # Administrators so a standard user who pre-created the folder cannot re-grant
+        # themselves access (an owner may always rewrite the DACL). FA = FullControl,
+        # 0x1200a9 = ReadAndExecute + Synchronize.
+        $dirSddl  = 'O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)'
+        $fileSddl = 'O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)'
+        $sec = New-Object System.Security.AccessControl.DirectorySecurity
+        try {
+            $sec.SetSecurityDescriptorSddlForm($dirSddl)
+            Set-Acl -LiteralPath $PersistDir -AclObject $sec -ErrorAction Stop
+        }
+        catch {
+            Write-Log "Folder ACL with owner failed ($($_.Exception.Message)); applying DACL only." -Level "WARN"
+            $sec = New-Object System.Security.AccessControl.DirectorySecurity
+            $sec.SetSecurityDescriptorSddlForm(($dirSddl -replace '^O:BA', ''))
+            Set-Acl -LiteralPath $PersistDir -AclObject $sec -ErrorAction Stop
+        }
+
+        # Byte-exact: UTF-8 without BOM, no trailing newline added.
+        [System.IO.File]::WriteAllText($PersistPath, $script:SelfText, (New-Object System.Text.UTF8Encoding $false))
+        $fsec = New-Object System.Security.AccessControl.FileSecurity
+        try   { $fsec.SetSecurityDescriptorSddlForm($fileSddl); Set-Acl -LiteralPath $PersistPath -AclObject $fsec -ErrorAction Stop }
+        catch { $fsec = New-Object System.Security.AccessControl.FileSecurity; $fsec.SetSecurityDescriptorSddlForm(($fileSddl -replace '^O:BA', '')); Set-Acl -LiteralPath $PersistPath -AclObject $fsec -ErrorAction Stop }
+
+        $hash = (Get-FileHash -LiteralPath $PersistPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        Write-Log "Persisted collector copy to $PersistPath (SHA-256 $hash)."
+    }
+    catch {
+        $hash = ''
+        Write-Log "Could not persist the collector copy: $($_.Exception.Message). Sensors will fall back to the cache." -Level "WARN"
+    }
+    try {
+        if (-not (Test-Path $RegPath)) { New-Item -Path $RegPath -Force | Out-Null }
+        Set-ItemProperty -Path $RegPath -Name "CollectorPath" -Value $PersistPath -Type String
+        Set-ItemProperty -Path $RegPath -Name "CollectorHash" -Value $hash        -Type String
+    }
+    catch { Write-Log "Could not write CollectorPath/CollectorHash: $($_.Exception.Message)" -Level "WARN" }
+}
+
 # -- Defaults ------------------------------------------------------------------
 $connected       = $false
 $tunnelMode      = 'None'
@@ -145,15 +241,19 @@ $discardPpm      = -1
 $clientCount     = 0
 $healthScore     = -1
 $healthReason    = 'NoVpnClient'
+$fingerprint     = ''
+
+Save-CollectorCopy
 
 try {
     # -- 1. Identify tunnel adapters -------------------------------------------
     $candidates  = Get-CandidateTunnelAdapter
     $clientCount = @($candidates).Count
-    Write-Log "Found $clientCount candidate tunnel adapter(s)."
+    $fingerprint = Get-VpnStateFingerprint
+    Write-Log "Found $clientCount candidate tunnel adapter(s). Fingerprint: '$fingerprint'"
 
     if ($clientCount -eq 0) {
-        Write-Output "$HEAD No VPN client detected on this device."
+        Write-Out "$HEAD No VPN client detected on this device."
         Write-Log "No VPN client detected. HealthScore = -1."
     }
     else {
@@ -162,7 +262,7 @@ try {
         if ($tunnel) {
             $connected   = $true
             $adapterName = $tunnel.InterfaceDescription
-            Write-Output "$HEAD Active tunnel: $adapterName (ifIndex $($tunnel.ifIndex))"
+            Write-Out "$HEAD Active tunnel: $adapterName (ifIndex $($tunnel.ifIndex))"
             Write-Log "Active tunnel: $adapterName (ifIndex $($tunnel.ifIndex))"
 
             # -- 2. Tunnel mode from default route ownership --------------------
@@ -207,7 +307,7 @@ try {
             Write-Log "Discard rate: $discardPpm ppm"
         }
         else {
-            Write-Output "$HEAD VPN client present but no active tunnel."
+            Write-Out "$HEAD VPN client present but no active tunnel."
             Write-Log "VPN client present but no active tunnel."
         }
 
@@ -322,7 +422,7 @@ try {
             $healthReason = ($deductions | Sort-Object { $_.Points } -Descending | Select-Object -First 1).Reason
         }
 
-        Write-Output "$HEAD Health score: $healthScore ($healthReason)"
+        Write-Out "$HEAD Health score: $healthScore ($healthReason)"
         Write-Log "Health score: $healthScore | Reason: $healthReason"
     }
 
@@ -331,6 +431,7 @@ try {
         New-Item -Path $RegPath -Force | Out-Null
     }
 
+    $now = Get-Date -Format "o"
     Set-ItemProperty -Path $RegPath -Name "HealthScore"            -Value ([string]$healthScore)    -Type String
     Set-ItemProperty -Path $RegPath -Name "HealthReason"           -Value $healthReason             -Type String
     Set-ItemProperty -Path $RegPath -Name "Connected"              -Value ([int]$connected)         -Type DWord
@@ -344,20 +445,24 @@ try {
     Set-ItemProperty -Path $RegPath -Name "DnsConfigured"          -Value ([int]$dnsConfigured)     -Type DWord
     Set-ItemProperty -Path $RegPath -Name "DiscardRatePpm"         -Value ([string]$discardPpm)     -Type String
     Set-ItemProperty -Path $RegPath -Name "ClientCount"            -Value ([string]$clientCount)    -Type String
-    Set-ItemProperty -Path $RegPath -Name "LastRun"                -Value (Get-Date -Format "o")    -Type String
+    Set-ItemProperty -Path $RegPath -Name "StateFingerprint"       -Value $fingerprint              -Type String
+    Set-ItemProperty -Path $RegPath -Name "LastRun"                -Value $now                      -Type String
+    Set-ItemProperty -Path $RegPath -Name "LastChecked"            -Value $now                      -Type String
 
-    Write-Output "$HEAD VPN state cached to $RegPath"
+    Write-Out "$HEAD VPN state cached to $RegPath"
     Write-Log "Collection complete."
     exit 0
 }
 catch {
-    Write-Error "$HEAD ERROR: $($_.Exception.Message)"
+    if (-not $Quiet) { Write-Error "$HEAD ERROR: $($_.Exception.Message)" }
     Write-Log "ERROR: $($_.Exception.Message)" -Level "ERROR"
 
     try {
         if (-not (Test-Path $RegPath)) { New-Item -Path $RegPath -Force | Out-Null }
+        $now = Get-Date -Format "o"
         Set-ItemProperty -Path $RegPath -Name "HealthReason" -Value "CollectionError" -Type String
-        Set-ItemProperty -Path $RegPath -Name "LastRun"      -Value (Get-Date -Format "o") -Type String
+        Set-ItemProperty -Path $RegPath -Name "LastRun"      -Value $now -Type String
+        Set-ItemProperty -Path $RegPath -Name "LastChecked"  -Value $now -Type String
     }
     catch { }
 

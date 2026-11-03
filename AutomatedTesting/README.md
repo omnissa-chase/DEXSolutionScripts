@@ -34,6 +34,7 @@ Current catalog:
 | `Invoke-AutoRemediateNetworkStack.ps1` | `Invoke-AutoRemediateNetworkStack_BreakTest.ps1` | 2 of 7 steps (`DhcpLeaseLoss`, `FirewallDisabled`); adapter-disable/Winsock-reset steps deferred — they can sever the session running the test |
 | `Invoke-AutoRemediateAudioBluetooth.ps1` | `Invoke-AutoRemediateAudioBluetooth_BreakTest.ps1` | 5 of 8 steps; 3 user-interaction-only steps excluded; `AudioDriverDisabled` needs real/virtual audio hardware |
 | `Invoke-AutoRemediateWindowsUpdates.ps1` | `Invoke-AutoRemediateWindowsUpdates_BreakTest.ps1` | 4 of 8 steps (`WuauservStopped`, `BitsDisabled`, `CryptSvcStopped`, `DataStoreBloated`); Disk Space/informational steps excluded — their remediations touch real user files/the C: drive and can't be safely redirected to a disposable target |
+| All five `ApplicationSpecific\SCCM\*.ps1` | `ApplicationSpecific\SCCM\_AutomatedTesting\Invoke-SCCMLabRun.ps1` | Single lab-run harness for an external ConfigMgr lab (no UEM needed): baseline of every script plus five reversible scenarios (CcmExec stopped / Manual, stale policy log, BITS disabled, foreign BITS job kept). Not a `*_BreakTest.ps1`, so the sweep does not pick it up. Runbook: `LAB-RUN-SCCM.md` in the same folder. Cache purge, ccmsetup retry loop and WMI salvage are manual (see runbook). |
 
 ## Non-destructive unit tests
 
