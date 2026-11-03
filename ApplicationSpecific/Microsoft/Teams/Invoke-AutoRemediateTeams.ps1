@@ -44,11 +44,12 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateTeams.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-11-03 (1.0.2: New Teams detection uses Get-AppxPackage -AllUsers so the SYSTEM run sees the per-user MSIX; 1.0.1 reported "not installed" under Hub on a device with Teams.)
+                   2026-10-28 (1.0.1)
     Timeout      : 60 seconds
 
 .DISCLAIMER
@@ -95,8 +96,13 @@ if ($_userProfile) {
     }
 }
 
-$_newPackage = Get-AppxPackage -Name 'MSTeams' -ErrorAction SilentlyContinue |
-               Select-Object -First 1
+# New Teams is a per-user MSIX. Hub runs this script as SYSTEM, whose own package list never
+# holds it, so ask for every user's packages first (needs elevation; SYSTEM has it) and fall
+# back to the caller's list for an interactive run. Without -AllUsers the 2026-11-03 UEM run
+# reported Teams "not installed" on a device that had it (TEST-VALIDATION.md 13.2.aa).
+$_newPackage = $null
+try   { $_newPackage = Get-AppxPackage -Name 'MSTeams' -AllUsers -ErrorAction Stop | Select-Object -First 1 }
+catch { $_newPackage = Get-AppxPackage -Name 'MSTeams' -ErrorAction SilentlyContinue | Select-Object -First 1 }
 if ($_newPackage) { $_teamsIsNew = $true }
 
 # -- Pre-flight: app presence check -------------------------------------------

@@ -119,7 +119,7 @@
     "note": "Classic Outlook 16.0.18925 is on CBRADLEYSWIN11 since 2026-11-02 (outlook.com IMAP profile), so that device takes the product path; CHASEWIN11_2 has no Office and proves the [Skipped] path. Watch the run time: two lab runs took over 100 s, the time spent before the script's first line while the host was busy (TEST-VALIDATION.md 13.2.s); 1.1.1 bounds the step 3 event query. Published timeout is 30 s."
   },
   "Invoke-AutoRemediateTeams.ps1": {
-    "note": "Teams is not on the lab VM; Completed proves only the [Skipped] path."
+    "note": "New Teams (MSTeams 26276.x) is on CBRADLEYSWIN11 since 2026-11-02, so that device takes the product path; CHASEWIN11_2 has no Teams and proves the [Skipped] path. Device-side proof: DEXRecords TeamsErrors on CBRADLEYSWIN11."
   },
   "Invoke-AutoRemediateZoom.ps1": {
     "note": "Zoom is not on the lab VM; Completed proves only the [Skipped] path."
