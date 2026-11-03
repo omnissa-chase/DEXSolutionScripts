@@ -32,7 +32,9 @@
       - Group Policy total        (GP EID 4001 -> EID 8001, by PrincipalSamName)
       - GP Logon Scripts          (GP EID 4018 -> EID 5018, ScriptType=1)
       - Folder Redirection        (Microsoft-Windows-Folder Redirection EID 501 -> 502)
-      - User Profile load         (User Profile Service EID 1 -> 2, by user SID)
+      - User Profile load         (User Profiles Service EID 1 -> 2, by user SID;
+                                   provider is "User Profiles Service", the log is
+                                   "User Profile Service/Operational" -- fixed 2026-11-03)
       - FSLogix container attach  (FSLogix Operational log, if present)
       - ActiveSetup               (Microsoft-Windows-Shell-Core EID 62170 -> 62171)
       - AppX / UWP packages       (Microsoft-Windows-AppReadiness EID 209)
@@ -269,21 +271,21 @@ try {
                 $profEndXPath   = "*[System[(EventID='2') and Security[@UserID='$userSID'] and " +
                     "TimeCreated[@SystemTime>='$($logonTime.ToUniversalTime().ToString('o'))']]]"
 
-                $profStartEvent = Get-WinEvent -ProviderName 'Microsoft-Windows-User Profile Service' `
+                $profStartEvent = Get-WinEvent -ProviderName 'Microsoft-Windows-User Profiles Service' `
                     -FilterXPath $profStartXPath -MaxEvents 1 -ErrorAction SilentlyContinue
-                $profEndEvent   = Get-WinEvent -ProviderName 'Microsoft-Windows-User Profile Service' `
+                $profEndEvent   = Get-WinEvent -ProviderName 'Microsoft-Windows-User Profiles Service' `
                     -FilterXPath $profEndXPath -MaxEvents 1 -ErrorAction SilentlyContinue
             }
 
             if ((-not $profStartEvent -or -not $profEndEvent) -and $null -ne $sessionId) {
                 $profStartEvent = Get-WinEvent -FilterHashtable @{
-                    ProviderName = 'Microsoft-Windows-User Profile Service'; Id = 1; StartTime = $logonTime
+                    ProviderName = 'Microsoft-Windows-User Profiles Service'; Id = 1; StartTime = $logonTime
                 } -MaxEvents 100 -ErrorAction SilentlyContinue |
                     Where-Object { $_.Properties[0].Value -eq $sessionId } |
                     Sort-Object TimeCreated | Select-Object -First 1
 
                 $profEndEvent = Get-WinEvent -FilterHashtable @{
-                    ProviderName = 'Microsoft-Windows-User Profile Service'; Id = 2; StartTime = $logonTime
+                    ProviderName = 'Microsoft-Windows-User Profiles Service'; Id = 2; StartTime = $logonTime
                 } -MaxEvents 100 -ErrorAction SilentlyContinue |
                     Where-Object { $_.Properties[0].Value -eq $sessionId } |
                     Sort-Object TimeCreated | Select-Object -First 1

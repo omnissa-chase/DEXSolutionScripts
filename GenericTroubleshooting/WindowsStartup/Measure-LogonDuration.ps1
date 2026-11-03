@@ -133,7 +133,7 @@ $script:ToolsDir   = 'C:\ProgramData\AirWatch\Extensions\DEXTools'
 $script:ScriptName = 'Measure-LogonDuration.ps1'
 $script:TaskName   = 'DEXTools_MeasureLogonDuration'
 $script:RegPath    = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration'
-$script:Version    = '1.1.1'
+$script:Version    = '1.1.2'
 $script:ValidModes = @('RunNow', 'DeployScheduledTask', 'ConfigureLogging')
 
 # Exit code the run will finish with. Script scope so the trailing entry-point block can
@@ -407,7 +407,10 @@ if ($logonTime) {
 }
 #endregion
 
-#region --- User Profile load duration (User Profile Service EID 1 start -> EID 2 finish) ---
+#region --- User Profile load duration (User Profiles Service EID 1 start -> EID 2 finish) ---
+# Provider name is "Microsoft-Windows-User Profiles Service" (plural). The log is named
+# ".../User Profile Service/Operational" (singular); querying the provider by the log's
+# name silently returns nothing, which left this phase Unknown until 2026-11-03.
 # Primary: correlate via user SID in the Security element (Security[@UserID='S-1-5-...']).
 # Fallback: correlate via Session ID in Properties[0] if SID resolution failed.
 $profileDurationSec = $null
@@ -419,16 +422,16 @@ if ($logonTime) {
         $profEndXPath   = "*[System[(EventID='2') and Security[@UserID='$userSID'] and " +
             "TimeCreated[@SystemTime>='$($logonTime.ToUniversalTime().ToString('o'))']]]" 
 
-        $profStartEvent = Get-WinEvent -ProviderName 'Microsoft-Windows-User Profile Service' `
+        $profStartEvent = Get-WinEvent -ProviderName 'Microsoft-Windows-User Profiles Service' `
             -FilterXPath $profStartXPath -MaxEvents 1 -ErrorAction SilentlyContinue
-        $profEndEvent   = Get-WinEvent -ProviderName 'Microsoft-Windows-User Profile Service' `
+        $profEndEvent   = Get-WinEvent -ProviderName 'Microsoft-Windows-User Profiles Service' `
             -FilterXPath $profEndXPath   -MaxEvents 1 -ErrorAction SilentlyContinue
     }
 
     # Fallback to Session ID if SID lookup yielded nothing
     if ((-not $profStartEvent -or -not $profEndEvent) -and $null -ne $sessionId) {
         $profStartEvent = Get-WinEvent -FilterHashtable @{
-            ProviderName = 'Microsoft-Windows-User Profile Service'
+            ProviderName = 'Microsoft-Windows-User Profiles Service'
             Id           = 1
             StartTime    = $logonTime
         } -MaxEvents 100 -ErrorAction SilentlyContinue |
@@ -436,7 +439,7 @@ if ($logonTime) {
             Sort-Object TimeCreated | Select-Object -First 1
 
         $profEndEvent   = Get-WinEvent -FilterHashtable @{
-            ProviderName = 'Microsoft-Windows-User Profile Service'
+            ProviderName = 'Microsoft-Windows-User Profiles Service'
             Id           = 2
             StartTime    = $logonTime
         } -MaxEvents 100 -ErrorAction SilentlyContinue |

@@ -49,6 +49,22 @@
           sensor returns one scalar per device, so a session host has to be reduced to
           a distribution somewhere; it is done here, at write time.
 
+    Version 2.1 adds the phases that account for the time the original twelve left as
+    "other". Phases overlap and several run past shell-ready, so they were never slices
+    of the total; the collector now also clips every measured interval to the logon
+    window, merges the overlaps, and reports the remainder as UnexplainedDurationSec.
+    The new phases, all from logs that are on by default:
+
+      Authentication        Winlogon/Operational 1 -> 2 (time-only; no user field)
+      Winlogon subscribers  Winlogon/Operational 811 -> 812 for the Logon notification,
+                            one pair per subscriber (Profiles, GPClient, TermSrv, Sens,
+                            and every third-party agent registered with Winlogon), with
+                            a per-subscriber breakdown and the slowest named
+      Pre-shell gap         last subscriber finished -> explorer.exe (userinit: network
+                            providers, user logon script, drive maps)
+      Startup apps          Shell-Core 9707 -> 9708 per Run/RunOnce command, with a
+                            per-app breakdown and a DesktopReady point at the last one
+
     Event sources are resolved at runtime rather than hard-coded, because the correct
     identity varies by OS build and domain state. AppReadiness event 209 is in the
     /Admin channel on Windows 11, not /Operational. The GroupPolicy provider is
@@ -167,11 +183,11 @@
 
 .NOTES
     Script Name  : Measure-LogonDurationMultiSession.ps1
-    Version      : 2.0.1
+    Version      : 2.1.0
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-29
+    Last Modified: 2026-11-03
     Timeout      : 300 seconds
 
     PowerShell 5.1 compatible.
@@ -292,7 +308,7 @@ $script:TaskName     = 'DEXTools_MeasureLogonDurationMultiSession'
 $script:RegRoot      = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration'
 $script:SessionsRoot = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration\Sessions'
 $script:AggRoot      = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration\Aggregate'
-$script:Version      = '2.0.1'
+$script:Version      = '2.1.0'
 $script:ValidModes   = @('RunNow', 'DeployScheduledTask', 'ConfigureLogging')
 $script:ValidScopes  = @('LastLogon', 'AllActive', 'AllSince', 'AllUsers')
 
@@ -516,6 +532,28 @@ $script:SourceTable = [ordered]@{
         Correlation = 'SamName'
         Optional    = $true
         NeedsData   = $true
+    }
+    # 1/2 are authentication start/stop, logged as SYSTEM with no user or session field.
+    # 811/812 are per-subscriber began/finished pairs; Security/UserID is the user and
+    # Properties are [notification number, subscriber name]. On by default.
+    Winlogon = @{
+        LogName     = 'Microsoft-Windows-Winlogon/Operational'
+        ProviderName= 'Microsoft-Windows-Winlogon'
+        Ids         = @(1, 2, 811, 812)
+        Correlation = 'Sid'
+        Optional    = $true
+        NeedsData   = $false
+    }
+    # 9705/9706 bracket explorer's enumeration of a Run/RunOnce key (Properties[0] is
+    # the key); 9707/9708 bracket each command it launched (Properties: [Command] and
+    # [PID, Command]). Security/UserID is the user. On by default.
+    StartupApps = @{
+        LogName     = 'Microsoft-Windows-Shell-Core/Operational'
+        ProviderName= 'Microsoft-Windows-Shell-Core'
+        Ids         = @(9705, 9706, 9707, 9708)
+        Correlation = 'Sid'
+        Optional    = $true
+        NeedsData   = $false
     }
 }
 
@@ -958,6 +996,11 @@ function Measure-Session {
     $windowEnd = $logonTime.AddMinutes($script:PhaseWindowMinutes)
     $diag      = [ordered]@{}
 
+    # Every phase that yields a start and an end adds its interval here. At the end
+    # they are clipped to the logon window and merged, so the time no event source
+    # covers can be reported instead of left as an implied "other".
+    $explained = New-Object 'System.Collections.Generic.List[object]'
+
     # Phase windows are per session, so a sweep that harvested a wide span does not let
     # one user's events leak into another's measurement on the time axis.
     $window = {
@@ -994,6 +1037,36 @@ function Measure-Session {
     $diag['ShellReady'] = $shellSource
     #endregion
 
+    #region Authentication (Winlogon/Operational 1 start -> 2 finish)
+    # Precedes the LocalSessionManager logon event, so the pair is the last 1 that
+    # started at or before this logon and the first 2 after it. The events are logged
+    # as SYSTEM with no user or session field: time-only, so measurable only when this
+    # session was the sole logon in the window.
+    $wlSet      = & $window $EventSets['Winlogon']
+    $authDurSec = $null
+    $authMode   = 'None'
+    $authStarts = @($wlSet | Where-Object { $_.Id -eq 1 -and $_.TimeCreated -le $logonTime.AddSeconds(5) })
+    if ($authStarts.Count -gt 0) {
+        if ($ConcurrentLogons -le 1) {
+            $authMode  = 'TimeOnly'
+            $authStart = @($authStarts | Sort-Object TimeCreated -Descending)[0]
+            $authEnd   = @($wlSet | Where-Object { $_.Id -eq 2 -and $_.TimeCreated -ge $authStart.TimeCreated } |
+                             Sort-Object TimeCreated | Select-Object -First 1)
+            if ($authEnd.Count -gt 0) {
+                $span = ($authEnd[0].TimeCreated - $authStart.TimeCreated).TotalSeconds
+                if ($span -ge 0) {
+                    $authDurSec = [math]::Round($span, 2)
+                    $explained.Add(@{ Start = $authStart.TimeCreated; End = $authEnd[0].TimeCreated })
+                }
+            }
+        }
+        else {
+            $authMode = 'Ambiguous'
+        }
+    }
+    $diag['Authentication'] = $authMode
+    #endregion
+
     #region Group Policy total (4001 start -> 8001 finish)
     $gpSet          = & $window $EventSets['GroupPolicy']
     $gpStartResolve = Resolve-PhaseEvents -Events $gpSet -Id 4001 -Session $Session `
@@ -1006,6 +1079,9 @@ function Measure-Session {
     if ($gpStartResolve.Events.Count -gt 0) {
         $gpStartTime   = @($gpStartResolve.Events | Sort-Object TimeCreated -Descending)[0].TimeCreated
         $gpDurationSec = Measure-PairedSpan -StartEvents $gpStartResolve.Events -EndEvents $gpEndResolve.Events
+        if ($null -ne $gpDurationSec) {
+            $explained.Add(@{ Start = $gpStartTime; End = $gpStartTime.AddSeconds($gpDurationSec) })
+        }
     }
     $diag['GroupPolicy'] = $gpStartResolve.Mode
     #endregion
@@ -1054,7 +1130,10 @@ function Measure-Session {
         if ($frEnd.Count -gt 0) {
             $frFirst = @($frResolve.Events | Sort-Object TimeCreated)[0]
             $span    = ($frEnd[0].TimeCreated - $frFirst.TimeCreated).TotalSeconds
-            if ($span -ge 0) { $folderRedirDurSec = [math]::Round($span, 2) }
+            if ($span -ge 0) {
+                $folderRedirDurSec = [math]::Round($span, 2)
+                $explained.Add(@{ Start = $frFirst.TimeCreated; End = $frEnd[0].TimeCreated })
+            }
         }
     }
     $diag['FolderRedirection'] = $frResolve.Mode
@@ -1082,11 +1161,17 @@ function Measure-Session {
             $_.Properties.Count -gt 0 -and [string]$_.Properties[0].Value -eq [string]$Session.SessionId
         })
 
+        $profStarts = $profStartSolve.Events
         if ($startBySession.Count -gt 0 -and $endBySession.Count -gt 0) {
+            $profStarts         = $startBySession
             $profileDurationSec = Measure-PairedSpan -StartEvents $startBySession -EndEvents $endBySession
         }
         else {
             $profileDurationSec = Measure-PairedSpan -StartEvents $profStartSolve.Events -EndEvents $profEndSolve.Events
+        }
+        if ($null -ne $profileDurationSec) {
+            $profStartTime = @($profStarts | Sort-Object TimeCreated -Descending)[0].TimeCreated
+            $explained.Add(@{ Start = $profStartTime; End = $profStartTime.AddSeconds($profileDurationSec) })
         }
     }
     $diag['ProfileLoad'] = $profStartSolve.Mode
@@ -1108,6 +1193,10 @@ function Measure-Session {
     elseif ($fsSet.Count -gt 0) {
         $fsMode             = 'TimeOnly'
         $fslogixDurationSec = Measure-BoundingSpan -Events $fsSet
+        if ($null -ne $fslogixDurationSec) {
+            $fsOrdered = @($fsSet | Sort-Object TimeCreated)
+            $explained.Add(@{ Start = $fsOrdered[0].TimeCreated; End = $fsOrdered[-1].TimeCreated })
+        }
     }
     $diag['FSLogix'] = $fsMode
     #endregion
@@ -1124,7 +1213,10 @@ function Measure-Session {
         $asFirst = @($asStartSolve.Events | Sort-Object TimeCreated)[0]
         $asLast  = @($asEndSolve.Events   | Sort-Object TimeCreated -Descending)[0]
         $span    = ($asLast.TimeCreated - $asFirst.TimeCreated).TotalSeconds
-        if ($span -ge 0) { $activeSetupDurSec = [math]::Round($span, 2) }
+        if ($span -ge 0) {
+            $activeSetupDurSec = [math]::Round($span, 2)
+            $explained.Add(@{ Start = $asFirst.TimeCreated; End = $asLast.TimeCreated })
+        }
     }
     $diag['ActiveSetup'] = $asStartSolve.Mode
     #endregion
@@ -1149,7 +1241,10 @@ function Measure-Session {
 
         if ($appxStart.Count -gt 0 -and $appxEnd.Count -gt 0) {
             $span = ($appxEnd[0].TimeCreated - $appxStart[0].TimeCreated).TotalSeconds
-            if ($span -ge 0) { $appxDurSec = [math]::Round($span, 2) }
+            if ($span -ge 0) {
+                $appxDurSec = [math]::Round($span, 2)
+                $explained.Add(@{ Start = $appxStart[0].TimeCreated; End = $appxEnd[0].TimeCreated })
+            }
         }
         if ($null -eq $appxDurSec -and $ordered.Count -ge 2) {
             $appxDurSec = Measure-BoundingSpan -Events $ordered
@@ -1180,7 +1275,10 @@ function Measure-Session {
                 $firstStart = @($printSolve.Events | Sort-Object TimeCreated)[0]
                 $lastEnd    = @($endResolve.Events | Sort-Object TimeCreated -Descending)[0]
                 $span       = ($lastEnd.TimeCreated - $firstStart.TimeCreated).TotalSeconds
-                if ($span -ge 0) { $printerDurSec = [math]::Round($span, 2) }
+                if ($span -ge 0) {
+                    $printerDurSec = [math]::Round($span, 2)
+                    $explained.Add(@{ Start = $firstStart.TimeCreated; End = $lastEnd.TimeCreated })
+                }
             }
         }
     }
@@ -1214,11 +1312,183 @@ function Measure-Session {
                 $firstStart = @($taskSolve.Events    | Sort-Object TimeCreated)[0]
                 $lastEnd    = @($taskEndSolve.Events | Sort-Object TimeCreated -Descending)[0]
                 $span       = ($lastEnd.TimeCreated - $firstStart.TimeCreated).TotalSeconds
-                if ($span -ge 0) { $logonTaskTotalSec = [math]::Round($span, 2) }
+                if ($span -ge 0) {
+                    $logonTaskTotalSec = [math]::Round($span, 2)
+                    $explained.Add(@{ Start = $firstStart.TimeCreated; End = $lastEnd.TimeCreated })
+                }
             }
         }
     }
     $diag['LogonTasks'] = $taskSolve.Mode
+    #endregion
+
+    #region Winlogon notification subscribers (811 began -> 812 finished, Logon notification)
+    # Everything registered for Winlogon's Logon notification runs here, serially:
+    # Profiles, GPClient, TermSrv, Sens, and any third-party agent (antivirus, VPN,
+    # VDI and SSO products). Each pair carries the user's SID and the subscriber name.
+    # Notification 2 is Logon; later notification numbers fire around and after shell
+    # start and are not logon cost.
+    $subStartSolve = Resolve-PhaseEvents -Events $wlSet -Id 811 -Session $Session `
+                         -Correlation 'Sid' -DataField '' -ConcurrentLogons $ConcurrentLogons
+    $subEndSolve   = Resolve-PhaseEvents -Events $wlSet -Id 812 -Session $Session `
+                         -Correlation 'Sid' -DataField '' -ConcurrentLogons $ConcurrentLogons
+
+    $subscribersSec    = $null
+    $subscriberDetail  = $null
+    $slowestSubscriber = $null
+    $lastSubscriberEnd = $null
+
+    $notifyStarts = @($subStartSolve.Events | Where-Object { $_.Properties.Count -gt 1 -and [string]$_.Properties[0].Value -eq '2' })
+    $notifyEnds   = @($subEndSolve.Events   | Where-Object { $_.Properties.Count -gt 1 -and [string]$_.Properties[0].Value -eq '2' })
+
+    if ($notifyStarts.Count -gt 0) {
+        $perSubscriber = @{}
+        foreach ($start in ($notifyStarts | Sort-Object TimeCreated)) {
+            $name   = [string]$start.Properties[1].Value
+            $finish = @($notifyEnds | Where-Object {
+                [string]$_.Properties[1].Value -eq $name -and $_.TimeCreated -ge $start.TimeCreated
+            } | Sort-Object TimeCreated | Select-Object -First 1)
+            if ($finish.Count -eq 0) { continue }
+
+            $span = ($finish[0].TimeCreated - $start.TimeCreated).TotalSeconds
+            if ($span -lt 0) { continue }
+
+            if (-not $perSubscriber.ContainsKey($name)) { $perSubscriber[$name] = 0.0 }
+            $perSubscriber[$name] += $span
+            $explained.Add(@{ Start = $start.TimeCreated; End = $finish[0].TimeCreated })
+            if ($null -eq $lastSubscriberEnd -or $finish[0].TimeCreated -gt $lastSubscriberEnd) {
+                $lastSubscriberEnd = $finish[0].TimeCreated
+            }
+        }
+
+        if ($perSubscriber.Count -gt 0) {
+            $ranked            = @($perSubscriber.GetEnumerator() | Sort-Object Value -Descending)
+            $subscribersSec    = [math]::Round(($perSubscriber.Values | Measure-Object -Sum).Sum, 2)
+            $slowestSubscriber = [string]$ranked[0].Key
+            # Name=seconds pairs, slowest first. Values formatted invariant so a
+            # comma-decimal locale cannot turn the separator into data.
+            $subscriberDetail  = (($ranked | ForEach-Object {
+                "$($_.Key)=$(Format-Metric ([math]::Round($_.Value, 2)))"
+            }) -join ';')
+        }
+    }
+    $diag['WinlogonSubscribers'] = $subStartSolve.Mode
+    #endregion
+
+    #region Pre-shell gap (last Logon subscriber finished -> explorer.exe)
+    # Userinit's work: network provider notification, the user-object logon script,
+    # drive maps, then launching the shell. Nothing in the default logs brackets it, so
+    # it is reported as the gap it is rather than folded into "other".
+    $preShellGapSec = $null
+    if ($null -ne $shellReadyTime -and $null -ne $lastSubscriberEnd) {
+        $span = ($shellReadyTime - $lastSubscriberEnd).TotalSeconds
+        if ($span -ge 0) { $preShellGapSec = [math]::Round($span, 2) }
+    }
+    #endregion
+
+    #region Startup apps (Shell-Core 9707 start -> 9708 finish per Run/RunOnce command)
+    # Explorer launches Run and RunOnce entries after the desktop appears, so this is
+    # the part of "logon" users feel after the total has stopped counting. Duration is
+    # the sum of the per-command spans (explorer launches them one at a time);
+    # DesktopReady is when the last one had been launched.
+    $saSet = @($EventSets['StartupApps'] | Where-Object {
+        $_.TimeCreated -ge $logonTime -and $_.TimeCreated -le $windowEnd
+    })
+    $saEnumSolve  = Resolve-PhaseEvents -Events $saSet -Id 9705 -Session $Session `
+                        -Correlation 'Sid' -DataField '' -ConcurrentLogons $ConcurrentLogons
+    $saStartSolve = Resolve-PhaseEvents -Events $saSet -Id 9707 -Session $Session `
+                        -Correlation 'Sid' -DataField '' -ConcurrentLogons $ConcurrentLogons
+    $saEndSolve   = Resolve-PhaseEvents -Events $saSet -Id 9708 -Session $Session `
+                        -Correlation 'Sid' -DataField '' -ConcurrentLogons $ConcurrentLogons
+
+    $startupAppCount    = $null
+    $startupAppsSec     = $null
+    $startupAppDetail   = $null
+    $desktopReadyTime   = $null
+    $desktopReadyDurSec = $null
+    $saMode             = $saEnumSolve.Mode
+
+    if ($saMode -ne 'Ambiguous' -and $saMode -ne 'None') {
+        if ($saStartSolve.Events.Count -eq 0) {
+            # Explorer enumerated the Run keys and launched nothing: a measurement.
+            $startupAppCount  = 0
+            $startupAppsSec   = 0
+            $desktopReadyTime = @($saEnumSolve.Events | Sort-Object TimeCreated -Descending)[0].TimeCreated
+        }
+        else {
+            $perApp   = @()
+            $remaining = @($saEndSolve.Events | Sort-Object TimeCreated)
+            foreach ($start in ($saStartSolve.Events | Sort-Object TimeCreated)) {
+                $command = [string]$start.Properties[0].Value
+                $finish  = @($remaining | Where-Object {
+                    $_.Properties.Count -gt 1 -and [string]$_.Properties[1].Value -eq $command -and $_.TimeCreated -ge $start.TimeCreated
+                } | Select-Object -First 1)
+                if ($finish.Count -eq 0) { continue }
+                $remaining = @($remaining | Where-Object { $_.RecordId -ne $finish[0].RecordId })
+
+                $span = ($finish[0].TimeCreated - $start.TimeCreated).TotalSeconds
+                if ($span -lt 0) { continue }
+
+                # The command string is whatever the Run value held, quotes and
+                # arguments included. The executable name is the useful part.
+                $label = if ($command -match '([^\\/"]+?\.exe)') { $Matches[1] } else { $command.Trim('"').Trim() }
+                if ($label.Length -gt 40) { $label = $label.Substring(0, 40) }
+
+                $perApp += [PSCustomObject]@{ Name = $label; Seconds = $span; End = $finish[0].TimeCreated }
+                $explained.Add(@{ Start = $start.TimeCreated; End = $finish[0].TimeCreated })
+            }
+
+            if ($perApp.Count -gt 0) {
+                $startupAppCount  = $perApp.Count
+                $startupAppsSec   = [math]::Round(($perApp | Measure-Object -Property Seconds -Sum).Sum, 2)
+                $desktopReadyTime = ($perApp | Sort-Object End -Descending)[0].End
+                $startupAppDetail = ((@($perApp | Sort-Object Seconds -Descending | Select-Object -First 5) | ForEach-Object {
+                    "$($_.Name)=$(Format-Metric ([math]::Round($_.Seconds, 2)))"
+                }) -join ';')
+            }
+        }
+
+        if ($null -ne $desktopReadyTime) {
+            $span = ($desktopReadyTime - $logonTime).TotalSeconds
+            if ($span -ge 0) { $desktopReadyDurSec = [math]::Round($span, 2) }
+        }
+    }
+    $diag['StartupApps'] = $saMode
+    #endregion
+
+    #region Explained and unexplained time inside the logon window
+    # The phases overlap and several run past shell-ready, so they cannot be summed.
+    # Clip every measured interval to [logon, shell-ready], merge the overlaps, and
+    # what the merged set does not cover is the time no event source accounts for.
+    $explainedSec   = $null
+    $unexplainedSec = $null
+    if ($null -ne $shellReadyTime -and $null -ne $totalLogonDurSec) {
+        $clipped = @()
+        foreach ($interval in $explained) {
+            $s = if ($interval.Start -lt $logonTime)      { $logonTime }      else { $interval.Start }
+            $e = if ($interval.End   -gt $shellReadyTime) { $shellReadyTime } else { $interval.End }
+            if ($e -gt $s) { $clipped += [PSCustomObject]@{ Start = $s; End = $e } }
+        }
+
+        $covered = 0.0
+        $curStart = $null
+        $curEnd   = $null
+        foreach ($interval in ($clipped | Sort-Object Start)) {
+            if ($null -eq $curStart) { $curStart = $interval.Start; $curEnd = $interval.End; continue }
+            if ($interval.Start -le $curEnd) {
+                if ($interval.End -gt $curEnd) { $curEnd = $interval.End }
+            }
+            else {
+                $covered += ($curEnd - $curStart).TotalSeconds
+                $curStart = $interval.Start
+                $curEnd   = $interval.End
+            }
+        }
+        if ($null -ne $curStart) { $covered += ($curEnd - $curStart).TotalSeconds }
+
+        $explainedSec   = [math]::Round($covered, 2)
+        $unexplainedSec = [math]::Round([math]::Max(0.0, $totalLogonDurSec - $covered), 2)
+    }
     #endregion
 
     #region Assemble the record
@@ -1254,6 +1524,21 @@ function Measure-Session {
     $record['LogonTimeUtc']     = Format-StampUtc $logonTime
     $record['ConcurrentLogons'] = Format-Metric $ConcurrentLogons
     $record['ShellReadySource'] = $shellSource
+
+    # Version 2.1 gap phases. Durations in seconds like the originals; the two Detail
+    # values are "Name=seconds" lists, slowest first, ';' separated.
+    $record['AuthenticationDurationSec']      = Format-Metric (Resolve-PhaseValue $authDurSec         $authMode             'Winlogon')
+    $record['WinlogonSubscribersDurationSec'] = Format-Metric (Resolve-PhaseValue $subscribersSec     $subStartSolve.Mode   'Winlogon')
+    $record['WinlogonSubscriberDetail']       = Format-Metric (Resolve-PhaseValue $subscriberDetail   $subStartSolve.Mode   'Winlogon')
+    $record['SlowestWinlogonSubscriber']      = Format-Metric (Resolve-PhaseValue $slowestSubscriber  $subStartSolve.Mode   'Winlogon')
+    $record['PreShellGapDurationSec']         = Format-Metric $preShellGapSec
+    $record['StartupAppCount']                = Format-Metric (Resolve-PhaseValue $startupAppCount    $saMode               'StartupApps')
+    $record['StartupAppsDurationSec']         = Format-Metric (Resolve-PhaseValue $startupAppsSec     $saMode               'StartupApps')
+    $record['StartupAppDetail']               = Format-Metric (Resolve-PhaseValue $startupAppDetail   $saMode               'StartupApps')
+    $record['DesktopReadyTime']               = Format-Stamp  $desktopReadyTime
+    $record['DesktopReadyDurationSec']        = Format-Metric (Resolve-PhaseValue $desktopReadyDurSec $saMode               'StartupApps')
+    $record['ExplainedDurationSec']           = Format-Metric $explainedSec
+    $record['UnexplainedDurationSec']         = Format-Metric $unexplainedSec
 
     # Why each phase reports what it reports. Without this, a wrong provider name and a
     # genuinely unmeasurable phase are indistinguishable -- which is how two headline
@@ -1480,8 +1765,12 @@ $script:RecordValueOrder = @(
     'AppXLoadDurationSec', 'PrintersMappedCount', 'PrinterMappingDurationSec',
     'LogonTaskCount', 'LogonTaskTotalDurationSec', 'DataCollectedAt', 'CollectorVersion',
     'Sid', 'SessionId', 'SessionType', 'SourceAddress', 'SessionIsLive',
-    'LogonTimeUtc', 'ConcurrentLogons', 'ShellReadySource', 'PhaseDiagnostics',
-    'Provisional', 'MeasureAttempts'
+    'LogonTimeUtc', 'ConcurrentLogons', 'ShellReadySource',
+    'AuthenticationDurationSec', 'WinlogonSubscribersDurationSec', 'WinlogonSubscriberDetail',
+    'SlowestWinlogonSubscriber', 'PreShellGapDurationSec', 'StartupAppCount',
+    'StartupAppsDurationSec', 'StartupAppDetail', 'DesktopReadyTime', 'DesktopReadyDurationSec',
+    'ExplainedDurationSec', 'UnexplainedDurationSec',
+    'PhaseDiagnostics', 'Provisional', 'MeasureAttempts'
 )
 
 # The provider's own properties, which are not values an admin wrote or a sensor reads.
@@ -1682,14 +1971,16 @@ function Invoke-MultiSessionCapture {
     #region Report
     Write-Output ''
     Write-Output '-- Measured ---------------------------------------------------------'
-    Write-Output ("   {0,-28} {1,-4} {2,-8} {3,-10} {4,-10} {5}" -f 'User', 'Sess', 'Type', 'Total(s)', 'Profile(s)', 'Logon')
+    Write-Output ("   {0,-28} {1,-4} {2,-8} {3,-9} {4,-9} {5,-9} {6,-9} {7}" -f 'User', 'Sess', 'Type', 'Total(s)', 'Unexpl(s)', 'Subscr(s)', 'Apps(s)', 'Logon')
     foreach ($measurement in ($measured | Sort-Object { $_.Session.LogonTime } -Descending)) {
-        Write-Output ("   {0,-28} {1,-4} {2,-8} {3,-10} {4,-10} {5}" -f
+        Write-Output ("   {0,-28} {1,-4} {2,-8} {3,-9} {4,-9} {5,-9} {6,-9} {7}" -f
             $measurement.Values['Username'],
             $measurement.Values['SessionId'],
             $measurement.Values['SessionType'],
             $measurement.Values['TotalLogonDurationSec'],
-            $measurement.Values['ProfileLoadDurationSec'],
+            $measurement.Values['UnexplainedDurationSec'],
+            $measurement.Values['WinlogonSubscribersDurationSec'],
+            $measurement.Values['StartupAppsDurationSec'],
             $measurement.Values['LogonTime'])
     }
 

@@ -56,11 +56,12 @@
 
 .NOTES
     Script Name  : Invoke-VpnStateCollection.ps1
-    Version      : 1.1.1
+    Version      : 1.1.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-03 (1.1.1: hashes the persisted copy with .NET SHA256 and logs the host's PowerShell version and PSModulePath; under Hub the sensor-spawned child could not resolve Get-FileHash, so the quiet rerun left CollectorHash empty.)
+    Last Modified: 2026-11-03 (1.1.2: holds the named mutex Global\DEX-VpnCollector for the whole run and Write-Log never throws; two gate-launched reruns had collided on the log and written CollectionError.)
+                   2026-11-03 (1.1.1: hashes the persisted copy with .NET SHA256 and logs the host's PowerShell version and PSModulePath; under Hub the sensor-spawned child could not resolve Get-FileHash, so the quiet rerun left CollectorHash empty.)
                    2026-11-02 (1.1.0: self-refreshing cache. Writes StateFingerprint, LastChecked, CollectorPath and CollectorHash; persists its own text to C:\ProgramData\AirWatch\Extensions\VPN with a locked ACL so sensors can rerun it when the adapter state changes; honours VPN_COLLECTOR_QUIET=1. Detection and scoring unchanged. 1.0.1: step 5 called Get-NetAdapterStatistics with -InterfaceIndex, a parameter it does not have, so the whole collection failed with CollectionError on any device with an active tunnel; now -Name. Found by the lab break test the first time a real tunnel (WireGuard) was present.)
     Timeout      : 30 seconds
     Schedule     : Every 15-30 minutes
@@ -101,7 +102,12 @@ Write-Out "[$RunEventId] Executing Invoke-VpnStateCollection, $SCRIPT_VERSION. S
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "[$timestamp] [$RunEventId] [$Level] $Message" | Out-File -FilePath $LogPath -Append -Encoding UTF8 -ErrorAction SilentlyContinue
+    # Never let logging fail the run: Out-File throws (not just errors) when another
+    # collector holds the file, which is how a concurrent rerun ended in CollectionError.
+    foreach ($attempt in 1..3) {
+        try { "[$timestamp] [$RunEventId] [$Level] $Message" | Out-File -FilePath $LogPath -Append -Encoding UTF8 -ErrorAction Stop; return }
+        catch { Start-Sleep -Milliseconds 50 }
+    }
 }
 
 # Virtual adapters that are structurally VPN-like but are never VPN tunnels.
@@ -245,6 +251,19 @@ $clientCount     = 0
 $healthScore     = -1
 $healthReason    = 'NoVpnClient'
 $fingerprint     = ''
+
+# One collector at a time. Hub runs sensors on several threads, and on 2026-11-03 two
+# gate-launched reruns started in the same second, fought over this log and left a
+# CollectionError row (TEST-VALIDATION 13.2.u). A second run waits up to 30 s; if the
+# first is still going it leaves the cache to that run and exits clean.
+$script:RunMutex = New-Object System.Threading.Mutex($false, 'Global\DEX-VpnCollector')
+$gotMutex = $false
+try { $gotMutex = $script:RunMutex.WaitOne(30000) } catch [System.Threading.AbandonedMutexException] { $gotMutex = $true }
+if (-not $gotMutex) {
+    Write-Out "$HEAD Another collector run holds the cache; leaving it to that run."
+    Write-Log "Global\DEX-VpnCollector still held after 30 s; exiting 0 without writing." -Level "WARN"
+    exit 0
+}
 
 Save-CollectorCopy
 
@@ -454,6 +473,7 @@ try {
 
     Write-Out "$HEAD VPN state cached to $RegPath"
     Write-Log "Collection complete."
+    try { $script:RunMutex.ReleaseMutex() } catch { }
     exit 0
 }
 catch {
@@ -469,6 +489,7 @@ catch {
     }
     catch { }
 
+    try { $script:RunMutex.ReleaseMutex() } catch { }
     exit 1
 }
 }
