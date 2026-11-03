@@ -27,7 +27,7 @@
     the rest.
 
     >> Deployment, the reason table, sensor contract and tunables are in
-       ApplicationSpecific/SCOM/README.md. Read it before deploying.
+       ApplicationSpecific/Microsoft/SCOM/README.md. Read it before deploying.
 
 .NOTES
     Script Name  : Invoke-AutoRemediateSCOMAgentPart3.ps1

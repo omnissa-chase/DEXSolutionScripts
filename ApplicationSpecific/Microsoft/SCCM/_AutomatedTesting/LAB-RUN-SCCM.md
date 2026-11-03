@@ -48,7 +48,7 @@ reads that record.
 ## Run it
 
 ```powershell
-Set-Location 'C:\DEXSolutionScripts\ApplicationSpecific\SCCM\_AutomatedTesting'
+Set-Location 'C:\DEXSolutionScripts\ApplicationSpecific\Microsoft\SCCM\_AutomatedTesting'
 
 .\Invoke-SCCMLabRun.ps1 -PlanOnly                       # shows what will run; changes nothing
 .\Invoke-SCCMLabRun.ps1 -Force                          # baseline: every script once, client untouched

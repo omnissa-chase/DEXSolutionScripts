@@ -67,7 +67,7 @@ entries are required for every script and sensor above.
   `MaxEventsScanned`; every TCP probe uses the `BeginConnect` / `WaitOne` / `EndConnect`
   pattern with `NetTimeoutMs`; at most `MaxProbeHosts` hosts are probed per run.
 - Remediations: `SupportsShouldProcess`, `$env:WhatIf` bridge defaulting to live,
-  check-then-apply engine exactly as `ApplicationSpecific/SCOM/Invoke-AutoRemediateSCOMAgentPart1.ps1`
+  check-then-apply engine exactly as `ApplicationSpecific/Microsoft/SCOM/Invoke-AutoRemediateSCOMAgentPart1.ps1`
   (array-ordered steps, `Enabled` absent means enabled, `Res` helper, detection in
   try/catch, summary block, registry persist, exit code). Report-only steps MUST return
   `Warning`, never `Failed`, so exit codes mean what section 8.4 says.

@@ -18,7 +18,7 @@
 
     >> Rationale, management-group load cost, discarded unsent data, the multi-homed
        MMA caveat, the AV/EDR exclusion this launcher requires, rollout guidance and
-       tunables: ApplicationSpecific/SCOM/README.md sections 3, 6.1 and 10.
+       tunables: ApplicationSpecific/Microsoft/SCOM/README.md sections 3, 6.1 and 10.
 
 .NOTES
     Script Name  : Invoke-AutoRemediateSCOMHealthServiceCache.ps1

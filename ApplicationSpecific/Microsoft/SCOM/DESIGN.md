@@ -7,7 +7,7 @@ sessions. This is **agent-side only** — a device-side script can never fix a m
 gateway, or operational database problem. It can only detect that condition and say so.
 
 ## Architecture
-Mirrors the existing `ApplicationSpecific/SCCM` two-tier pattern:
+Mirrors the existing `ApplicationSpecific/Microsoft/SCCM` two-tier pattern:
 
 ```
 Tier 1 — fleet-wide, low blast radius (3 script objects, share one registry cache)
@@ -209,14 +209,14 @@ Everything now fits the 32,767-character limit.
 
 | Script | Original | Now | Headroom |
 |---|---:|---:|---:|
-| `Invoke-AutoRemediateSCOMAgentPart1.ps1` | — | 22,760 | 10,007 |
-| `Invoke-AutoRemediateSCOMAgentPart2.ps1` | — | 26,500 | 6,267 |
-| `Invoke-AutoRemediateSCOMAgentPart3.ps1` | — | 28,731 | 4,036 |
-| `Invoke-AutoRemediateSCOMHealthServiceCache.ps1` | 38,284 | 32,701 | 66 |
-| `Invoke-AutoRemediateSCOMClonedIdentity.ps1` | 36,185 | 32,642 | 125 |
+| `Invoke-AutoRemediateSCOMAgentPart1.ps1` | — | 22,770 | 9,997 |
+| `Invoke-AutoRemediateSCOMAgentPart2.ps1` | — | 26,510 | 6,257 |
+| `Invoke-AutoRemediateSCOMAgentPart3.ps1` | — | 28,741 | 4,026 |
+| `Invoke-AutoRemediateSCOMHealthServiceCache.ps1` | 38,284 | 32,711 | 56 |
+| `Invoke-AutoRemediateSCOMClonedIdentity.ps1` | 36,185 | 32,652 | 115 |
 | `Invoke-AutoRemediateSCOMMonitoringHost.ps1` | 30,535 | 30,778 | 1,989 |
 | `OneTimeSensor/scom_agent_health.ps1` | 32,717 | 32,739 | 28 |
-| `Invoke-AutoRemediateSCOMAgent.ps1` | 54,369 | 48,735 | **reference only, not deployable** |
+| `Invoke-AutoRemediateSCOMAgent.ps1` | 54,369 | 48,745 | **reference only, not deployable** |
 
 `HealthServiceCache` (66), `ClonedIdentity` (125) and the one-time sensor (28) are at the edge — the
 next edit to any of them needs space freed first. Figures re-measured 2026-11-02 (`(Get-Content -Raw).Length`).

@@ -18,7 +18,7 @@
     what Parts 1 and 2 cached. Deploy all three; Part 3 must run last.
 
     >> Deployment, the reason table, sensor contract and tunables are in
-       ApplicationSpecific/SCOM/README.md. Read it before deploying.
+       ApplicationSpecific/Microsoft/SCOM/README.md. Read it before deploying.
 
 .NOTES
     Script Name  : Invoke-AutoRemediateSCOMAgentPart1.ps1

@@ -44,7 +44,7 @@
 
     >> Deployment guidance, the health-score reason table, sensor contract, VDI/golden-image
        notes, tunable reference and troubleshooting are in
-       ApplicationSpecific/SCOM/README.md. Read it before deploying.
+       ApplicationSpecific/Microsoft/SCOM/README.md. Read it before deploying.
 
 .NOTES
     Script Name  : Invoke-AutoRemediateSCOMAgent.ps1

@@ -32,7 +32,7 @@
 
     >> Full rationale -- the golden-image failure mode, why the correct fix is upstream
        in the image, why this is the WRONG TOOL for non-persistent VDI, and rollout
-       guidance -- is in ApplicationSpecific/SCOM/README.md sections 6.3 and 7. Read
+       guidance -- is in ApplicationSpecific/Microsoft/SCOM/README.md sections 6.3 and 7. Read
        both before deploying.
 
 .NOTES

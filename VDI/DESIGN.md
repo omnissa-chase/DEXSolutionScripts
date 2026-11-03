@@ -12,7 +12,7 @@ surround them.
 A VDI session involves at least four machines: the endpoint running a client, a broker or
 control plane, a gateway, and the virtual desktop or session host running an agent. Hub
 and DEX only ever run on two of those: the endpoint and the session host. Everything this
-folder ships therefore follows the same constraint as `VPN/` and `ApplicationSpecific/SCOM/`:
+folder ships therefore follows the same constraint as `VPN/` and `ApplicationSpecific/Microsoft/SCOM/`:
 
 > A device-side script can fix what the local OS and the locally installed agent or
 > client own. It can only *detect and name* a broker, gateway, licensing, image, or
@@ -244,7 +244,7 @@ The DEX console is gaining the ability to run a sensor on demand against one dev
 ideally, to parse JSON sensor output. For an investigation that is far more efficient
 than reading fifteen scalar sensors whose samples are up to 30 minutes old. Each
 component therefore ships **one all-in-one sensor** alongside its scalar set, following
-the precedent of `ApplicationSpecific/SCOM/OneTimeSensor/scom_agent_health.ps1`:
+the precedent of `ApplicationSpecific/Microsoft/SCOM/OneTimeSensor/scom_agent_health.ps1`:
 
 | Property | Rule |
 |---|---|

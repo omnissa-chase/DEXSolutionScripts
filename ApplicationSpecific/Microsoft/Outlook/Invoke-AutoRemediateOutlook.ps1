@@ -11,7 +11,7 @@
     |  1   | Office Add-in Conflict       | Warning ($AllowDestructiveActs)  |
     |  2   | OST Cache Size               | Warning ($AllowDestructiveActs)  |
     |  3   | Exchange Sync Backlog        | -- (informational only)          |
-    |  4   | Office C2R Update Health     | -- (informational only)          |
+    |  4   | Office C2R Update Health     | DISABLED (Word script owns it)   |
     |  5   | Outlook Profile Health       | -- (informational only)          |
 
     STEP 2 TIERS (gated by $AllowDestructiveActions; largest OST over CacheSizeWarningMB)
@@ -390,7 +390,7 @@ $Steps = @(
     @{
         Name             = 'Office C2R Update Health'
         Order            = 4
-        Enabled          = $true
+        Enabled          = $false   # suite-wide: Invoke-AutoRemediateWord owns it
         ResolveOnWarning = $false
         DetectionScript  = {
             if (-not $_c2rConfig) {

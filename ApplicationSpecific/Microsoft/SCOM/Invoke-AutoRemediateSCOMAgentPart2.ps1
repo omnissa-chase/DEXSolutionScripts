@@ -22,7 +22,7 @@
     plus a Part2RunTime marker. Part 3 reads these back to compute the health score.
 
     >> Deployment, the reason table, sensor contract and tunables are in
-       ApplicationSpecific/SCOM/README.md. Read it before deploying.
+       ApplicationSpecific/Microsoft/SCOM/README.md. Read it before deploying.
 
 .NOTES
     Script Name  : Invoke-AutoRemediateSCOMAgentPart2.ps1
