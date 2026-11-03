@@ -56,11 +56,12 @@
 
 .NOTES
     Script Name  : Invoke-VpnStateCollection.ps1
-    Version      : 1.1.0
+    Version      : 1.1.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-02 (1.1.0: self-refreshing cache. Writes StateFingerprint, LastChecked, CollectorPath and CollectorHash; persists its own text to C:\ProgramData\AirWatch\Extensions\VPN with a locked ACL so sensors can rerun it when the adapter state changes; honours VPN_COLLECTOR_QUIET=1. Detection and scoring unchanged. 1.0.1: step 5 called Get-NetAdapterStatistics with -InterfaceIndex, a parameter it does not have, so the whole collection failed with CollectionError on any device with an active tunnel; now -Name. Found by the lab break test the first time a real tunnel (WireGuard) was present.)
+    Last Modified: 2026-11-03 (1.1.1: hashes the persisted copy with .NET SHA256 and logs the host's PowerShell version and PSModulePath; under Hub the sensor-spawned child could not resolve Get-FileHash, so the quiet rerun left CollectorHash empty.)
+                   2026-11-02 (1.1.0: self-refreshing cache. Writes StateFingerprint, LastChecked, CollectorPath and CollectorHash; persists its own text to C:\ProgramData\AirWatch\Extensions\VPN with a locked ACL so sensors can rerun it when the adapter state changes; honours VPN_COLLECTOR_QUIET=1. Detection and scoring unchanged. 1.0.1: step 5 called Get-NetAdapterStatistics with -InterfaceIndex, a parameter it does not have, so the whole collection failed with CollectionError on any device with an active tunnel; now -Name. Found by the lab break test the first time a real tunnel (WireGuard) was present.)
     Timeout      : 30 seconds
     Schedule     : Every 15-30 minutes
 
@@ -184,6 +185,7 @@ function Get-VpnStateFingerprint {
 # empty so the sensors fall back to the cache instead of running an unverified file.
 function Save-CollectorCopy {
     $hash = ''
+    Write-Log "Host: PowerShell $($PSVersionTable.PSVersion), $(if ([Environment]::Is64BitProcess) { 'x64' } else { 'x86' }), quiet=$Quiet, Get-FileHash=$([bool](Get-Command Get-FileHash -ErrorAction SilentlyContinue)), PSModulePath='$env:PSModulePath'"
     try {
         if ([string]::IsNullOrWhiteSpace($script:SelfText)) { throw "Script text unavailable; nothing to persist." }
         if (-not (Test-Path -LiteralPath $PersistDir)) { New-Item -ItemType Directory -Path $PersistDir -Force -ErrorAction Stop | Out-Null }
@@ -212,12 +214,13 @@ function Save-CollectorCopy {
         try   { $fsec.SetSecurityDescriptorSddlForm($fileSddl); Set-Acl -LiteralPath $PersistPath -AclObject $fsec -ErrorAction Stop }
         catch { $fsec = New-Object System.Security.AccessControl.FileSecurity; $fsec.SetSecurityDescriptorSddlForm(($fileSddl -replace '^O:BA', '')); Set-Acl -LiteralPath $PersistPath -AclObject $fsec -ErrorAction Stop }
 
-        $hash = (Get-FileHash -LiteralPath $PersistPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        # .NET, not Get-FileHash: that cmdlet did not resolve in the child powershell.exe Hub's sensor host spawned (2026-11-03).
+        $hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([IO.File]::ReadAllBytes($PersistPath))) -replace '-', ''
         Write-Log "Persisted collector copy to $PersistPath (SHA-256 $hash)."
     }
     catch {
         $hash = ''
-        Write-Log "Could not persist the collector copy: $($_.Exception.Message). Sensors will fall back to the cache." -Level "WARN"
+        Write-Log "Could not persist the collector copy: $($_.Exception.Message). PSModulePath='$env:PSModulePath'. Sensors will fall back to the cache." -Level "WARN"
     }
     try {
         if (-not (Test-Path $RegPath)) { New-Item -Path $RegPath -Force | Out-Null }
