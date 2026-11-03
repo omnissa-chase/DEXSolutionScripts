@@ -3,11 +3,12 @@
 .NOTES
     Sensor Name  : vpn_tunnel_mtu
     Data Type    : Integer
-    Version      : 1.1.0
+    Version      : 1.1.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-02 (1.1.0: reads TunnelMtu from the cache behind the self-refreshing gate instead of querying the interface itself; see Invoke-VpnStateCollection.ps1 1.1.0)
+    Last Modified: 2026-11-03 (1.1.1: gate hashes the collector copy with .NET SHA256; Get-FileHash did not resolve in the child powershell.exe that Hub's sensor host spawned)
+                   2026-11-02 (1.1.0: reads TunnelMtu from the cache behind the self-refreshing gate instead of querying the interface itself; see Invoke-VpnStateCollection.ps1 1.1.0)
     Timeout      : < 5 seconds on the fast path; up to 45 seconds when the gate reruns the collector
     Requires     : Invoke-VpnStateCollection.ps1 1.1.0 scheduled every 15-30 minutes
 
@@ -56,7 +57,7 @@ try {
             Set-ItemProperty -Path $k -Name 'LastChecked' -Value $now -Type String
         }
         elseif ($c.CollectorHash -and $c.CollectorPath -and (Test-Path -LiteralPath $c.CollectorPath) -and
-                (Get-FileHash -LiteralPath $c.CollectorPath -Algorithm SHA256).Hash -eq $c.CollectorHash) {
+                ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([IO.File]::ReadAllBytes($c.CollectorPath))) -replace '-', '') -eq $c.CollectorHash) {
             # Claim first so sibling sensors running now take the fast path instead of each starting a collector.
             Set-ItemProperty -Path $k -Name 'LastChecked' -Value $now -Type String
             $env:VPN_COLLECTOR_QUIET = '1'
