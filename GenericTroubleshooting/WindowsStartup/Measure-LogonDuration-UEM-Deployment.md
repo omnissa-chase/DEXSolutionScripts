@@ -17,12 +17,29 @@ logon of the currently logged-on user, breaking the logon down into phases:
 | Group Policy total | Group Policy EID 4001 → EID 8001 |
 | GP Logon Scripts | Group Policy EID 4018 → EID 5018 (ScriptType=1) |
 | Folder Redirection | Microsoft-Windows-Folder Redirection EID 501 → 502 |
-| User Profile load | User Profile Service EID 1 → 2 |
+| User Profile load | User Profiles Service EID 1 → 2 (provider name; the log is `User Profile Service/Operational`) |
 | FSLogix container attach | FSLogix Operational log (if present) |
 | ActiveSetup | Microsoft-Windows-Shell-Core EID 62170 → 62171 |
 | AppX / UWP packages | Microsoft-Windows-AppReadiness EID 209 |
 | Printer mapping | PrintService/Operational EID 300 → 306 **(requires log enabled)** |
 | Scheduled tasks at logon | TaskScheduler/Operational EID 100 → 102 **(requires log enabled)** |
+
+These phases overlap and several run past shell-ready, so they are **not slices of
+the total** and must not be subtracted from it to get an "other" figure. The
+multi-session collector, `Measure-LogonDurationMultiSession.ps1` 2.1+, adds the
+phases that account for that time and computes the true remainder:
+
+| Phase (multi-session 2.1+) | Source |
+|---|---|
+| Authentication | Winlogon/Operational EID 1 → 2 |
+| Winlogon notification subscribers, per subscriber | Winlogon/Operational EID 811 → 812 (Logon notification) |
+| Pre-shell gap (userinit, network providers, logon script) | last subscriber EID 812 → explorer.exe start |
+| Startup apps, per Run/RunOnce command, and DesktopReady | Microsoft-Windows-Shell-Core EID 9707 → 9708 |
+| Explained / Unexplained | all measured intervals clipped to the logon window and merged |
+
+All four sources are enabled by default on Windows 10 and 11. Use the multi-session
+collector on any device where "what is the rest of the logon" is the question; it
+measures the console user on a single-session device exactly like this script.
 
 Results are written as string registry values under:
 
@@ -31,9 +48,16 @@ HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration
 ```
 
 DEX sensors read from this key. Sensor scripts and naming are in
-[`Sensors/`](./Sensors) — 17 individual value sensors plus one monolithic JSON
+[`Sensors/`](./Sensors) — 27 individual value sensors plus one monolithic JSON
 sensor (`logon_duration_summary.ps1`). Deploy the sensors as their own DEX
 Sensor resources; they do not need to be part of this deployment.
+
+The ten gap-phase sensors (`logon_auth_duration_ms`, `logon_winlogon_subscribers_duration_ms`,
+`logon_winlogon_subscriber_detail`, `logon_slowest_winlogon_subscriber`,
+`logon_preshell_gap_ms`, `logon_startup_app_count`, `logon_startup_apps_duration_ms`,
+`logon_startup_app_detail`, `logon_desktop_ready_ms`, `logon_unexplained_ms`) read
+values that only the multi-session collector writes; under this script they report
+`-1` or `""`.
 
 ---
 
