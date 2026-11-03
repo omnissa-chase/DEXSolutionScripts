@@ -6,6 +6,9 @@
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
 
+# Script version for tracking. Bump here, not in the filename.
+$SCRIPT_VERSION = "1.2.0.7"
+
 # Admin modified values
 
 # How long until machine automatically reboots

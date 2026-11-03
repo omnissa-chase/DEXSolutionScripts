@@ -118,7 +118,7 @@ Variables that change what the script does, but have a safe default:
 | `Invoke-AutoRemediateDriverIssues.ps1`, `Invoke-AutoRemediateAllDriverIssues.ps1` | `DriverFilter`, `AllowedActions` | Empty filter = every device; actions Scan, Restart, Rollback | A filter to scope; add `Reinstall`/`Uninstall` to escalate further |
 | `Invoke-AutoRemediateNetworkStack.ps1`, WindowsLogon scripts, `Invoke-AutoRemediateGenericVPN.ps1`, `Start-ClearRecycleBin.ps1`, `Restart-WinService.ps1` | `WhatIf` | Live run | `true` for a dry run on first deployment |
 
-Scripts with hard-coded tunables and no variables at all, where the file itself must be edited before publishing: `Start-UserProfileCleanup.ps1` (`$DAYS_INACTIVE`, `$SIZE_THRESHOLD_MB`, `$ENROLLMENTUSER`), `Invoke_RebootWithUserDefer_1.2.0.7.ps1` (`$MaxHours`, `$ShowEveryMinutes`, `$RebootCountdownSeconds`), `Invoke-SimpleReboot.ps1` (`$CountdownSeconds`).
+Scripts with hard-coded tunables and no variables at all, where the file itself must be edited before publishing: `Start-UserProfileCleanup.ps1` (`$DAYS_INACTIVE`, `$SIZE_THRESHOLD_MB`, `$ENROLLMENTUSER`), `Invoke-RebootWithUserDefer.ps1` (`$MaxHours`, `$ShowEveryMinutes`, `$RebootCountdownSeconds`), `Invoke-SimpleReboot.ps1` (`$CountdownSeconds`).
 
 Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDriverIssues.ps1` and `Invoke-AutoRemediateAllDriverIssues.ps1` as `Requires Input = Yes`, but both default `DriverFilter` to empty (all devices) and run without any variable. The six scripts in the first table are the ones that truly require one; the inventory agrees on all six.
 
@@ -157,7 +157,7 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 27 | `Invoke-DefenderServiceRemediation.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 28 | `Invoke-DefenderUpdateSignatures.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 29 | `Start-DefenderFullScan.ps1` | Antivirus | Needs Testing | Low | UEM via `Test_JSpencerOnly` | `PASS - UEM` (single-VM group, run `fad62d`, 2026-11-02, `Completed` 194 s after the sync; `Start-MpScan -AsJob` returns at once and the full scan then runs on the VM, revert the snapshot afterwards) |
-| 30 | `Start-DefenderThreatReport_1.4.8.4.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
+| 30 | `Start-DefenderThreatReport.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 31 | `Invoke-TrellixCPUPriority.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 32 | `Invoke-TrellixLocalUpdate.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 33 | `Invoke-TrellixRefreshPolicies.ps1` | Antivirus | Needs Testing | Low | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
@@ -193,7 +193,7 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 63 | `DEX_Start-WindowsUpdate.ps1` | MDM commands | Needs Testing | Medium | UEM via `Test_JSpencerOnly` | `PASS - UEM` (single-VM group, run `48bf63`, 2026-11-02, `Completed` 417 s after the sync, run after the Stop script on the same VM; may leave it pending a restart, revert the snapshot afterwards) |
 | 64 | `Invoke-AutoRemediateGenericVPN.ps1` | VPN | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 65 | `Invoke-VpnStateCollection.ps1` | VPN | Needs Testing | Low | none | `PASS - LAB` on 1.0.1 (break test 2026-11-02, runs `e73c23ecf1ac`, `f26937f84576`, `01c6dadd22f9`, `b91e95203a31`, all four breaks against a live WireGuard tunnel) and `PASS - UEM` on 1.0.1 (run `709d52`, 2026-11-02 15:24, `Completed` on both lab VMs; on `CBRADLEYSWIN11` the SYSTEM run wrote the connected row for the live WireGuard tunnel: score 100 Healthy, Connected 1, Split, MTU 1420, DNS 1, ClientCount 1. The earlier 1.0.0 pass in `6c8405` covered only the no-client path; 1.0.0 crashed on any device with a tunnel, 13.2.q). Other defects in 13.2.o |
-| 66 | `Invoke_RebootWithUserDefer_1.2.0.7.ps1` | Reboot | Tested | High | UEM via `Test_JSpencerOnly` | `PASS - UEM` for the install (single-VM group, run `ea5217`, 2026-10-30); the deferral prompt and forced reboot still need the manual steps 1 to 4 |
+| 66 | `Invoke-RebootWithUserDefer.ps1` | Reboot | Tested | High | UEM via `Test_JSpencerOnly` | `PASS - UEM` for the install (single-VM group, run `ea5217`, 2026-10-30); the deferral prompt and forced reboot still need the manual steps 1 to 4 |
 | 67 | `Invoke-SimpleReboot.ps1` | Reboot | Tested | High | UEM via `Test_JSpencerOnly` | `PASS - UEM` (single-VM group, run `f3996a`, 2026-10-30; device rebooted and came back). 1.0.1 defers the no-user reboot by 10 s, parse-checked, that branch not re-run |
 | 68 | `SmartReboot.ps1` | Reboot | Tested | Low | none | `TESTED - MANUAL` |
 
@@ -609,11 +609,11 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 
 **Review notes.** Fixed: `$healthDetectionPath` is now assigned before the branch, so the task-present path reads `FullScanInProgress` correctly; the event and `Get-MpComputerStatus` paths both normalise to `[DateTime]` before comparing, so a finished scan is no longer reported as running; `Start-MpScan` uses `-ErrorAction Stop` so the catch and exit `1` are reachable. Remaining: `-MaxEvents 100` can miss the start event on busy logs.
 
-### 4.8 `Start-DefenderThreatReport_1.4.8.4.ps1`
+### 4.8 `Start-DefenderThreatReport.ps1`
 
 | Field | Value |
 |---|---|
-| Path / version | `AntiVirusResolutionScripts\MicrosoftDefender\ThreatReporting\Start-DefenderThreatReport_1.4.8.4.ps1`, v1.4.8.4 |
+| Path / version | `AntiVirusResolutionScripts\MicrosoftDefender\ThreatReporting\Start-DefenderThreatReport.ps1`, v1.4.8.4 |
 | Inventory | `4) Complete - Tested`, impact Low |
 | Inputs | none (`$MAP_THREATS_TO_APPS=$true`, `$MAP_THREATS_RETENTION=36` hours hard-coded) |
 | Prerequisites | Defender AV with at least one detection in history |
@@ -1958,11 +1958,11 @@ The first three end or weaken the console session and must never be run through 
 
 ## 11. Reboot scripts
 
-### 11.1 `Invoke_RebootWithUserDefer_1.2.0.7.ps1`
+### 11.1 `Invoke-RebootWithUserDefer.ps1`
 
 | Field | Value |
 |---|---|
-| Path / version | `WindowsReboot\InteractiveReboot\Invoke_RebootWithUserDefer_1.2.0.7.ps1`, v1.2.0.7 |
+| Path / version | `WindowsReboot\InteractiveReboot\Invoke-RebootWithUserDefer.ps1`, v1.2.0.7 |
 | Inventory | `4) Complete - Tested`, impact High |
 | Inputs | none; hard-coded `$MaxHours = 4`, `$ShowEveryMinutes = 30`, `$RebootCountdownSeconds = 300`, `$PollMinutes = 5` |
 | Prerequisites | SYSTEM, Task Scheduler, WinRT toast APIs, logged-on users; deployed by Product Provisioning |

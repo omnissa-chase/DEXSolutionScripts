@@ -15,7 +15,7 @@
 
 ## Understanding the Key Parameters
 
-Before deploying, verify these values at the top of `Invoke_RebootWithUserDefer_1.2.0.7.ps1` match your intended behavior:
+Before deploying, verify these values at the top of `Invoke-RebootWithUserDefer.ps1` match your intended behavior:
 
 | Parameter | Default | Guidance |
 |---|---|---|
@@ -34,7 +34,7 @@ Before deploying, verify these values at the top of `Invoke_RebootWithUserDefer_
 
 The script is a single `.ps1` file. Because it exceeds the Workspace ONE Script upload size limit, it must be deployed via **Product Provisioning**.
 
-1. Locate `Invoke_RebootWithUserDefer_1.2.0.7.ps1` from this repository
+1. Locate `Invoke-RebootWithUserDefer.ps1` from this repository
 2. Adjust `$MaxHours`, `$ShowEveryMinutes`, `$RebootCountdownSeconds`, and `$PollMinutes` at the top of the file to match your organization's standard policy before uploading
 
 ### Step 2 — Upload to WS1 Product Provisioning
@@ -45,10 +45,10 @@ The script is a single `.ps1` file. Because it exceeds the Workspace ONE Script 
 4. Give the product a clear name: `Interactive Reboot - [MaxHours]hr Window` (e.g., `Interactive Reboot - 4hr Window`)
 5. Under **Manifest**, click **Add** → **Install**
    - **Action Type:** Install Files / Actions
-   - Upload `Invoke_RebootWithUserDefer_1.2.0.7.ps1`
+   - Upload `Invoke-RebootWithUserDefer.ps1`
    - **Execute Command:**
      ```
-     powershell.exe -ExecutionPolicy Bypass -File "Invoke_RebootWithUserDefer_1.2.0.7.ps1"
+     powershell.exe -ExecutionPolicy Bypass -File "Invoke-RebootWithUserDefer.ps1"
      ```
 6. **Condition (optional but recommended):** Add a condition to confirm the device has the Hub running — or leave unconditioned for immediate rollout
 

@@ -1,4 +1,4 @@
-﻿# Name: Defender_ThreatReport_1.4.8.4
+﻿# Name: Defender_ThreatReport
 # Context: System
 # Timeout: 30 seconds 
 # User impact: None 

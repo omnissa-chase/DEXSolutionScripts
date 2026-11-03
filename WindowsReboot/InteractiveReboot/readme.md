@@ -35,7 +35,7 @@ The script uses a multi-process architecture to bridge the gap between SYSTEM-co
 WS1 Product Provisioning
         │
         ▼
-Invoke_RebootWithUserDefer_1.2.0.7.ps1   (runs as SYSTEM)
+Invoke-RebootWithUserDefer.ps1   (runs as SYSTEM)
         │
         ├── Writes helper scripts to disk:
         │       C:\ProgramData\AirWatch\Extensions\AdvancedReboot\

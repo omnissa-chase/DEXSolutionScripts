@@ -6,7 +6,7 @@
     "timeoutMinutes": 5,
     "note": "Reboots the target 5 minutes after exit 0 (shutdown.exe /t 300). Only against the single-VM group so the machine running the tool is never in scope. Device-side proof: System event 1074 and uptime reset on CHASEWIN11_2."
   },
-  "Invoke_RebootWithUserDefer_1.2.0.7.ps1": {
+  "Invoke-RebootWithUserDefer.ps1": {
     "onlyInGroup": "Test_JSpencerOnly",
     "timeoutMinutes": 5,
     "note": "Installs the deferral orchestrator task and exits 0; the prompt and eventual reboot happen later. Completed proves the install. Needs a signed-in user on CHASEWIN11_2 to see the toast; the deferral and forced reboot are then validated by hand (TEST-VALIDATION.md section 11)."

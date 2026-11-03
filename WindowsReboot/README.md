@@ -11,7 +11,7 @@ A collection of PowerShell scripts for managing Windows endpoint reboots in a co
 | Subfolder | Script | Deployment Method | Description |
 |---|---|---|---|
 | `SmartReboot/` | `SmartReboot.ps1` | **App Package** (ZIP) | Lightweight reboot trigger deployed as a Workspace ONE application. Uses native UEM deferral and notification capabilities. |
-| `InteractiveReboot/` | `Invoke_RebootWithUserDefer_1.2.0.7.ps1` | **Product Provisioning** | Full-featured interactive reboot with toast notifications, user deferral support, and automatic enforcement deadlines. Exceeds the WS1 Script size threshold — must be deployed via Product Provisioning. |
+| `InteractiveReboot/` | `Invoke-RebootWithUserDefer.ps1` | **Product Provisioning** | Full-featured interactive reboot with toast notifications, user deferral support, and automatic enforcement deadlines. Exceeds the WS1 Script size threshold — must be deployed via Product Provisioning. |
 
 ---
 
