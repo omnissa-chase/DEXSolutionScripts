@@ -409,6 +409,24 @@ Scripts are delivered and executed by Workspace ONE Hub or Freestyle Orchestrato
 12. Scripts SHOULD **cache expensive results** to the registry for sensors to consume.
 13. Scripts MUST NOT **use `Get-ChildItem` to calculate disk space**. See [§18](#18-measuring-disk-space).
 14. Scripts SHOULD **hard-code tunables** rather than exposing UEM variables. See [§9](#9-script-variables--current-uem-limitations).
+15. Scripts and sensors MUST **fit the UEM script size limit** of 32,767 characters, and SHOULD stay under the 30,000-character planning ceiling. See [Script Size Limit](#script-size-limit) below.
+
+### Script Size Limit
+
+The UEM console stores a script or sensor body in a field capped at **32,767 characters** (a 16-bit signed maximum, measured as `(Get-Content -Raw).Length` on the file). A body over that limit cannot be saved as a single Scripts or Sensors object. The pre-2607 console enforces this silently at the field level, so measure before publishing rather than relying on the console to tell you.
+
+| Figure | Value | Meaning |
+|---|---:|---|
+| Hard limit | 32,767 | Console field maximum. Anything over this will not publish. |
+| Planning ceiling | 30,000 | Author to this so a later fix, an extra step or a longer KB candidate list does not force a split. |
+| Documented exception | 31,500 | Granted per script in that script's SPEC when the public build is already near the ceiling (for example the Horizon Agent collector). The SPEC MUST also say where the split goes if the internal build needs more. |
+
+Rules:
+
+- Measure every deployable script and sensor with `(Get-Content -Raw -Path <file>).Length` before adding it to the inventory, and record scripts that cannot fit as `UEM skip` in the inventory and TEST-VALIDATION.
+- When a script is over the ceiling, **split by step order**, not by concern: Part1 carries the first N steps and the shared engine, Part2 continues the numbering, and each part writes its own slice of the registry cache. The SCOM agent sweep (`ApplicationSpecific/Microsoft/SCOM/DESIGN.md`, "UEM script size limit") is the reference split.
+- Trim comments, padding and the KB candidate blocks before trimming logic. Never remove the explicit exits, the run-ID header or the WhatIf bridge to make room.
+- Scripts that cannot reasonably fit (interactive reboot, multi-session logon measurement) go through Product Provisioning or the on-disk pattern in [§16](#16-on-disk-script-pattern) instead.
 
 ### Minimal Script Template
 
@@ -1396,6 +1414,7 @@ The agent MUST NOT generate these patterns.
 - [ ] `New-Item` and similar cmdlets piped to `| Out-Null`
 - [ ] Caches expensive results to registry for sensor consumption
 - [ ] AV exception documented if staging to `ProgramData\AirWatch\Extensions`
+- [ ] Measured under 30,000 characters (`(Get-Content -Raw).Length`); 32,767 is the hard UEM limit, split by step order if over
 
 ### Additionally, For Async Scripts
 
@@ -1423,6 +1442,7 @@ The agent MUST NOT generate these patterns.
 - [ ] No expensive I/O or deep enumeration
 - [ ] Reads from a script-written cache when data is expensive
 - [ ] Considered an event trigger instead of interval polling
+- [ ] Measured under 30,000 characters; the 32,767 limit applies to sensors too (one-time JSON sensors run closest to it)
 
 ---
 
