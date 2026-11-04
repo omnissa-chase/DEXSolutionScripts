@@ -7,7 +7,9 @@
 #>
 
 # Script version for tracking. Bump here, not in the filename.
-$SCRIPT_VERSION = "1.2.0.8"
+$SCRIPT_VERSION = "1.2.0.9"
+# 1.2.0.9 (2026-11-04): the toast uses scenario="reminder" so it stays on screen until the user
+# picks a button, instead of sliding away after the default few seconds (seen on the lab VM).
 # 1.2.0.8 (2026-11-04): a stored campaign is reset after a reboot or a passed deadline, a stale
 # orchestrator task (unreadable install stamp or no next run) is re-registered, and the
 # orchestrator logs its decisions to RebootPrompt.log. Before this a second deployment inherited
@@ -298,7 +300,7 @@ $mins=[math]::Max(1,[math]::Min($ShowEveryMinutes,1440))
 
 
 $xml = @"
-<toast launch="reboot-consent">
+<toast launch="reboot-consent" scenario="reminder">
   <visual><binding template="ToastGeneric">
     $ToastMessage
   </binding></visual>
