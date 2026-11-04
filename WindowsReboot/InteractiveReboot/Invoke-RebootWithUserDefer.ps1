@@ -7,7 +7,9 @@
 #>
 
 # Script version for tracking. Bump here, not in the filename.
-$SCRIPT_VERSION = "1.2.1.0"
+$SCRIPT_VERSION = "1.2.1.1"
+# 1.2.1.1 (2026-11-04): every cleanup (install of a stale task, post-reboot, test mode) also removes
+# leftover one-shot RebootPrompt-Toast-* tasks; a July relic survived on the lab VM.
 # 1.2.1.0 (2026-11-04): TestMode (admin value below, or script variable TestMode=true). The install
 # starts a fresh campaign, the orchestrator polls every minute and shows the prompt on every poll,
 # nothing ever reboots, and pressing either button records which one in the user's registry hive;
@@ -111,6 +113,9 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
         Unregister-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -Confirm:$false | Out-Null
         $ScheduledTask = $null
     }
+    # One-shot toast tasks are removed 10 s after launch; sweep any that an interrupted run left behind.
+    Get-ScheduledTask -TaskPath $TaskPath -TaskName 'RebootPrompt-Toast-*' -ErrorAction SilentlyContinue |
+        Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
 
     if (-not (Test-Path $MachineKey)){
         New-Item -Path $MachineKey -Force | Out-Null
@@ -408,6 +413,8 @@ Function Invoke-MainThread{
             Write-Log "Reboot has occurred since FirstRunAt; removing the orchestrator task, the campaign key and the helpers."
             # Remove Scheduled Task
             Unregister-ScheduledTask -TaskPath $MainTaskPath -TaskName $MainTaskName -Confirm:$false | Out-Null
+            Get-ScheduledTask -TaskPath $MainTaskPath -TaskName 'RebootPrompt-Toast-*' -ErrorAction SilentlyContinue |
+                Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
             Write-Verbose "Removing registry key at $MachineKey."
             # Remove Scheduled Task
             Remove-Item -Path $MachineKey -Recurse -Force | Out-Null
@@ -480,6 +487,8 @@ Function Invoke-MainThread{
                 Write-Log "TEST MODE: '$pressed' pressed by $u; no reboot. Removing the orchestrator task, the campaign key, the marker and the helpers. Test complete."
                 Remove-ItemProperty -Path $markerKey -Name ButtonPressed -Force -ErrorAction SilentlyContinue
                 Unregister-ScheduledTask -TaskPath $MainTaskPath -TaskName $MainTaskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+                Get-ScheduledTask -TaskPath $MainTaskPath -TaskName 'RebootPrompt-Toast-*' -ErrorAction SilentlyContinue |
+                    Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
                 Remove-Item -Path $MachineKey -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
                 Get-ChildItem -Path $BasePath -Filter '*.ps1' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
                 return
