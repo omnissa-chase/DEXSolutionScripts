@@ -160,7 +160,7 @@ function Set-DexW32Type {
     Set-ItemProperty -Path $W32Params -Name 'Type' -Value $Type -Type String -ErrorAction Stop
     # The service reads its configuration at start; a restart makes the change live.
     & w32tm.exe /config /update 2>&1 | Out-Null
-    Restart-Service -Name 'W32Time' -ErrorAction SilentlyContinue
+    Restart-Service -Name 'W32Time' -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
 }
 
 function Test-DexStepReported {
