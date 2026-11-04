@@ -7,8 +7,12 @@
 #>
 
 # Script version for tracking. Bump here, not in the filename.
-$SCRIPT_VERSION = "1.2.0.9"
-# 1.2.0.9 (2026-11-04): the toast uses scenario="reminder" so it stays on screen until the user
+$SCRIPT_VERSION = "1.2.1.0"
+# 1.2.1.0 (2026-11-04): TestMode (admin value below, or script variable TestMode=true). The install
+# starts a fresh campaign, the orchestrator polls every minute and shows the prompt on every poll,
+# nothing ever reboots, and pressing either button records which one in the user's registry hive;
+# the next poll logs it and removes the task, the campaign key and the helpers. Lets one VM
+# validate the prompt end to end. 1.2.0.9 (2026-11-04): the toast uses scenario="reminder" so it stays on screen until the user
 # picks a button, instead of sliding away after the default few seconds (seen on the lab VM).
 # 1.2.0.8 (2026-11-04): a stored campaign is reset after a reboot or a passed deadline, a stale
 # orchestrator task (unreadable install stamp or no next run) is re-registered, and the
@@ -25,6 +29,10 @@ $ShowEveryMinutes = 30   # Min 30, Max 1440 minutes
 $RebootCountdownSeconds = 300 # default 5 minutes
 # How often the script checks conditions
 $PollMinutes = 5 # how often to check reboot in seconds
+# Test mode: prompt every minute, never reboot, clean up when a button is pressed. Set here or
+# through the UEM script variable TestMode (true/1/yes). Never leave this on in production.
+$TestMode = $false
+If([string]$env:TestMode -match '^(1|true|yes)$'){ $TestMode = $true }
 
 # Base Paths *Not recommended to change
 # Important for security allowance purposes
@@ -37,15 +45,17 @@ Function Invoke-RebootPrompt{
 [CmdletBinding(SupportsShouldProcess=$true)]
 param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeconds = 300,[int]$PollMinutes = 15,
     [string]$BasePath = "$env:ProgramData\AirWatch\Extensions\AdvancedReboot",
-    [string]$MachineKey = 'HKLM:\Software\AirWatch\Extensions\AdvancedReboot'
+    [string]$MachineKey = 'HKLM:\Software\AirWatch\Extensions\AdvancedReboot',
+    [switch]$TestMode
 )
-    
+
     $TaskPath = '\WorkspaceOneEx\'
     $TaskName = 'RebootPrompt-Orchestrator'
     # -------- Policy Limits ----------
     $MaxHours        = [math]::Max(0, [math]::Min($MaxHours, 168))
     $ShowEveryMinutes = [math]::Max(30, [math]::Min($ShowEveryMinutes, 1440))
     $RebootCountdownSeconds = [math]::Max(30, $RebootCountdownSeconds)
+    If($TestMode){ $PollMinutes = 1 }
 
     # ===================== INSTALL SECTION =====================
     if (-not (Test-Path $MachineKey)) { New-Item -Path $MachineKey -Force | Out-Null }
@@ -80,7 +90,8 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
         If($TaskInfo -and -not $TaskInfo.NextRunTime){ $taskOld = $true }
     }
 
-    if($MaxHours -eq 0){
+    if($MaxHours -eq 0 -or $TestMode){
+        # MaxHours 0 is "reboot now"; test mode always starts from a clean campaign and task.
         $lastBootOld = $true
         $taskOld = $true
     }
@@ -108,6 +119,8 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
     if (-not (Get-ItemProperty -Path $MachineKey -Name FirstRunAt -ErrorAction SilentlyContinue)) {
         New-ItemProperty -Path $MachineKey -Name FirstRunAt -Value (Get-Date).ToString('o') -Force | Out-Null
         New-ItemProperty -Path $MachineKey -Name Deadline -Value (Get-Date).AddHours($MaxHours).ToString('o') -Force | Out-Null }
+    If($TestMode){ New-ItemProperty -Path $MachineKey -Name TestMode -Value 1 -PropertyType DWord -Force | Out-Null }
+    Else { Remove-ItemProperty -Path $MachineKey -Name TestMode -Force -ErrorAction SilentlyContinue }
 
     If(-not (Test-Path $BasePath)){  New-Item -ItemType Directory -Path $BasePath -Force | Out-Null }
     # Write helper files from the code blocks
@@ -120,13 +133,15 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
         $mainThreadPath = Join-Path $BasePath 'RebootMainThread.ps1'
         # Register SYSTEM Orchestrator (AtStartup + AtLogOn + Once w/ Repetition)
         $exe  = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
-        $args = @(
+        $argList = @(
             '-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$mainThreadPath`"",
             '-MaxHours', $MaxHours,
             '-ShowEveryMinutes', $ShowEveryMinutes,
             '-RebootCountdownSeconds', $RebootCountdownSeconds,
             '-PollMinutes', $PollMinutes
-        ) -join ' '
+        )
+        If($TestMode){ $argList += '-TestMode' }
+        $args = $argList -join ' '
 
         $action = New-ScheduledTaskAction -Execute $exe -Argument $args
         $tLogon = New-ScheduledTaskTrigger -AtLogOn
@@ -161,14 +176,15 @@ param([string]$UserId,
   [int]$MaxHours                = 72,
   [int]$ShowEveryMinutes         = 240,
   [int]$RebootCountdownSeconds = 300,
-  [switch]$Force)
+  [switch]$Force,
+  [switch]$TestMode)
 
 $ForceOverride=$false
 $WhatIfOverride=$false
 
 function Invoke-UserMessage{
 [CmdletBinding(SupportsShouldProcess=$true)]
-param($UserId,$MaxHours,$ShowEveryMinutes,$RebootCountdownSeconds,[switch]$Force)
+param($UserId,$MaxHours,$ShowEveryMinutes,$RebootCountdownSeconds,[switch]$Force,[switch]$TestMode)
 
 $BasePath = "$env:ProgramData\AirWatch\Extensions\AdvancedReboot"
 
@@ -231,7 +247,7 @@ if($diffDeadline){
 }
 
 $deferrals = If($s.Deferrals){ $s.Deferrals } Else{ 0 }
-$mandatory = ($now -ge $deadline) 
+$mandatory = ($now -ge $deadline) -and -not $TestMode
 
 $timeleft=$deadline.Subtract((Get-Date))
 # Stamp that we showed now
@@ -262,19 +278,27 @@ $shutdown="$env:WINDIR\System32\shutdown.exe"
 
 # Start countdown + show confirm toast (hidden)
 $rebootCmd = "`"$shutdown`" /r /t 10 /f"
+# Increment deferrals (hidden; no inline -Command parsing issues)
+$deferCmd = 'mshta.exe "javascript:close()"'
+If($TestMode){
+    # Test mode: a button press only records which button, in the user's hive, where the
+    # orchestrator (SYSTEM) reads it on its next poll and cleans the test up. No reboot.
+    $marker = 'reg.exe add "HKCU\Software\AirWatch\Extensions\AdvancedReboot" /v ButtonPressed /t REG_SZ /d {0} /f'
+    $rebootCmd = $marker -f 'RebootNow'
+    $deferCmd  = $marker -f 'NotNow'
+}
 Ensure-UrlProtocol -Scheme 'rebootcountdown' -Command $rebootCmd
 
 # Cancel pending shutdown (hidden)
 $abortCmd = "`"$shutdown`" /a"
 Ensure-UrlProtocol -Scheme 'rebootabort' -Command $abortCmd
 
-# Increment deferrals (hidden; no inline -Command parsing issues)
-$deferCmd = 'mshta.exe "javascript:close()"'
-Ensure-UrlProtocol -Scheme 'rebootlater' -Command $deferCmd 
+Ensure-UrlProtocol -Scheme 'rebootlater' -Command $deferCmd
 
 $ToastMessage=@"
 <text>Reboot available</text>
 <text>A reboot is needed. You have $($timeleft.Days) days, and $($timeleft.Hours) hours until the machine will automatically reboot.</text>
+$(If($TestMode){'<text>TEST MODE: nothing will reboot. Either button ends the test.</text>'})
 "@
 
 If($mandatory){
@@ -329,7 +353,7 @@ If([string]::IsNullOrEmpty($UserId)){
     }
 }
 
-Invoke-UserMessage -UserId $UserId -MaxHours $MaxHours -ShowEveryMinutes $ShowEveryMinutes -RebootCountdownSeconds $RebootCountdownSeconds -WhatIf:$WhatIfOverride -Verbose:$VerbosePreference
+Invoke-UserMessage -UserId $UserId -MaxHours $MaxHours -ShowEveryMinutes $ShowEveryMinutes -RebootCountdownSeconds $RebootCountdownSeconds -Force:$Force -TestMode:$TestMode -WhatIf:$WhatIfOverride -Verbose:$VerbosePreference
 
 }
 
@@ -338,13 +362,14 @@ $MainThreadSource = {
 
 
 [CmdletBinding(SupportsShouldProcess=$true)]
-param([int]$MaxHours = 72, [int]$ShowEveryMinutes = 240, [int]$RebootCountdownSeconds = 300, [int]$PollMinutes = 60)
+param([int]$MaxHours = 72, [int]$ShowEveryMinutes = 240, [int]$RebootCountdownSeconds = 300, [int]$PollMinutes = 60, [switch]$TestMode)
 
 Function Invoke-MainThread{
     [CmdletBinding(SupportsShouldProcess=$true)]
     param($MaxHours = 72,$ShowEveryMinutes = 240,
-        $RebootCountdownSeconds = 300, 
-        $PollMinutes = 60)
+        $RebootCountdownSeconds = 300,
+        $PollMinutes = 60,
+        [switch]$TestMode)
 
     $BasePath = 'C:\ProgramData\AirWatch\Extensions\AdvancedReboot'
     $MachineKey = 'HKLM:\Software\AirWatch\Extensions\AdvancedReboot'
@@ -403,6 +428,7 @@ Function Invoke-MainThread{
         Write-Log "Time until deadline: $([int]($dtDeadline).Subtract((Get-Date)).TotalSeconds) seconds"
         $mandatoryReboot = ($dtDeadline - (Get-Date)).TotalSeconds -le 0
     }
+    If($TestMode){ $mandatoryReboot = $false }   # test mode never reboots
 
     $SystemReboot=$false
     $quser = quser 2>$null
@@ -440,6 +466,27 @@ Function Invoke-MainThread{
         return
     }
 
+    # Test mode: a button press left a marker in the user's hive; log it and end the test.
+    If($TestMode){
+        foreach ($UserRecord in @($activeUsers)) {
+            $u = $UserRecord.USERNAME -replace '^>',''
+            $pressed = $null
+            try {
+                $sid = (New-Object System.Security.Principal.NTAccount($u)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+                $markerKey = "Registry::HKEY_USERS\$sid\Software\AirWatch\Extensions\AdvancedReboot"
+                $pressed = (Get-ItemProperty -Path $markerKey -Name ButtonPressed -ErrorAction SilentlyContinue).ButtonPressed
+            } catch { }
+            if ($pressed) {
+                Write-Log "TEST MODE: '$pressed' pressed by $u; no reboot. Removing the orchestrator task, the campaign key, the marker and the helpers. Test complete."
+                Remove-ItemProperty -Path $markerKey -Name ButtonPressed -Force -ErrorAction SilentlyContinue
+                Unregister-ScheduledTask -TaskPath $MainTaskPath -TaskName $MainTaskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+                Remove-Item -Path $MachineKey -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
+                Get-ChildItem -Path $BasePath -Filter '*.ps1' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+                return
+            }
+        }
+    }
+
 
     foreach ($UserRecord in @($activeUsers)) {
         # Some hosts mark current user with a leading '>' — remove if present
@@ -456,6 +503,7 @@ Function Invoke-MainThread{
                 '-ShowEveryMinutes', $ShowEveryMinutes,
                 '-RebootCountdownSeconds', $RebootCountdownSeconds
             ) -join ' '
+            If($TestMode){ $args += ' -Force -TestMode' }   # -Force: ignore the ShowEveryMinutes cadence
 
             $A = New-ScheduledTaskAction -Execute $exe -Argument $args
             $S = New-ScheduledTaskSettingsSet -Hidden -StartWhenAvailable -Priority 5 -AllowStartIfOnBatteries
@@ -477,7 +525,7 @@ Function Invoke-MainThread{
     return
 }
 
-Invoke-MainThread -MaxHours $MaxHours -ShowEveryMinutes $ShowEveryMinutes -RebootCountdownSeconds $RebootCountdownSeconds -PollMinutes $PollMinutes -Verbose -WhatIf:$WhatIfPreference        
+Invoke-MainThread -MaxHours $MaxHours -ShowEveryMinutes $ShowEveryMinutes -RebootCountdownSeconds $RebootCountdownSeconds -PollMinutes $PollMinutes -TestMode:$TestMode -Verbose -WhatIf:$WhatIfPreference
 }
 
 # -------- Paths to write helpers ----------
@@ -486,4 +534,5 @@ $mainThreadPath = Join-Path $BasePath 'RebootMainThread.ps1'
 Set-Content -Path $userToastPath -Value $UserToastSource -Encoding UTF8 -Force
 Set-Content -Path $mainThreadPath -Value $MainThreadSource -Encoding UTF8 -Force
 
-Invoke-RebootPrompt -MaxHours $MaxHours -ShowEveryMinutes $ShowEveryMinutes -RebootCountdownSeconds $RebootCountdownSeconds -PollMinutes $PollMinutes
+Invoke-RebootPrompt -MaxHours $MaxHours -ShowEveryMinutes $ShowEveryMinutes -RebootCountdownSeconds $RebootCountdownSeconds -PollMinutes $PollMinutes -TestMode:$TestMode
+If($TestMode){ Write-Output "TEST MODE install complete: the prompt appears about every minute; press either button and the next poll removes everything. Log: $BasePath\RebootPrompt.log" }
