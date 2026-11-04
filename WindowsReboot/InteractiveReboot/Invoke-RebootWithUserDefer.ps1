@@ -7,7 +7,11 @@
 #>
 
 # Script version for tracking. Bump here, not in the filename.
-$SCRIPT_VERSION = "1.2.0.7"
+$SCRIPT_VERSION = "1.2.0.8"
+# 1.2.0.8 (2026-11-04): a stored campaign is reset after a reboot or a passed deadline, a stale
+# orchestrator task (unreadable install stamp or no next run) is re-registered, and the
+# orchestrator logs its decisions to RebootPrompt.log. Before this a second deployment inherited
+# the first campaign's expired deadline and the July task was never replaced, so no toast showed.
 
 # Admin modified values
 
@@ -44,21 +48,34 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
     # ===================== INSTALL SECTION =====================
     if (-not (Test-Path $MachineKey)) { New-Item -Path $MachineKey -Force | Out-Null }
     
+    # A stored campaign is stale when the machine has rebooted since it began (the reboot it
+    # asked for happened) or its deadline has passed. 1.2.0.7 compared FirstRunAt - LastBoot
+    # against MaxHours, which is never true after a reboot, so a second deployment inherited
+    # the first one's expired deadline and went straight to mandatory mode (seen 2026-11-04).
     $lastBootOld=$false
     $lastBoot = $(Get-CimInstance Win32_OperatingSystem).LastBootUpTime
-    $firstRunAt = (Get-ItemProperty -Path $MachineKey -ErrorAction SilentlyContinue | Select-Object "FirstRunAt" -ExpandProperty "FirstRunAt" -ErrorAction SilentlyContinue)
-    If($firstRunAt){
-        $dtFirstRunAt = [datetime]::Parse($firstRunAt, [cultureinfo]::InvariantCulture, 'RoundtripKind')
-        $dtDiff=$dtFirstRunAt.Subtract($lastBoot)
-        $lastBootOld=$dtDiff.TotalHours -gt $MaxHours
-    }
+    $stored = Get-ItemProperty -Path $MachineKey -ErrorAction SilentlyContinue
+    $dtFirstRunAt = $null; $dtDeadline = $null
+    If($stored.FirstRunAt){ $dtFirstRunAt = $stored.FirstRunAt -as [datetime] }
+    If($stored.Deadline){ $dtDeadline = $stored.Deadline -as [datetime] }
+    If($stored.FirstRunAt -and -not $dtFirstRunAt){ $lastBootOld = $true }          # unreadable stamp: start over
+    If($dtFirstRunAt -and $lastBoot -gt $dtFirstRunAt){ $lastBootOld = $true }
+    If($dtDeadline -and $dtDeadline -lt (Get-Date)){ $lastBootOld = $true }
 
+    # The orchestrator task is stale when its install stamp is older than MaxHours, cannot be
+    # read (an earlier release wrote "yyyy:MM:dd HH:mm:ss", which never parses, so the task was
+    # kept forever), or it has no next run: its repetition window has lapsed and it will never
+    # fire again. Any of those means re-register.
     $taskOld=$false
     $ScheduledTask = Get-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
-    $ScheduledTaskInstallDate = $null
-    If($ScheduledTask.Description){ $ScheduledTaskInstallDate = $ScheduledTask.Description -as [datetime] }
-    If($ScheduledTaskInstallDate){
-        $taskOld=$(Get-Date).Subtract($ScheduledTaskInstallDate).TotalHours -gt $MaxHours
+    If($ScheduledTask){
+        $ScheduledTaskInstallDate = $null
+        If($ScheduledTask.Description){ $ScheduledTaskInstallDate = $ScheduledTask.Description -as [datetime] }
+        If($ScheduledTaskInstallDate){
+            $taskOld=$(Get-Date).Subtract($ScheduledTaskInstallDate).TotalHours -gt $MaxHours
+        } else { $taskOld = $true }
+        $TaskInfo = Get-ScheduledTaskInfo -TaskPath $TaskPath -TaskName $TaskName -ErrorAction SilentlyContinue
+        If($TaskInfo -and -not $TaskInfo.NextRunTime){ $taskOld = $true }
     }
 
     if($MaxHours -eq 0){
@@ -76,9 +93,10 @@ param([int]$MaxHours = 72,[int]$ShowEveryMinutes = 240,[int]$RebootCountdownSeco
     }
    
     if(($ScheduledTask | Measure).Count -and $taskOld){
-        Write-Verbose "Reboot has occured, removing scheduled task."            
-        # Remove Scheduled Task 
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false | Out-Null
+        Write-Verbose "Orchestrator task is stale, removing it so it is re-registered."
+        # Remove Scheduled Task
+        Unregister-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -Confirm:$false | Out-Null
+        $ScheduledTask = $null
     }
 
     if (-not (Test-Path $MachineKey)){
@@ -356,13 +374,14 @@ Function Invoke-MainThread{
     
     # This section ensures that if the machine has rebooted after the request date/time that the 
     # main thread gets removed   
+    Write-Log "Orchestrator poll: lastBoot=$($lastBoot.ToString('o')) firstRunAt=$firstRunAt deadline=$deadline"
     if($dtFirstRunAt){
         $dtDiff=$dtFirstRunAt.Subtract($lastBoot)
             if(($dtDiff.TotalMilliseconds -le 0)){
-            Write-Verbose "Reboot has occured, removing scheduled task."            
-            # Remove Scheduled Task 
-            Unregister-ScheduledTask -TaskName $MainTaskName -Confirm:$false | Out-Null
-            Write-Verbose "Removing registry key at $MachineKey."            
+            Write-Log "Reboot has occurred since FirstRunAt; removing the orchestrator task, the campaign key and the helpers."
+            # Remove Scheduled Task
+            Unregister-ScheduledTask -TaskPath $MainTaskPath -TaskName $MainTaskName -Confirm:$false | Out-Null
+            Write-Verbose "Removing registry key at $MachineKey."
             # Remove Scheduled Task
             Remove-Item -Path $MachineKey -Recurse -Force | Out-Null
             Write-Verbose "Removing helper scripts."           
@@ -379,14 +398,14 @@ Function Invoke-MainThread{
 
     $mandatoryReboot=$false
     if($dtDeadline){
-        Write-Verbose "Time until deadline: $(($dtDeadline).Subtract((Get-Date)).TotalSeconds) seconds"
+        Write-Log "Time until deadline: $([int]($dtDeadline).Subtract((Get-Date)).TotalSeconds) seconds"
         $mandatoryReboot = ($dtDeadline - (Get-Date)).TotalSeconds -le 0
     }
 
     $SystemReboot=$false
     $quser = quser 2>$null
-    if (-not $quser) { 
-        Write-Verbose "quser returned no output."
+    if (-not $quser) {
+        Write-Log "quser returned no output (no sessions)."
         if($mandatoryReboot){ $SystemReboot = $true } else { return; }
     }
 
@@ -414,6 +433,7 @@ Function Invoke-MainThread{
     }
 
     if($SystemReboot){
+        Write-Log "Deadline passed with no active session; restarting through shutdown.exe /r /t 10 /f."
         Start-Process -FilePath "C:\Windows\System32\shutdown.exe" -ArgumentList "/r /t 10 /f" -WindowStyle Hidden
         return
     }
@@ -447,9 +467,9 @@ Function Invoke-MainThread{
             Start-ScheduledTask -TaskPath $MainTaskPath -TaskName $oneShot
             Start-Sleep -Seconds 10
             Unregister-ScheduledTask -TaskPath $MainTaskPath -TaskName $oneShot -Confirm:$false
-            Write-Verbose "Displayed toast for $user"
+            Write-Log "Toast task launched for $user (mandatory=$mandatoryReboot)."
         } catch {
-            Write-Verbose "Failed to show toast for $user`: $($_.Exception.Message)"
+            Write-Log "Failed to show toast for $user`: $($_.Exception.Message)"
         }
     }
     return

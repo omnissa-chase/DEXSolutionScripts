@@ -8,7 +8,7 @@
   },
   "Invoke-RebootWithUserDefer.ps1": {
     "onlyInGroup": "Test_JSpencerOnly",
-    "timeoutMinutes": 5,
+    "timeoutMinutes": 8,
     "note": "Installs the deferral orchestrator task and exits 0; the prompt and eventual reboot happen later. Completed proves the install. Needs a signed-in user on CHASEWIN11_2 to see the toast; the deferral and forced reboot are then validated by hand (TEST-VALIDATION.md section 11)."
   },
   "DEX_Invoke-SignoffWindows.ps1": {
@@ -132,6 +132,18 @@
   },
   "Invoke-RemediatePageFile.ps1": {
     "note": "Exits 1 (Warning) when the page file is manually sized but under threshold, or system-managed with high usage. On the lab VM the page file is system-managed, so Completed is expected."
+  },
+  "Invoke-AutoRemediateTimeSync.ps1": {
+    "expect": "Completed",
+    "note": "Both lab VMs are workgroup devices with an NTP peer, so step 2 is a Warning (ConfigureWorkgroupNtp defaults to false) and steps 1, 3 and 4 act only if W32Time is stopped, unsynchronised or skewed. Exits 1 only when a resolution block throws. Device-side proof: DEXRecords SystemHealth\\TimeSync and UEM_AutoRemediateTimeSync.log; a resync shows as Clock Synchronization -> Remediated."
+  },
+  "Invoke-AutoRemediateBitLockerProtection.ps1": {
+    "expect": "Completed",
+    "note": "CBRADLEYSWIN11 has no encrypted volume, so it proves only the no-volume exit 0. CHASEWIN11_2 has BitLocker on C: with a password protector (since 2026-10-30), so it takes the product path: if protection was left suspended by the lock-script tests the script resumes it, otherwise every step passes. Exits 1 when Get-BitLockerVolume fails (not elevated); Hub runs as SYSTEM so that should not happen. Device-side proof: DEXRecords SystemHealth\\BitLockerProtection."
+  },
+  "Invoke-AutoRemediateCertEnrollment.ps1": {
+    "expect": "Completed",
+    "note": "Off-domain lab VMs: step 5 reports not applicable, steps 2 to 4 report on the machine store. The CertificateServicesClient tasks are read through the Task Scheduler COM API (1.0.1), the first use of that path under Hub's PowerShell 7 as SYSTEM. Device-side proof: DEXRecords SystemHealth\\CertEnrollment."
   },
   "Start-ClearRecycleBin.ps1": {
     "note": "Empties every user's Recycle Bin on the test device. Keep the test smart group to disposable VMs."
