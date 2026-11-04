@@ -409,19 +409,28 @@ Scripts are delivered and executed by Workspace ONE Hub or Freestyle Orchestrato
 12. Scripts SHOULD **cache expensive results** to the registry for sensors to consume.
 13. Scripts MUST NOT **use `Get-ChildItem` to calculate disk space**. See [§18](#18-measuring-disk-space).
 14. Scripts SHOULD **hard-code tunables** rather than exposing UEM variables. See [§9](#9-script-variables--current-uem-limitations).
-15. Scripts and sensors MUST **fit the UEM script size limit** of 32,767 characters, and SHOULD stay under the 30,000-character planning ceiling. See [Script Size Limit](#script-size-limit) below.
+15. Scripts and sensors intended to run on consoles **before UEM 2607** MUST **fit the 32,767-character script size limit**, and SHOULD stay under the 30,000-character planning ceiling. See [Script Size Limit (pre-2607 compatibility)](#script-size-limit-pre-2607-compatibility) below.
 
-### Script Size Limit
+### Script Size Limit (pre-2607 compatibility)
 
-The UEM console stores a script or sensor body in a field capped at **32,767 characters** (a 16-bit signed maximum, measured as `(Get-Content -Raw).Length` on the file). A body over that limit cannot be saved as a single Scripts or Sensors object. The pre-2607 console enforces this silently at the field level, so measure before publishing rather than relying on the console to tell you.
+Consoles before UEM 2607 store a script or sensor body in a field capped at **32,767 characters** (a 16-bit signed maximum, measured as `(Get-Content -Raw).Length` on the file). On those consoles a body over that limit cannot be saved as a single Scripts or Sensors object, and the console enforces it silently at the field level, so measure before publishing rather than relying on the console to tell you. UEM 2607 lifts the limit. The restriction in this section exists only for scripts that must stay **backwards compatible with pre-2607 consoles**, which is the default for everything in this repo today.
+
+How the rule retires, by the oldest console the repo still supports:
+
+| Oldest supported console | What the agent does |
+|---|---|
+| Before 2607 (current) | Apply the limit to every deployable script and sensor. No exceptions beyond the per-SPEC 31,500 figure below. |
+| 2607 | Still apply the limit. Most customers run one or two releases behind, so a 2607 floor does not yet mean every console is past the limit. |
+| 2707 | **Ask the user once**, at the start of the engagement, whether pre-2607 compatibility is still required. Record the answer in the project's SPEC. If yes, keep applying the limit; if no, drop it for that project. |
+| 2807 or later | Assume pre-2607 compatibility is no longer required. Do not apply the limit unless the user asks for it. |
 
 | Figure | Value | Meaning |
 |---|---:|---|
-| Hard limit | 32,767 | Console field maximum. Anything over this will not publish. |
+| Hard limit | 32,767 | Pre-2607 console field maximum. Anything over this will not publish there. |
 | Planning ceiling | 30,000 | Author to this so a later fix, an extra step or a longer KB candidate list does not force a split. |
 | Documented exception | 31,500 | Granted per script in that script's SPEC when the public build is already near the ceiling (for example the Horizon Agent collector). The SPEC MUST also say where the split goes if the internal build needs more. |
 
-Rules:
+Rules (while the limit applies):
 
 - Measure every deployable script and sensor with `(Get-Content -Raw -Path <file>).Length` before adding it to the inventory, and record scripts that cannot fit as `UEM skip` in the inventory and TEST-VALIDATION.
 - When a script is over the ceiling, **split by step order**, not by concern: Part1 carries the first N steps and the shared engine, Part2 continues the numbering, and each part writes its own slice of the registry cache. The SCOM agent sweep (`ApplicationSpecific/Microsoft/SCOM/DESIGN.md`, "UEM script size limit") is the reference split.
@@ -1414,7 +1423,7 @@ The agent MUST NOT generate these patterns.
 - [ ] `New-Item` and similar cmdlets piped to `| Out-Null`
 - [ ] Caches expensive results to registry for sensor consumption
 - [ ] AV exception documented if staging to `ProgramData\AirWatch\Extensions`
-- [ ] Measured under 30,000 characters (`(Get-Content -Raw).Length`); 32,767 is the hard UEM limit, split by step order if over
+- [ ] Measured under 30,000 characters (`(Get-Content -Raw).Length`) while pre-2607 compatibility applies; 32,767 is that hard limit, split by step order if over
 
 ### Additionally, For Async Scripts
 
@@ -1442,7 +1451,7 @@ The agent MUST NOT generate these patterns.
 - [ ] No expensive I/O or deep enumeration
 - [ ] Reads from a script-written cache when data is expensive
 - [ ] Considered an event trigger instead of interval polling
-- [ ] Measured under 30,000 characters; the 32,767 limit applies to sensors too (one-time JSON sensors run closest to it)
+- [ ] Measured under 30,000 characters while pre-2607 compatibility applies; the 32,767 limit covers sensors too (one-time JSON sensors run closest to it)
 
 ---
 
