@@ -7,29 +7,29 @@
     Break -> verify-the-break -> remediate -> validate -> restore. Writes a uniform JSON
     result to C:\Temp\FixReport\Invoke-AutoRemediateExcel\ for Invoke-FixReportAnalysis.ps1.
 
-    THIS SCRIPT IS DELIBERATELY DESTRUCTIVE. It writes an add-in key, a Resiliency entry,
-    AutoRecover values, an OPENn add-in registration and a calculation-mode override into the
-    logged-on user's Excel hive, and drops a file into the user's XLSTART folder. Run it only
-    on a marked test host (Assert-DexTestHost in DEXTestFramework.psm1).
+    THIS SCRIPT IS DELIBERATELY DESTRUCTIVE. It writes AutoRecover values, an OPENn add-in
+    registration and a calculation-mode override into the logged-on user's Excel hive, and
+    drops a file into the user's XLSTART folder. Run it only on a marked test host
+    (Assert-DexTestHost in DEXTestFramework.psm1).
 
     HOW THE SCRIPT SEES THE USER
     Invoke-AutoRemediateExcel.ps1 resolves the logged-on user from
     Win32_ComputerSystem.UserName and reads HKEY_USERS\<SID>, so the harness does the same.
     Run elevated as the interactive user; the child powershell.exe runs in this same
     context, as Workspace ONE Hub would, with the script's inputs passed as environment
-    variables (AllowDestructiveActions, ReenableDisabledItems, CacheSizeWarningMB,
-    CrashWarnCount7d, TemplateWarnMB). Every planted artefact carries the DEXTest prefix;
-    every break Captures what it changes and Restore writes it back.
+    variables (AllowDestructiveActions, CacheSizeWarningMB, CrashWarnCount7d,
+    TemplateWarnMB). Every planted artefact carries the DEXTest prefix; every break
+    Captures what it changes and Restore writes it back.
 
     ONE ENVIRONMENT PER RUN
     Each break declares the variables the child must see (Env); '' means "must be unset".
     A gated break (flag unset, ExpectReportedOnly) and its ungated twin (flag 'true',
     ExpectFixed) cannot share a run: the first drawn decides and conflicting draws are
     dropped. A run is refused when the script would act on real state no break restores:
-    a real active third-party add-in (step 3 disables the first one) or real XLSTART
-    content (step 6 quarantines everything but PERSONAL.XLSB) in an ungated run; a real
-    dangling OPENn registration, AutoRecoverEnabled=0 or missing AutoRecoverPath in any run
-    (steps 5 and 9 fix those unconditionally) unless the matching break is in the run.
+    real XLSTART content (step 6 quarantines everything but PERSONAL.XLSB) in an ungated
+    run; a real dangling OPENn registration, AutoRecoverEnabled=0 or missing AutoRecoverPath
+    in any run (steps 5 and 9 fix those unconditionally) unless the matching break is in
+    the run.
 
     EXCEL REWRITES OPTIONS ON EXIT
     Steps 5 (re-enable), 6 and 9 only act with Excel closed, and an Excel that exits after
@@ -37,17 +37,10 @@
     fix refuse to start while EXCEL.EXE is running; the harness never closes the user's
     Excel. Plant-and-report breaks tolerate a running Excel.
 
-    EXPECTED OUTCOMES (derived from the script's own messages, 1.0.1)
+    EXPECTED OUTCOMES (derived from the script's own messages, 1.0.3)
       ExpectFixed        -- remediation must repair the component
       ExpectReportedOnly -- remediation must DETECT and report it, and leave it alone
 
-    Step 3  ThirdPartyAddinConflictGated  ReportedOnly. DEXTest.LabAddin, LoadBehavior 3, under
-                                          HKU\<SID>\Software\Microsoft\Office\Excel\Addins.
-            ThirdPartyAddinConflict       Fixed (AllowDestructiveActions). LoadBehavior becomes 0.
-    Step 4  DisabledItemGated             ReportedOnly. REG_BINARY 'DEXTest' entry under
-                                          16.0\Excel\Resiliency\DisabledItems in Office's shape.
-            DisabledItem                  Fixed (ReenableDisabledItems). Aborts when real entries
-                                          exist (the script clears every entry).
     Step 5  AutoRecoverPathMissing        Fixed (no gate). Options\AutoRecoverPath points at a
                                           missing DEXTest_AutoRecover_Excel folder; the script
                                           creates it.
@@ -68,8 +61,10 @@
     NOT COVERED
       Step 2  Crash and Hang History -- the only trigger is a real EXCEL 1000/1002 event; the
               harness never writes to the Application log.
-      Step 3  Failed branch (crash module matches an add-in name) and step 6 Failed branch
-              ("Repeated crashes and ...") -- both need real crash events.
+      Steps 3 and 4 (COM Add-in Conflict, Office-Disabled Items) -- moved to
+              ApplicationSpecific\Microsoft\Office\Invoke-AutoRemediateOfficeAddins.ps1; its
+              own harness carries the four add-in breaks that used to live here.
+      Step 6  Failed branch ("Repeated crashes and ...") -- needs real crash events.
       Step 6  AltStartup and machine XLSTART scopes -- the fixture goes in the user folder only;
               the machine folder is Program Files and AltStartup would need a real Options write
               Excel may discard.
@@ -98,13 +93,17 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateExcel_BreakTest.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : Administrator (elevated), run as the interactive user
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-11-05
     Reporting    : C:\Temp\FixReport\Invoke-AutoRemediateExcel\
 
+    1.0.1  ThirdPartyAddinConflictGated, ThirdPartyAddinConflict, DisabledItemGated and
+           DisabledItem moved to the Invoke-AutoRemediateOfficeAddins.ps1 harness with the
+           script's steps 3 and 4; ReenableDisabledItems is no longer passed to the child.
+           Six breaks remain. Tracks script 1.0.3.
     1.0.0  Initial: ten breaks against script 1.0.1 (steps 3, 4, 5, 6, 9, 10).
 
 .DISCLAIMER
@@ -144,15 +143,10 @@ Import-Module $modulePath -Force
 if (-not (Test-Path -LiteralPath $RemediationScript)) { throw "Script under test not found at $RemediationScript" }
 
 # -- Fixture ------------------------------------------------------------------
-$FixturePrefix         = 'DEXTest'
-$FixtureAddinName      = 'DEXTest.LabAddin'           # must NOT match the script's $_msAddin matcher
-$FixtureResiliencyName = 'DEXTest'                    # value name under Resiliency\DisabledItems
 $FixtureAutoRecoverDir = 'DEXTest_AutoRecover_Excel'  # under AppData\Local\Microsoft\Office
 $FixtureXlStartFile    = 'DEXTest_lab.csv'            # a CSV opens harmlessly if Excel starts while it is planted
 $FixtureXlamName       = 'DEXTest_lab.xlam'           # never created: the OPENn registration must dangle
 $FixtureCalcMode       = 2                            # anything but 1 or -4105
-# Same matcher as the script, verbatim, so "third-party" means the same thing here.
-$MicrosoftAddinMatcher = '^Microsoft\.|OfficeMicrosoftTeams|Microsoft Online|SharePoint|OneDrive|Skype|Lync|Grammarly\.Microsoft|CopilotAddin|PowerPivot|PowerMap|Inquire|NativeShim'
 
 # -- Helpers: identity and paths ------------------------------------------------
 
@@ -181,10 +175,7 @@ function Get-C2RRoot {
 }
 function Get-UserHive          { "Registry::HKEY_USERS\$(Get-LoggedOnUserSid)" }
 function Get-AppKeyPath        { "$(Get-UserHive)\Software\Microsoft\Office\$(Get-OfficeVersion)\Excel" }   # versioned key: Options, Resiliency
-function Get-UserAddinsKeyPath { "$(Get-UserHive)\Software\Microsoft\Office\Excel\Addins" }                  # first key the script enumerates
-function Get-FixtureAddinKeyPath { Join-Path (Get-UserAddinsKeyPath) $FixtureAddinName }
 function Get-OptionsPath       { "$(Get-AppKeyPath)\Options" }
-function Get-ResiliencyPath    { param([string]$Sub = '') $p = "$(Get-AppKeyPath)\Resiliency"; if ($Sub) { "$p\$Sub" } else { $p } }
 function Get-XlStartPath       { Join-Path (Get-UserProfilePath) 'AppData\Roaming\Microsoft\Excel\XLSTART' }
 function Get-FixtureXlamPath   { Join-Path (Get-UserProfilePath) "AppData\Roaming\Microsoft\AddIns\$FixtureXlamName" }
 function Get-AutoRecoverFixturePath { Join-Path (Get-UserProfilePath) "AppData\Local\Microsoft\Office\$FixtureAutoRecoverDir" }
@@ -287,12 +278,12 @@ function Test-DexRecordMatches {
     return $true
 }
 function Get-RemediationVariables {
-    # Every variable the child must see. '' means unset; the five inputs the script reads are always
+    # Every variable the child must see. '' means unset; the four inputs the script reads are always
     # made explicit so a stray value in the harness's own environment cannot leak into the child.
     $vars = @{}
     $runEnv = ConvertTo-DexHashtable -InputObject $state.RunEnv
     if ($runEnv) { foreach ($k in @($runEnv.Keys)) { $vars[$k] = "$($runEnv[$k])" } }
-    foreach ($k in @('AllowDestructiveActions', 'ReenableDisabledItems', 'CacheSizeWarningMB', 'CrashWarnCount7d', 'TemplateWarnMB')) {
+    foreach ($k in @('AllowDestructiveActions', 'CacheSizeWarningMB', 'CrashWarnCount7d', 'TemplateWarnMB')) {
         if (-not $vars.ContainsKey($k)) { $vars[$k] = '' }
     }
     return $vars
@@ -324,86 +315,6 @@ function Invoke-RemediationScript {
     }
     $sw.Stop()
     return @{ ExitCode = $rc; DurationSec = [math]::Round($sw.Elapsed.TotalSeconds, 1); Variables = $Variables; Output = ($output | Out-String).Trim() }
-}
-
-# -- Helpers: step 3 add-in -----------------------------------------------------
-
-function Get-ActiveThirdPartyAddins {
-    # Every add-in the script would count, from the same six keys in the same order, minus our fixture. Plain string array.
-    $list = New-Object System.Collections.Generic.List[string]
-    $ver = Get-OfficeVersion; $hku = Get-UserHive
-    foreach ($s in @('Software\Microsoft\Office\Excel\Addins', "Software\Microsoft\Office\$ver\Excel\Addins")) {
-        foreach ($root in @("$hku\$s", "HKLM:\$s", "HKLM:\SOFTWARE\WOW6432Node\$($s.Substring(9))")) {
-            if (-not (Test-Path -LiteralPath $root)) { continue }
-            foreach ($k in @(Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue)) {
-                if ($k.PSChildName -eq $FixtureAddinName -or $k.PSChildName -match $MicrosoftAddinMatcher) { continue }
-                $lb = (Get-ItemProperty -LiteralPath $k.PSPath -Name 'LoadBehavior' -ErrorAction SilentlyContinue).LoadBehavior
-                if ($lb -eq 3) { $list.Add("$root\$($k.PSChildName)") }
-            }
-        }
-    }
-    return $list.ToArray()
-}
-function Get-FixtureAddinLoadBehavior {
-    $key = Get-FixtureAddinKeyPath
-    if (-not (Test-Path -LiteralPath $key)) { return $null }
-    return (Get-ItemProperty -LiteralPath $key -Name 'LoadBehavior' -ErrorAction SilentlyContinue).LoadBehavior
-}
-function Add-FixtureAddin {
-    $key = Get-FixtureAddinKeyPath
-    New-Item -Path $key -Force -ErrorAction Stop | Out-Null
-    Set-ItemProperty -LiteralPath $key -Name 'LoadBehavior' -Value 3 -Type DWord -ErrorAction Stop
-    Set-ItemProperty -LiteralPath $key -Name 'FriendlyName' -Value 'DEX Test Lab Add-in' -Type String -ErrorAction Stop
-    Set-ItemProperty -LiteralPath $key -Name 'Description'  -Value 'Planted by Invoke-AutoRemediateExcel_BreakTest.ps1; safe to delete.' -Type String -ErrorAction Stop
-}
-function Get-FixtureAddinBaseline { @{ AddinsKeyExisted = (Test-Path -LiteralPath (Get-UserAddinsKeyPath)) } }
-function Test-FixtureAddinPlanted {
-    $lb = Get-FixtureAddinLoadBehavior
-    if ($lb -ne 3) { Write-Host "           $FixtureAddinName LoadBehavior is '$lb', expected 3"; return $false }
-    return $true
-}
-function Restore-FixtureAddin {
-    param($Original)
-    $key = Get-FixtureAddinKeyPath
-    if (Test-Path -LiteralPath $key) { Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction SilentlyContinue }
-    if (-not [bool]$Original.AddinsKeyExisted) { Remove-EmptyRegKey (Get-UserAddinsKeyPath) }
-}
-
-# -- Helpers: step 4 Resiliency -------------------------------------------------
-
-function New-ResiliencyBlob {
-    # Office's REG_BINARY shape: three DWORD header fields, then two NUL-terminated UTF-16 strings.
-    # The script reports the first NUL-separated segment with three or more letters, so both strings
-    # carry the DEXTest marker and the message names it whichever one wins.
-    $p = [Text.Encoding]::Unicode.GetBytes("C:\$FixturePrefix\$FixtureAddinName.dll" + [char]0)
-    $n = [Text.Encoding]::Unicode.GetBytes($FixtureAddinName + [char]0)
-    $hdr = [BitConverter]::GetBytes([int]1) + [BitConverter]::GetBytes([int]$p.Length) + [BitConverter]::GetBytes([int]$n.Length)
-    return [byte[]]($hdr + $p + $n)
-}
-function Get-RealResiliencyValueNames {
-    # Value names under DisabledItems and StartupItems that are not ours. Plain array.
-    $names = @()
-    foreach ($sub in @('DisabledItems', 'StartupItems')) {
-        $k = Get-ResiliencyPath $sub
-        if (Test-Path -LiteralPath $k) { $names += @((Get-Item -LiteralPath $k).GetValueNames() | Where-Object { $_ -ne $FixtureResiliencyName } | ForEach-Object { "$sub\$_" }) }
-    }
-    return @($names)
-}
-function Get-FixtureResiliencyBaseline {
-    @{
-        ResiliencyExisted = (Test-Path -LiteralPath (Get-ResiliencyPath))
-        DisabledExisted   = (Test-Path -LiteralPath (Get-ResiliencyPath 'DisabledItems'))
-        RealEntries       = @(Get-RealResiliencyValueNames)
-    }
-}
-function Add-FixtureDisabledItem { Set-RegValue -Path (Get-ResiliencyPath 'DisabledItems') -Name $FixtureResiliencyName -Value ([byte[]]@(New-ResiliencyBlob)) -Type Binary }
-function Test-FixtureDisabledItemPresent { (Get-RegValueInfo -Path (Get-ResiliencyPath 'DisabledItems') -Name $FixtureResiliencyName).Exists }
-function Restore-FixtureDisabledItem {
-    param($Original)
-    $k = Get-ResiliencyPath 'DisabledItems'
-    if (Test-Path -LiteralPath $k) { Remove-ItemProperty -LiteralPath $k -Name $FixtureResiliencyName -ErrorAction SilentlyContinue }
-    if (-not [bool]$Original.DisabledExisted)   { Remove-EmptyRegKey $k }
-    if (-not [bool]$Original.ResiliencyExisted) { Remove-EmptyRegKey (Get-ResiliencyPath) }
 }
 
 # -- Helpers: step 5 AutoRecover ---------------------------------------------------
@@ -544,18 +455,15 @@ function Initialize-Fixture {
     if (-not (Get-C2RConfig) -or -not (Get-C2RRoot)) { throw 'Click-to-Run configuration or EXCEL.EXE is absent; Invoke-AutoRemediateExcel.ps1 would exit 0 as Skipped.' }
     $user = Get-LoggedOnUser; $sid = Get-LoggedOnUserSid
     if (-not (Test-Path -LiteralPath "Registry::HKEY_USERS\$sid")) { throw "Hive for $user ($sid) is not loaded under HKEY_USERS; the script's per-user steps would not see it." }
-    Write-DexStep -Status 'Info' -Name 'Fixture' -Message "Office $(Get-OfficeVersion) ($((Get-C2RConfig).VersionToReport)); user $user; real third-party add-ins $(@(Get-ActiveThirdPartyAddins).Count); Resiliency entries $(@(Get-RealResiliencyValueNames).Count); real XLSTART files $(@(Get-RealXlStartFiles).Count); OPENn values $(@(Get-OpenValues).Count) (dangling $(@(Get-RealDanglingOpenValues).Count)); AutoRecover problems: $(@(Get-RealAutoRecoverProblems) -join ', '); EXCEL crash/hang 7d $(@(Get-AppCrashEvents).Count); EXCEL running: $(Test-ProcessRunning 'EXCEL')"
+    Write-DexStep -Status 'Info' -Name 'Fixture' -Message "Office $(Get-OfficeVersion) ($((Get-C2RConfig).VersionToReport)); user $user; real XLSTART files $(@(Get-RealXlStartFiles).Count); OPENn values $(@(Get-OpenValues).Count) (dangling $(@(Get-RealDanglingOpenValues).Count)); AutoRecover problems: $(@(Get-RealAutoRecoverProblems) -join ', '); EXCEL crash/hang 7d $(@(Get-AppCrashEvents).Count); EXCEL running: $(Test-ProcessRunning 'EXCEL')"
 }
 function Assert-RunSafe {
     # Refuses a run whose variables would make the script act on real state no break restores.
     param([hashtable]$RunEnv, [string[]]$Names)
     if ($RunEnv['AllowDestructiveActions'] -eq 'true') {
-        $real = @(Get-ActiveThirdPartyAddins)
-        if ($real.Count -gt 0) { throw "Real active third-party add-in(s) registered ($($real -join '; ')); step 3 could disable one in an ungated run. Refusing." }
         $xl = @(Get-RealXlStartFiles)
         if ($xl.Count -gt 0) { throw "Real XLSTART content exists ($($xl -join '; ')); step 6 would quarantine it in an ungated run. Refusing." }
     }
-    if ($RunEnv['ReenableDisabledItems'] -eq 'true' -and @(Get-RealResiliencyValueNames).Count -gt 0) { throw 'Real Resiliency entries exist; step 4 would clear them. Refusing.' }
     # Steps 5 and 9 fix unconditionally (with Excel closed); real problems there are changed by every run.
     if ($Names -notcontains 'XlamDanglingRegistration' -and @(Get-RealDanglingOpenValues).Count -gt 0) { throw "Real dangling OPENn registration(s) exist ($(@(Get-RealDanglingOpenValues | ForEach-Object { "$($_.Name)=$($_.Path)" }) -join ', ')); step 9 would remove them and nothing would put them back. Refusing." }
     $ar = @(Get-RealAutoRecoverProblems)
@@ -563,8 +471,6 @@ function Assert-RunSafe {
 }
 function Remove-Fixture {
     # Sweep by prefix; per-break Restore normally did all of this. Catches what a half-finished run left behind.
-    try { $k = Get-FixtureAddinKeyPath; if (Test-Path -LiteralPath $k) { Remove-Item -LiteralPath $k -Recurse -Force -ErrorAction SilentlyContinue } } catch { }
-    try { $k = Get-ResiliencyPath 'DisabledItems'; if (Test-Path -LiteralPath $k) { Remove-ItemProperty -LiteralPath $k -Name $FixtureResiliencyName -ErrorAction SilentlyContinue } } catch { }
     try {
         $info = Get-RegValueInfo -Path (Get-OptionsPath) -Name 'AutoRecoverPath'
         if ($info.Exists -and "$($info.Value)" -eq (Get-AutoRecoverFixturePath)) { Remove-ItemProperty -LiteralPath (Get-OptionsPath) -Name 'AutoRecoverPath' -ErrorAction SilentlyContinue }
@@ -581,79 +487,6 @@ function Remove-Fixture {
 $GatedSuffix = ' -- set \$AllowDestructiveActions=\$true to apply\.'
 
 $BreakCatalog = @(
-
-    @{
-        Name = 'ThirdPartyAddinConflictGated'; ExpectedOutcome = 'ExpectReportedOnly'; RequiresReboot = $false
-        Env = @{ AllowDestructiveActions = '' }; Excludes = @()
-        Methods  = @(@{ Name = 'PlantUserAddin'; Apply = { Add-FixtureAddin } })
-        Capture  = { Get-FixtureAddinBaseline }
-        Verify   = { Test-FixtureAddinPlanted }
-        # Step 3: "<n> active third-party add-in(s): DEXTest.LabAddin [user]. Disabling the first one is the remediation -- set ..."
-        Validate = {
-            $lb = Get-FixtureAddinLoadBehavior
-            if ($lb -ne 3) { Write-Host "           $FixtureAddinName LoadBehavior is '$lb' after a gated run; expected 3" }
-            $reported = Test-DexRecordMatches -ValueNamePrefix 'Step03_' -Pattern "^\[Warning\] \d+ active third-party add-in\(s\): .*$([regex]::Escape($FixtureAddinName)) \[user\].*Disabling the first one is the remediation$GatedSuffix$"
-            ($lb -eq 3) -and $reported
-        }
-        Restore  = { param($Original) Restore-FixtureAddin -Original $Original }
-    },
-
-    @{
-        Name = 'ThirdPartyAddinConflict'; ExpectedOutcome = 'ExpectFixed'; RequiresReboot = $false
-        Env = @{ AllowDestructiveActions = 'true' }; Excludes = @()
-        Methods  = @(@{ Name = 'PlantUserAddin'; Apply = {
-            # The script disables the FIRST active third-party add-in it finds; with no real one the fixture is the only candidate.
-            $real = @(Get-ActiveThirdPartyAddins)
-            if ($real.Count -gt 0) { throw "A real active third-party add-in is registered ($($real -join '; ')); the ungated run could disable it instead of the fixture. Run ThirdPartyAddinConflictGated instead." }
-            Add-FixtureAddin
-        } })
-        Capture  = { Get-FixtureAddinBaseline }
-        Verify   = { Test-FixtureAddinPlanted }
-        # Resolution: "Add-in 'DEXTest.LabAddin' [user] set to LoadBehavior=0. Restart Excel to take effect."
-        Validate = {
-            $lb = Get-FixtureAddinLoadBehavior
-            if ($lb -ne 0) { Write-Host "           $FixtureAddinName LoadBehavior is '$lb'; expected 0" }
-            $reported = Test-DexRecordMatches -ValueNamePrefix 'Step03_' -Pattern "^\[Remediated\] Add-in '$([regex]::Escape($FixtureAddinName))' \[user\] set to LoadBehavior=0\. Restart Excel to take effect\.$"
-            ($lb -eq 0) -and $reported
-        }
-        Restore  = { param($Original) Restore-FixtureAddin -Original $Original }
-    },
-
-    @{
-        Name = 'DisabledItemGated'; ExpectedOutcome = 'ExpectReportedOnly'; RequiresReboot = $false
-        Env = @{ ReenableDisabledItems = '' }; Excludes = @()
-        Methods  = @(@{ Name = 'PlantResiliencyEntry'; Apply = { Add-FixtureDisabledItem } })
-        Capture  = { Get-FixtureResiliencyBaseline }
-        Verify   = { $ok = Test-FixtureDisabledItemPresent; if (-not $ok) { Write-Host '           fixture Resiliency value missing' }; $ok }
-        # Step 4: "<n> disabled item(s), <n> disabled startup item(s): DEXTest... Set $ReenableDisabledItems=$true to clear them; ..."
-        Validate = {
-            $still = Test-FixtureDisabledItemPresent
-            if (-not $still) { Write-Host '           fixture Resiliency value was cleared during a gated run' }
-            $reported = Test-DexRecordMatches -ValueNamePrefix 'Step04_' -Pattern "^\[Warning\] \d+ disabled item\(s\), \d+ disabled startup item\(s\): .*$FixturePrefix.*\. Set \`$ReenableDisabledItems=\`$true to clear them; Office disabled these after a failure, so confirm first\.$"
-            $still -and $reported
-        }
-        Restore  = { param($Original) Restore-FixtureDisabledItem -Original $Original }
-    },
-
-    @{
-        Name = 'DisabledItem'; ExpectedOutcome = 'ExpectFixed'; RequiresReboot = $false
-        Env = @{ ReenableDisabledItems = 'true' }; Excludes = @()
-        Methods  = @(@{ Name = 'PlantResiliencyEntry'; Apply = {
-            $real = @(Get-RealResiliencyValueNames)
-            if ($real.Count -gt 0) { throw "Real Resiliency entries exist ($($real -join ', ')); the script clears every entry, so an ungated run would re-enable items Office disabled. Run DisabledItemGated instead." }
-            Add-FixtureDisabledItem
-        } })
-        Capture  = { Get-FixtureResiliencyBaseline }
-        Verify   = { $ok = Test-FixtureDisabledItemPresent; if (-not $ok) { Write-Host '           fixture Resiliency value missing' }; $ok }
-        # Resolution: "Cleared 1 Resiliency entry; items load at Excel's next start."
-        Validate = {
-            $gone = -not (Test-FixtureDisabledItemPresent)
-            if (-not $gone) { Write-Host '           fixture Resiliency value still present' }
-            $reported = Test-DexRecordMatches -ValueNamePrefix 'Step04_' -Pattern "^\[Remediated\] Cleared 1 Resiliency entry; items load at Excel's next start\.$"
-            $gone -and $reported
-        }
-        Restore  = { param($Original) Restore-FixtureDisabledItem -Original $Original }
-    },
 
     @{
         Name = 'AutoRecoverPathMissing'; ExpectedOutcome = 'ExpectFixed'; RequiresReboot = $false

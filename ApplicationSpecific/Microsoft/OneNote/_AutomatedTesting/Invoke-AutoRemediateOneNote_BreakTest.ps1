@@ -8,9 +8,9 @@
     JSON result to C:\Temp\FixReport\Invoke-AutoRemediateOneNote\ for
     Invoke-FixReportAnalysis.ps1 to aggregate.
 
-    THIS SCRIPT IS DELIBERATELY DESTRUCTIVE. It writes an add-in key, a Resiliency
-    DisabledItems entry and an OpenNotebooks subkey into the logged-on user's OneNote hive,
-    drops a 64 MB fixture file into the user's notebook cache folder
+    THIS SCRIPT IS DELIBERATELY DESTRUCTIVE. It writes an OpenNotebooks subkey into the
+    logged-on user's OneNote hive, drops a 64 MB fixture file into the user's notebook
+    cache folder
     (%LOCALAPPDATA%\Microsoft\OneNote\16.0\cache, created if absent), lowers the script's
     cache threshold, and -- for NotebookCacheBloat only -- lets the script RENAME the
     user's cache folder to cache_<stamp>.bak; Restore renames it back. Run it only on a
@@ -21,38 +21,26 @@
     HKEY_USERS\<SID> and the profile through C:\Users\<name>; so does this harness, so run
     it elevated as the interactive user. Every artefact carries the DEXTest prefix. Each
     break Captures what it is about to change (keys and folders it had to create, whether
-    the cache folder existed, the cache_*.bak folders already present, real Resiliency
-    entry names) and Restore removes only what was planted, deepest first, keys and folders
-    only when empty afterwards. The user's cache content is never deleted: after the
-    script renames the folder, Restore strips the DEXTest subfolder out of the .bak and
-    renames it back to cache. If both cache and a new .bak exist at Restore (OneNote was
-    launched mid-run) the harness refuses to guess and reports Dirty with the .bak name.
+    the cache folder existed, the cache_*.bak folders already present) and Restore removes
+    only what was planted, deepest first, keys and folders only when empty afterwards. The
+    user's cache content is never deleted: after the script renames the folder, Restore
+    strips the DEXTest subfolder out of the .bak and renames it back to cache. If both
+    cache and a new .bak exist at Restore (OneNote was launched mid-run) the harness
+    refuses to guess and reports Dirty with the .bak name.
 
     GATES
-    Steps 3 and 6 remediate only with $env:AllowDestructiveActions = true, step 4 only
-    with $env:ReenableDisabledItems = true; each has a gated (ExpectReportedOnly) and an
-    ungated (ExpectFixed) break. A flag is one variable for the whole child, so gated and
-    ungated breaks of one flag cannot share a run: the first drawn decides, the rest are
-    dropped. The script disables the FIRST third-party add-in, clears EVERY Resiliency
-    entry and renames the WHOLE cache, so the ungated breaks refuse when a real add-in or
-    entry exists, and AllowDestructiveActions is never set while a real third-party add-in
-    is active or while (with no cache break drawn) the real cache already exceeds the
-    script's default 4096 MB or has a zero-byte 0.onecache. The two cache breaks share one
-    fixture (Group 'Cache') and are mutually exclusive.
+    Step 6 remediates only with $env:AllowDestructiveActions = true; it has a gated
+    (ExpectReportedOnly) and an ungated (ExpectFixed) break. The flag is one variable for
+    the whole child, so the two cannot share a run: the first drawn decides, the other is
+    dropped. The script renames the WHOLE cache, so AllowDestructiveActions is never set
+    while (with no cache break drawn) the real cache already exceeds the script's default
+    4096 MB or has a zero-byte 0.onecache. The two cache breaks share one fixture (Group
+    'Cache') and are mutually exclusive. The gated add-in steps (3 COM Add-in Conflict,
+    4 Office-Disabled Items) moved to ApplicationSpecific\Microsoft\Office\
+    Invoke-AutoRemediateOfficeAddins.ps1, and their four breaks moved to that script's
+    harness.
 
-    EXPECTED OUTCOMES (from the script's own messages, 1.0.1; the regexes sit in Validate)
-    ThirdPartyAddinConflictGated  ExpectReportedOnly. DEXTest.Addin LoadBehavior 3 under
-                                  HKU\<SID>\...\Office\16.0\OneNote\Addins; still 3 afterwards;
-                                  Step03 "[Warning] 1 active third-party add-in(s): DEXTest.Addin
-                                  [user]. Disabling the first one is the remediation -- set ...".
-    ThirdPartyAddinConflict       ExpectFixed. Flag 'true'; LoadBehavior 0; Step03 "[Remediated]
-                                  Add-in 'DEXTest.Addin' [user] set to LoadBehavior=0. ...".
-    DisabledItemGated             ExpectReportedOnly. REG_BINARY DEXTest01 under
-                                  ...\OneNote\Resiliency\DisabledItems decoding to DEXTest.Addin;
-                                  still there; Step04 "[Warning] 1 disabled item(s), 0 disabled
-                                  startup item(s): DEXTest.Addin. Set $ReenableDisabledItems...".
-    DisabledItem                  ExpectFixed. ReenableDisabledItems 'true'; value gone; Step04
-                                  "[Remediated] Cleared 1 Resiliency entry; items load at ...".
+    EXPECTED OUTCOMES (from the script's own messages, 1.0.3; the regexes sit in Validate)
     NotebookCacheBloatGated       ExpectReportedOnly. cache\DEXTest\DEXTest_bloat.bin (64 MB,
                                   dated 30 days back), CacheSizeWarningMB = floor(real MB) + 64
                                   handed to the script; cache still present, no new .bak; Step06
@@ -71,8 +59,8 @@
 
     NOT COVERED
       Step 2 Crash and Hang History -- planting real 1000/1002 events is out of bounds.
-      Step 3 Failed branch (crash module matches an add-in name) -- needs a step 2 crash;
-             note that branch remediates WITHOUT the AllowDestructiveActions gate.
+      Steps 3 and 4 (COM Add-in Conflict, Office-Disabled Items) -- moved to
+             Invoke-AutoRemediateOfficeAddins.ps1; its own harness carries those breaks.
       Step 6 corrupt branch (zero-byte 0.onecache with notebooks registered) -- would mean
              replacing the user's real 0.onecache; the bloat branch reaches the same path.
       Step 6 'OneNote is open' refusal -- Verify refuses instead of launching OneNote.
@@ -104,13 +92,17 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateOneNote_BreakTest.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : Administrator (elevated), run as the interactive user
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-11-05
     Reporting    : C:\Temp\FixReport\Invoke-AutoRemediateOneNote\
 
+    1.0.1  ThirdPartyAddinConflictGated, ThirdPartyAddinConflict, DisabledItemGated and
+           DisabledItem moved to the Invoke-AutoRemediateOfficeAddins.ps1 harness with the
+           script's steps 3 and 4; ReenableDisabledItems is no longer passed to the child.
+           Three breaks remain. Tracks script 1.0.3.
     1.0.0  Initial: add-in gated/ungated, Resiliency gated/ungated, NotebookCacheBloat
            gated/ungated, NotebookSyncError. Tracks script 1.0.1.
 
@@ -159,9 +151,6 @@ if (-not (Test-Path -LiteralPath $RemediationScript)) {
 }
 
 # -- Fixture ------------------------------------------------------------------
-$FixtureAddinName       = 'DEXTest.Addin'       # must NOT match the script's $_msAddin matcher
-$FixtureResiliencyValue = 'DEXTest01'           # REG_BINARY value name under Resiliency\DisabledItems
-$FixtureDisabledItem    = 'DEXTest.Addin'       # what _DecodeResiliency must read out of that value
 $FixtureBloatSubdir     = 'DEXTest'             # subfolder inside the cache folder
 $FixtureBloatFile       = 'DEXTest_bloat.bin'
 $FixtureBloatMB         = 64                    # fixture size; threshold = floor(real cache MB) + this
@@ -173,7 +162,6 @@ $FixtureSyncError       = [int]-2147024891       # 0x80070005 as the Int32 a REG
 $FixtureFreeSpaceMB     = 512
 $ScriptDefaultCacheMB   = 4096                  # the script's default CacheSizeWarningMB
 
-$MicrosoftAddinMatcher = '^Microsoft\.|OfficeMicrosoftTeams|Microsoft Online|SharePoint|OneDrive|Skype|Lync|Grammarly\.Microsoft|CopilotAddin'
 
 function Initialize-Fixture {
     if (-not (Test-AppInstalled)) {
@@ -185,23 +173,13 @@ function Initialize-Fixture {
         throw "Hive for $user ($sid) is not loaded under HKEY_USERS; the script's per-user steps would not see it."
     }
     Get-UserProfilePath | Out-Null
-    $thirdParty = @(Get-ActiveThirdPartyAddins)
-    $realRes    = @(Get-RealResiliencyEntries)
     $cache      = Get-CacheDir
     $cacheInfo  = if (Test-Path -LiteralPath $cache) { "$(Get-DirMB -Path $cache)MB, 0.onecache $(if (Test-Path -LiteralPath (Join-Path $cache '0.onecache')) { 'present' } else { 'absent' })" } else { 'absent' }
-    Write-DexStep -Status 'Info' -Name 'Fixture' -Message "Office $(Get-OfficeVersion) ($((Get-C2RConfig).VersionToReport)); user $user; real active third-party add-ins: $($thirdParty.Count); real Resiliency entries: $($realRes.Count); notebook cache: $cacheInfo; registered notebooks: $(@(Get-RegisteredNotebooks).Count); $AppExe running: $(Test-AppRunning)"
+    Write-DexStep -Status 'Info' -Name 'Fixture' -Message "Office $(Get-OfficeVersion) ($((Get-C2RConfig).VersionToReport)); user $user; notebook cache: $cacheInfo; registered notebooks: $(@(Get-RegisteredNotebooks).Count); $AppExe running: $(Test-AppRunning)"
 }
 
 function Remove-Fixture {
     # Sweep by prefix; the per-break Restore blocks have normally done all of this already.
-    try {
-        $key = Get-FixtureAddinKeyPath
-        if (Test-Path -LiteralPath $key) { Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction SilentlyContinue }
-    } catch { }
-    try {
-        $k = Get-DisabledItemsKeyPath
-        if (Test-Path -LiteralPath $k) { Remove-ItemProperty -LiteralPath $k -Name $FixtureResiliencyValue -ErrorAction SilentlyContinue }
-    } catch { }
     try {
         $nb = Get-FixtureNotebookKeyPath
         if (Test-Path -LiteralPath $nb) { Remove-Item -LiteralPath $nb -Recurse -Force -ErrorAction SilentlyContinue }
@@ -259,11 +237,6 @@ function Get-OfficeVersion {
 
 function Get-UserHivePath         { "Registry::HKEY_USERS\$(Get-LoggedOnUserSid)" }
 function Get-UserAppKeyPath       { "$(Get-UserHivePath)\Software\Microsoft\Office\$(Get-OfficeVersion)\$AppName" }
-function Get-UserAddinsKeyPath    { "$(Get-UserAppKeyPath)\Addins" }
-function Get-FixtureAddinKeyPath  { "$(Get-UserAddinsKeyPath)\$FixtureAddinName" }
-function Get-ResiliencyKeyPath    { "$(Get-UserAppKeyPath)\Resiliency" }
-function Get-DisabledItemsKeyPath { "$(Get-ResiliencyKeyPath)\DisabledItems" }
-function Get-StartupItemsKeyPath  { "$(Get-ResiliencyKeyPath)\StartupItems" }
 function Get-OpenNotebooksKeyPath { "$(Get-UserAppKeyPath)\OpenNotebooks" }
 function Get-FixtureNotebookKeyPath { "$(Get-OpenNotebooksKeyPath)\$FixtureNotebookKey" }
 
@@ -335,129 +308,6 @@ function Test-DexRecordMatches {
     if ($null -eq $text) { Write-Host "           no $ValueNamePrefix value under $DexRecordsPath"; return $false }
     if ($text -notmatch $Pattern) { Write-Host "           $ValueNamePrefix = '$text' did not match '$Pattern'"; return $false }
     return $true
-}
-
-# -- Helpers: add-ins (step 3) ----------------------------------------------------
-
-function Get-AddinSearchKeys {
-    $ver = Get-OfficeVersion; $hku = Get-UserHivePath
-    $out = @()
-    foreach ($s in @("Software\Microsoft\Office\$AppName\Addins", "Software\Microsoft\Office\$ver\$AppName\Addins")) {
-        $out += "$hku\$s"
-        $out += "HKLM:\$s"
-        $out += "HKLM:\SOFTWARE\WOW6432Node\$($s.Substring(9))"
-    }
-    return @($out | Where-Object { Test-Path -LiteralPath $_ })
-}
-
-function Get-ActiveThirdPartyAddins {
-    $list = New-Object System.Collections.Generic.List[string]
-    foreach ($root in @(Get-AddinSearchKeys)) {
-        foreach ($k in @(Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue)) {
-            if ($k.PSChildName -eq $FixtureAddinName) { continue }
-            if ($k.PSChildName -match $MicrosoftAddinMatcher) { continue }
-            $lb = (Get-ItemProperty -LiteralPath $k.PSPath -Name 'LoadBehavior' -ErrorAction SilentlyContinue).LoadBehavior
-            if ($lb -eq 3) { $list.Add(($k.PSPath -replace '^Microsoft\.PowerShell\.Core\\Registry::', '')) }
-        }
-    }
-    return $list.ToArray()
-}
-
-function Get-FixtureAddinLoadBehavior {
-    $key = Get-FixtureAddinKeyPath
-    if (-not (Test-Path -LiteralPath $key)) { return $null }
-    return (Get-ItemProperty -LiteralPath $key -Name 'LoadBehavior' -ErrorAction SilentlyContinue).LoadBehavior
-}
-
-function Get-FixtureAddinBaseline {
-    @{ MissingKeys = @(Get-MissingRegistryKeys -Paths @((Get-UserAppKeyPath), (Get-UserAddinsKeyPath))) }
-}
-
-function Add-FixtureAddin {
-    New-RegistryKeyChain -Path (Get-UserAddinsKeyPath)
-    $key = Get-FixtureAddinKeyPath
-    New-Item -Path $key -Force -ErrorAction Stop | Out-Null
-    Set-ItemProperty -LiteralPath $key -Name 'LoadBehavior' -Value 3 -Type DWord -ErrorAction Stop
-    Set-ItemProperty -LiteralPath $key -Name 'FriendlyName' -Value 'DEX Test Lab Add-in' -Type String -ErrorAction Stop
-    Set-ItemProperty -LiteralPath $key -Name 'Description'  -Value "Planted by $ScriptUnderTest`_BreakTest.ps1; safe to delete." -Type String -ErrorAction Stop
-}
-
-function Test-FixtureAddinPlanted {
-    $lb = Get-FixtureAddinLoadBehavior
-    if ($lb -ne 3) { Write-Host "           $FixtureAddinName LoadBehavior is '$lb', expected 3"; return $false }
-    if ($FixtureAddinName -match $MicrosoftAddinMatcher) { Write-Host '           fixture name matches the Microsoft matcher'; return $false }
-    return $true
-}
-
-function Restore-FixtureAddin {
-    param($Original)
-    $key = Get-FixtureAddinKeyPath
-    if (Test-Path -LiteralPath $key) { Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction SilentlyContinue }
-    Remove-MissingRegistryKeys -Paths @($Original.MissingKeys | Where-Object { $_ })
-}
-
-# -- Helpers: Resiliency (step 4) --------------------------------------------------
-
-function ConvertFrom-ResiliencyValue {
-    param([Parameter(Mandatory = $true)][string]$Key, [Parameter(Mandatory = $true)][string]$Name)
-    $item  = Get-Item -LiteralPath $Key -ErrorAction SilentlyContinue
-    if (-not $item) { return $null }
-    $bytes = $item.GetValue($Name)
-    if ($bytes -is [byte[]]) {
-        $text = [Text.Encoding]::Unicode.GetString($bytes)
-        $segs = @($text -split "`0" | Where-Object { $_ -match '[A-Za-z]{3,}' })
-        if ($segs.Count -gt 0) { return $segs[0].Trim() }
-        return $Name
-    }
-    return $Name
-}
-
-function Get-RealResiliencyEntries {
-    $out = @()
-    foreach ($k in @((Get-DisabledItemsKeyPath), (Get-StartupItemsKeyPath))) {
-        if (-not (Test-Path -LiteralPath $k)) { continue }
-        $item = Get-Item -LiteralPath $k -ErrorAction SilentlyContinue
-        if (-not $item) { continue }
-        foreach ($v in @($item.GetValueNames())) {
-            if ($v -ne $FixtureResiliencyValue) { $out += "$(Split-Path -Path $k -Leaf)\$v" }
-        }
-    }
-    return @($out)
-}
-
-function Get-FixtureResiliencyBaseline {
-    @{
-        MissingKeys = @(Get-MissingRegistryKeys -Paths @((Get-UserAppKeyPath), (Get-ResiliencyKeyPath), (Get-DisabledItemsKeyPath)))
-        RealEntries = @(Get-RealResiliencyEntries)
-    }
-}
-
-function Add-FixtureDisabledItem {
-    New-RegistryKeyChain -Path (Get-DisabledItemsKeyPath)
-    $bytes = [Text.Encoding]::Unicode.GetBytes("$FixtureDisabledItem`0DEX Test Lab Add-in`0")
-    Set-ItemProperty -LiteralPath (Get-DisabledItemsKeyPath) -Name $FixtureResiliencyValue -Value ([byte[]]$bytes) -Type Binary -ErrorAction Stop
-}
-
-function Test-FixtureDisabledItemPlanted {
-    $k = Get-DisabledItemsKeyPath
-    if (-not (Test-Path -LiteralPath $k)) { Write-Host "           $k missing"; return $false }
-    if (@((Get-Item -LiteralPath $k).GetValueNames()) -notcontains $FixtureResiliencyValue) { Write-Host "           value $FixtureResiliencyValue missing"; return $false }
-    $decoded = ConvertFrom-ResiliencyValue -Key $k -Name $FixtureResiliencyValue
-    if ($decoded -ne $FixtureDisabledItem) { Write-Host "           value decodes to '$decoded', expected '$FixtureDisabledItem'"; return $false }
-    return $true
-}
-
-function Test-FixtureDisabledItemPresent {
-    $k = Get-DisabledItemsKeyPath
-    if (-not (Test-Path -LiteralPath $k)) { return $false }
-    return (@((Get-Item -LiteralPath $k).GetValueNames()) -contains $FixtureResiliencyValue)
-}
-
-function Restore-FixtureResiliency {
-    param($Original)
-    $k = Get-DisabledItemsKeyPath
-    if (Test-Path -LiteralPath $k) { Remove-ItemProperty -LiteralPath $k -Name $FixtureResiliencyValue -ErrorAction SilentlyContinue }
-    Remove-MissingRegistryKeys -Paths @($Original.MissingKeys | Where-Object { $_ })
 }
 
 # -- Helpers: notebook cache (step 6) ---------------------------------------------
@@ -617,7 +467,6 @@ function Restore-FixtureNotebook {
 function Get-RemediationVariables {
     $vars = @{
         AllowDestructiveActions = if ([bool]$state.DestructiveFlag) { 'true' } else { $null }
-        ReenableDisabledItems   = if ([bool]$state.ReenableFlag)    { 'true' } else { $null }
         CacheSizeWarningMB      = if ($state.CacheThresholdMB) { "$([int]$state.CacheThresholdMB)" } else { $null }
     }
     return $vars
@@ -654,108 +503,15 @@ function Invoke-RemediationScript {
 }
 
 # -- Break definitions ---------------------------------------------------------
-# DestructiveFlag / ReenableFlag: $true -- the run sets the variable to 'true'; $false -- unset; $null -- either.
+# DestructiveFlag: $true -- the run sets the variable to 'true'; $false -- unset; $null -- either.
 # Group: breaks sharing a fixture; only the first drawn of a group runs.
 $BreakCatalog = @(
-
-    @{
-        Name            = 'ThirdPartyAddinConflictGated'
-        ExpectedOutcome = 'ExpectReportedOnly'
-        RequiresReboot  = $false
-        DestructiveFlag = $false
-        ReenableFlag    = $null
-        Group           = 'Addin'
-        Methods         = @(@{ Name = 'PlantUserAddin'; Apply = { Add-FixtureAddin } })
-        Capture  = { Get-FixtureAddinBaseline }
-        Verify   = { Test-FixtureAddinPlanted }
-        Validate = {
-            $lb     = Get-FixtureAddinLoadBehavior
-            $intact = ($lb -eq 3)
-            if (-not $intact) { Write-Host "           $FixtureAddinName LoadBehavior is '$lb' after a gated run; expected 3" }
-            $reported = Test-DexRecordMatches -ValueNamePrefix 'Step03_' -Pattern "^\[Warning\] \d+ active third-party add-in\(s\): .*$([regex]::Escape($FixtureAddinName)) \[user\].*\. Disabling the first one is the remediation -- set \`$AllowDestructiveActions=\`$true to apply\.$"
-            return ($intact -and $reported)
-        }
-        Restore  = { param($Original) Restore-FixtureAddin -Original $Original }
-    },
-
-    @{
-        Name            = 'ThirdPartyAddinConflict'
-        ExpectedOutcome = 'ExpectFixed'
-        RequiresReboot  = $false
-        DestructiveFlag = $true
-        ReenableFlag    = $null
-        Group           = 'Addin'
-        Methods         = @(@{
-            Name  = 'PlantUserAddin'
-            Apply = {
-                $real = @(Get-ActiveThirdPartyAddins)
-                if ($real.Count -gt 0) { throw "A real active third-party add-in is registered ($($real -join '; ')); the ungated run could disable it instead of the fixture. Run ThirdPartyAddinConflictGated instead." }
-                Add-FixtureAddin
-            }
-        })
-        Capture  = { Get-FixtureAddinBaseline }
-        Verify   = { Test-FixtureAddinPlanted }
-        Validate = {
-            $lb       = Get-FixtureAddinLoadBehavior
-            $disabled = ($lb -eq 0)
-            if (-not $disabled) { Write-Host "           $FixtureAddinName LoadBehavior is '$lb'; expected 0" }
-            $reported = Test-DexRecordMatches -ValueNamePrefix 'Step03_' -Pattern "^\[Remediated\] Add-in '$([regex]::Escape($FixtureAddinName))' \[user\] set to LoadBehavior=0\. Restart $AppName to take effect\.$"
-            return ($disabled -and $reported)
-        }
-        Restore  = { param($Original) Restore-FixtureAddin -Original $Original }
-    },
-
-    @{
-        Name            = 'DisabledItemGated'
-        ExpectedOutcome = 'ExpectReportedOnly'
-        RequiresReboot  = $false
-        DestructiveFlag = $null
-        ReenableFlag    = $false
-        Group           = 'Resiliency'
-        Methods         = @(@{ Name = 'PlantDisabledItem'; Apply = { Add-FixtureDisabledItem } })
-        Capture  = { Get-FixtureResiliencyBaseline }
-        Verify   = { Test-FixtureDisabledItemPlanted }
-        Validate = {
-            $intact = Test-FixtureDisabledItemPresent
-            if (-not $intact) { Write-Host "           $FixtureResiliencyValue is gone after a gated run" }
-            $reported = Test-DexRecordMatches -ValueNamePrefix 'Step04_' -Pattern "^\[Warning\] \d+ disabled item\(s\), \d+ disabled startup item\(s\): .*$([regex]::Escape($FixtureDisabledItem)).*\. Set \`$ReenableDisabledItems=\`$true to clear them; Office disabled these after a failure, so confirm first\.$"
-            return ($intact -and $reported)
-        }
-        Restore  = { param($Original) Restore-FixtureResiliency -Original $Original }
-    },
-
-    @{
-        Name            = 'DisabledItem'
-        ExpectedOutcome = 'ExpectFixed'
-        RequiresReboot  = $false
-        DestructiveFlag = $null
-        ReenableFlag    = $true
-        Group           = 'Resiliency'
-        Methods         = @(@{
-            Name  = 'PlantDisabledItem'
-            Apply = {
-                $real = @(Get-RealResiliencyEntries)
-                if ($real.Count -gt 0) { throw "Real Resiliency entries exist ($($real -join '; ')); the ungated run would clear them too. Run DisabledItemGated instead." }
-                Add-FixtureDisabledItem
-            }
-        })
-        Capture  = { Get-FixtureResiliencyBaseline }
-        Verify   = { Test-FixtureDisabledItemPlanted }
-        Validate = {
-            $cleared = -not (Test-FixtureDisabledItemPresent)
-            if (-not $cleared) { Write-Host "           $FixtureResiliencyValue still present after an ungated run" }
-            $reported = Test-DexRecordMatches -ValueNamePrefix 'Step04_' -Pattern "^\[Remediated\] Cleared \d+ Resiliency entr(y|ies); items load at $AppName's next start\.$"
-            return ($cleared -and $reported)
-        }
-        Restore  = { param($Original) Restore-FixtureResiliency -Original $Original }
-    },
 
     @{
         Name            = 'NotebookCacheBloatGated'
         ExpectedOutcome = 'ExpectReportedOnly'
         RequiresReboot  = $false
         DestructiveFlag = $false
-        ReenableFlag    = $null
         Group           = 'Cache'
         Methods         = @(@{ Name = 'PlantCacheBloat'; Apply = { New-FixtureBloat } })
         Capture  = { Get-CacheBaseline }
@@ -778,7 +534,6 @@ $BreakCatalog = @(
         ExpectedOutcome = 'ExpectFixed'
         RequiresReboot  = $false
         DestructiveFlag = $true
-        ReenableFlag    = $null
         Group           = 'Cache'
         Methods         = @(@{ Name = 'PlantCacheBloat'; Apply = { New-FixtureBloat } })
         Capture  = { Get-CacheBaseline }
@@ -808,7 +563,6 @@ $BreakCatalog = @(
         ExpectedOutcome = 'ExpectReportedOnly'
         RequiresReboot  = $false
         DestructiveFlag = $null
-        ReenableFlag    = $null
         Group           = 'Notebook'
         Methods         = @(@{ Name = 'PlantNotebookWithError'; Apply = { Add-FixtureNotebook } })
         Capture  = { Get-NotebookBaseline }
@@ -917,7 +671,7 @@ try {
 
         # One environment variable per flag for the whole child process: gated and ungated
         # breaks of the same flag cannot share a run. The first drawn decides.
-        foreach ($flag in @(@{ Field = 'DestructiveFlag'; Env = 'AllowDestructiveActions' }, @{ Field = 'ReenableFlag'; Env = 'ReenableDisabledItems' })) {
+        foreach ($flag in @(@{ Field = 'DestructiveFlag'; Env = 'AllowDestructiveActions' })) {
             $f = $flag.Field
             $flagged = @($selected | Where-Object { $null -ne $_[$f] })
             if ($flagged.Count -gt 0) {
@@ -943,11 +697,9 @@ try {
         }
         $state.CacheThresholdMB = $null
 
-        # Never hand the script AllowDestructiveActions while step 3 could disable a real
-        # add-in or step 6 could rename the user's real cache on its own merits.
+        # Never hand the script AllowDestructiveActions while step 6 could rename the user's
+        # real cache on its own merits.
         if ($state.DestructiveFlag) {
-            $real = @(Get-ActiveThirdPartyAddins)
-            if ($real.Count -gt 0) { throw "AllowDestructiveActions would be set while a real active third-party add-in is registered ($($real -join '; ')); step 3 could disable it. Refusing." }
             if (@($selected | Where-Object { $_.Group -eq 'Cache' }).Count -eq 0) {
                 $realMB = Get-DirMB -Path (Get-CacheDir)
                 if ($realMB -ge $ScriptDefaultCacheMB) { throw "The real notebook cache is ${realMB}MB, at or over the script's default ${ScriptDefaultCacheMB}MB; an ungated run would rename it. Refusing." }

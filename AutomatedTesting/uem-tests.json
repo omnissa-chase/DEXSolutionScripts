@@ -124,6 +124,27 @@
   "Invoke-AutoRemediateZoom.ps1": {
     "note": "Zoom 7.2.5 is installed machine-wide on CBRADLEYSWIN11 since 2026-11-05 (Program Files, no App Paths entry), so that device takes the product path from 1.0.2 on (1.0.1 misdetected it as not installed, 13.2.dd); CHASEWIN11_2 has no Zoom and proves the [Skipped] path. Device-side proof: DEXRecords ZoomErrors with ZoomVersion and TotalSteps 5."
   },
+  "Invoke-AutoRemediateOfficeAddins.ps1": {
+    "note": "Suite-wide Office add-in script (new 2026-11-05, 1.0.0): twelve steps, two per application, for Word, Excel, PowerPoint, Access, OneNote and Publisher. Office 365 C2R 16.0.18925 is on CBRADLEYSWIN11, so that device takes the product path; CHASEWIN11_2 has no Office and proves the [Skipped] path. Device-side proof: DEXRecords OfficeAddinsErrors with TotalSteps 12. Report-only by default; AllowDestructiveActions and ReenableDisabledItems are the gates."
+  },
+  "Invoke-AutoRemediateWord.ps1": {
+    "note": "Office 365 C2R is on CBRADLEYSWIN11 (product path, 7 steps from 1.0.3: add-in steps moved to Invoke-AutoRemediateOfficeAddins.ps1); CHASEWIN11_2 has no Office and proves the [Skipped] path. Device-side proof: DEXRecords WordErrors. Report-only by default apart from creating a missing AutoRecover folder."
+  },
+  "Invoke-AutoRemediateExcel.ps1": {
+    "note": "Office 365 C2R is on CBRADLEYSWIN11 (product path, 5 active steps from 1.0.3); CHASEWIN11_2 proves the [Skipped] path. 31,436 characters: under the 32,767 limit, over the 30,000 planning ceiling (documented exception). Device-side proof: DEXRecords ExcelErrors."
+  },
+  "Invoke-AutoRemediatePowerPoint.ps1": {
+    "note": "Office 365 C2R is on CBRADLEYSWIN11 (product path, 4 active steps from 1.0.3); CHASEWIN11_2 proves the [Skipped] path. A real igd10iumd64.dll crash on CBRADLEYSWIN11 makes steps 2 and 6 Warn until about 2026-11-10. Device-side proof: DEXRecords PowerPointErrors."
+  },
+  "Invoke-AutoRemediateAccess.ps1": {
+    "note": "Office 365 C2R is on CBRADLEYSWIN11 (product path, 3 active steps from 1.0.3); CHASEWIN11_2 proves the [Skipped] path. Device-side proof: DEXRecords AccessErrors."
+  },
+  "Invoke-AutoRemediateOneNote.ps1": {
+    "note": "Office 365 C2R desktop OneNote is on CBRADLEYSWIN11 (product path, 3 active steps from 1.0.3); CHASEWIN11_2 proves the [Skipped] path. Device-side proof: DEXRecords OneNoteErrors."
+  },
+  "Invoke-AutoRemediatePublisher.ps1": {
+    "note": "Office 365 C2R Publisher is on CBRADLEYSWIN11 (product path, 2 active steps from 1.0.3); CHASEWIN11_2 proves the [Skipped] path. Device-side proof: DEXRecords PublisherErrors."
+  },
   "Invoke-AutoRemediateAppXBloat.ps1": {
     "note": "Deprovisions consumer inbox AppX packages on the test device. Expected and acceptable on a disposable VM; the first run changes the image."
   },

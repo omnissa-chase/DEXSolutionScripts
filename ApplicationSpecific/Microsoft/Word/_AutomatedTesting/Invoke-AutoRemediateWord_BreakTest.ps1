@@ -7,8 +7,8 @@
     Break -> verify-the-break -> remediate -> validate -> restore. Writes a uniform JSON
     result to C:\Temp\FixReport\Invoke-AutoRemediateWord\ for Invoke-FixReportAnalysis.ps1.
 
-    THIS SCRIPT IS DELIBERATELY DESTRUCTIVE. It writes an add-in key, a Resiliency entry
-    and an AutoRecover path into the logged-on user's Office hive, replaces the user's
+    THIS SCRIPT IS DELIBERATELY DESTRUCTIVE. It writes an AutoRecover path into the
+    logged-on user's Office hive, replaces the user's
     Normal.dotm with an oversized fixture (the original is backed up and put back), bloats
     or creates the Office Document Cache folder, drops a file into the user's Word STARTUP
     folder, and can let the script rename the user's Word Data key. Run it only on a marked
@@ -19,34 +19,25 @@
     Win32_ComputerSystem.UserName and reads HKEY_USERS\<SID>, so the harness does the same.
     Run elevated as the interactive user; the child powershell.exe runs in this same
     context, as Workspace ONE Hub would, with the script's inputs passed as environment
-    variables (AllowDestructiveActions, ReenableDisabledItems, CacheSizeWarningMB,
-    CrashWarnCount7d, TemplateWarnMB). Every planted artefact carries the DEXTest prefix;
-    every break Captures what it changes and Restore writes it back.
+    variables (AllowDestructiveActions, CacheSizeWarningMB, CrashWarnCount7d,
+    TemplateWarnMB). Every planted artefact carries the DEXTest prefix; every break
+    Captures what it changes and Restore writes it back.
 
     ONE ENVIRONMENT PER RUN
     Each break declares the variables the child must see (Env); '' means "must be unset".
     The flag is one value for the whole child process, so a gated break (flag unset,
     ExpectReportedOnly) and its ungated twin (flag 'true', ExpectFixed) cannot share a run:
     the first drawn decides and conflicting draws are dropped. Breaks whose detection would
-    be masked by another break's blame (step 9 needs no add-in, disabled item or template
-    blamed) carry an Excludes list and are kept exclusive the same way. An ungated run is
-    refused when real state would be acted on: a real active third-party add-in (step 3
-    disables the first one), a real Normal.dotm at or over TemplateWarnMB, a real Document
-    Cache at or over the threshold, or three or more real WINWORD crash events.
+    be masked by another break's blame (step 9 needs nothing blamed by step 2 -- third-party
+    crash module or Resiliency entries -- or by step 6) carry an Excludes list and are kept
+    exclusive the same way. An ungated run is refused when real state would be acted on: a
+    real Normal.dotm at or over TemplateWarnMB, a real Document Cache at or over the
+    threshold, or three or more real WINWORD crash events.
 
-    EXPECTED OUTCOMES (derived from the script's own messages, 1.0.1)
+    EXPECTED OUTCOMES (derived from the script's own messages, 1.0.3)
       ExpectFixed        -- remediation must repair the component
       ExpectReportedOnly -- remediation must DETECT and report it, and leave it alone
 
-    Step 3  ThirdPartyAddinConflictGated  ReportedOnly. DEXTest.LabAddin, LoadBehavior 3, under
-                                          HKU\<SID>\Software\Microsoft\Office\Word\Addins.
-            ThirdPartyAddinConflict       Fixed (AllowDestructiveActions). LoadBehavior becomes 0.
-                                          Aborts when a real active third-party add-in exists.
-    Step 4  DisabledItemGated             ReportedOnly. REG_BINARY 'DEXTest' entry under
-                                          16.0\Word\Resiliency\DisabledItems in Office's shape.
-            DisabledItem                  Fixed (ReenableDisabledItems). The entry is cleared.
-                                          Aborts when real Resiliency entries exist (the script
-                                          clears every entry, not just ours).
     Step 5  AutoRecoverPathMissing        Fixed (no gate). Options\AUTOSAVE-PATH points at a
                                           missing DEXTest_AutoRecover_Word folder; the script
                                           creates it. A Word launched between break and Restore
@@ -80,7 +71,11 @@
     NOT COVERED
       Step 2  Crash and Hang History -- the only trigger is a real WINWORD 1000/1002 event;
               the harness never writes to the Application log.
-      Step 3  Failed branch (crash module matches an add-in name) -- needs a crash event.
+      Steps 3 and 4 (COM Add-in Conflict, Office-Disabled Items) -- moved to
+              ApplicationSpecific\Microsoft\Office\Invoke-AutoRemediateOfficeAddins.ps1; its
+              own harness carries the four add-in breaks that used to live here.
+      Step 2  blame branches ('add-in' from a third-party crash module, 'disabled-items' from
+              real Resiliency entries) -- need a crash event or an entry Office itself wrote.
       Step 6  wwlib.dll suspect branch -- needs three real wwlib.dll crashes.
       Step 7  corrupt-cache branch (CentralTable.accdb missing with content present) -- would
               require deleting the user's real CentralTable.accdb.
@@ -111,13 +106,17 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateWord_BreakTest.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : Administrator (elevated), run as the interactive user
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-11-05
     Reporting    : C:\Temp\FixReport\Invoke-AutoRemediateWord\
 
+    1.0.1  ThirdPartyAddinConflictGated, ThirdPartyAddinConflict, DisabledItemGated and
+           DisabledItem moved to the Invoke-AutoRemediateOfficeAddins.ps1 harness with the
+           script's steps 3 and 4; ReenableDisabledItems is no longer passed to the child.
+           Eight breaks remain. Tracks script 1.0.3.
     1.0.0  Initial: twelve breaks against script 1.0.1 (steps 3, 4, 5, 6, 7, 9, 10).
 
 .DISCLAIMER
@@ -157,9 +156,6 @@ Import-Module $modulePath -Force
 if (-not (Test-Path -LiteralPath $RemediationScript)) { throw "Script under test not found at $RemediationScript" }
 
 # -- Fixture ------------------------------------------------------------------
-$FixturePrefix         = 'DEXTest'
-$FixtureAddinName      = 'DEXTest.LabAddin'          # must NOT match the script's $_msAddin matcher
-$FixtureResiliencyName = 'DEXTest'                   # value name under Resiliency\DisabledItems
 $FixtureAutoRecoverDir = 'DEXTest_AutoRecover_Word'  # under AppData\Local\Microsoft\Office
 $FixtureTemplateMB     = 9                           # Normal.dotm fixture; script default TemplateWarnMB is 8
 $TemplateWarnMB        = 8
@@ -169,8 +165,6 @@ $FixtureCacheMarginMB  = 16                          # threshold = real cache MB
 $FixtureStartupFile    = 'DEXTest_lab.txt'
 $CrashWarnDefault      = 3
 $OfficeProcs           = @('WINWORD', 'EXCEL', 'POWERPNT', 'OUTLOOK', 'ONENOTE', 'MSACCESS', 'MSPUB', 'MSOSYNC', 'msouc')
-# Same matcher as the script, verbatim, so "third-party" means the same thing here.
-$MicrosoftAddinMatcher = '^Microsoft\.|OfficeMicrosoftTeams|Microsoft Online|SharePoint|OneDrive|Skype|Lync|Grammarly\.Microsoft|CopilotAddin'
 
 # -- Helpers: identity and paths ------------------------------------------------
 
@@ -199,8 +193,6 @@ function Get-C2RRoot {
 }
 function Get-UserHive          { "Registry::HKEY_USERS\$(Get-LoggedOnUserSid)" }
 function Get-AppKeyPath        { "$(Get-UserHive)\Software\Microsoft\Office\$(Get-OfficeVersion)\Word" }   # versioned key: Options, Resiliency, Data
-function Get-UserAddinsKeyPath { "$(Get-UserHive)\Software\Microsoft\Office\Word\Addins" }                  # first key the script enumerates
-function Get-FixtureAddinKeyPath { Join-Path (Get-UserAddinsKeyPath) $FixtureAddinName }
 function Get-OptionsPath       { "$(Get-AppKeyPath)\Options" }
 function Get-ResiliencyPath    { param([string]$Sub = '') $p = "$(Get-AppKeyPath)\Resiliency"; if ($Sub) { "$p\$Sub" } else { $p } }
 function Get-DataKeyPath       { "$(Get-AppKeyPath)\Data" }
@@ -329,7 +321,7 @@ function Test-DexRecordAbsent {
     return $true
 }
 function Get-RemediationVariables {
-    # Every variable the child must see. '' means unset; the five inputs the script reads are always
+    # Every variable the child must see. '' means unset; the four inputs the script reads are always
     # made explicit so a stray value in the harness's own environment cannot leak into the child.
     $vars = @{}
     $runEnv = ConvertTo-DexHashtable -InputObject $state.RunEnv
@@ -340,7 +332,7 @@ function Get-RemediationVariables {
             $vars[$k] = $v
         }
     }
-    foreach ($k in @('AllowDestructiveActions', 'ReenableDisabledItems', 'CacheSizeWarningMB', 'CrashWarnCount7d', 'TemplateWarnMB')) {
+    foreach ($k in @('AllowDestructiveActions', 'CacheSizeWarningMB', 'CrashWarnCount7d', 'TemplateWarnMB')) {
         if (-not $vars.ContainsKey($k)) { $vars[$k] = '' }
     }
     return $vars
@@ -374,84 +366,17 @@ function Invoke-RemediationScript {
     return @{ ExitCode = $rc; DurationSec = [math]::Round($sw.Elapsed.TotalSeconds, 1); Variables = $Variables; Output = ($output | Out-String).Trim() }
 }
 
-# -- Helpers: step 3 add-in -----------------------------------------------------
+# -- Helpers: Resiliency entries (step 2 blame) ------------------------------------
 
-function Get-ActiveThirdPartyAddins {
-    # Every add-in the script would count, from the same six keys in the same order, minus our fixture. Plain string array.
-    $list = New-Object System.Collections.Generic.List[string]
-    $ver = Get-OfficeVersion; $hku = Get-UserHive
-    foreach ($s in @('Software\Microsoft\Office\Word\Addins', "Software\Microsoft\Office\$ver\Word\Addins")) {
-        foreach ($root in @("$hku\$s", "HKLM:\$s", "HKLM:\SOFTWARE\WOW6432Node\$($s.Substring(9))")) {
-            if (-not (Test-Path -LiteralPath $root)) { continue }
-            foreach ($k in @(Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue)) {
-                if ($k.PSChildName -eq $FixtureAddinName -or $k.PSChildName -match $MicrosoftAddinMatcher) { continue }
-                $lb = (Get-ItemProperty -LiteralPath $k.PSPath -Name 'LoadBehavior' -ErrorAction SilentlyContinue).LoadBehavior
-                if ($lb -eq 3) { $list.Add("$root\$($k.PSChildName)") }
-            }
-        }
-    }
-    return $list.ToArray()
-}
-function Get-FixtureAddinLoadBehavior {
-    $key = Get-FixtureAddinKeyPath
-    if (-not (Test-Path -LiteralPath $key)) { return $null }
-    return (Get-ItemProperty -LiteralPath $key -Name 'LoadBehavior' -ErrorAction SilentlyContinue).LoadBehavior
-}
-function Add-FixtureAddin {
-    $key = Get-FixtureAddinKeyPath
-    New-Item -Path $key -Force -ErrorAction Stop | Out-Null
-    Set-ItemProperty -LiteralPath $key -Name 'LoadBehavior' -Value 3 -Type DWord -ErrorAction Stop
-    Set-ItemProperty -LiteralPath $key -Name 'FriendlyName' -Value 'DEX Test Lab Add-in' -Type String -ErrorAction Stop
-    Set-ItemProperty -LiteralPath $key -Name 'Description'  -Value 'Planted by Invoke-AutoRemediateWord_BreakTest.ps1; safe to delete.' -Type String -ErrorAction Stop
-}
-function Get-FixtureAddinBaseline { @{ AddinsKeyExisted = (Test-Path -LiteralPath (Get-UserAddinsKeyPath)) } }
-function Test-FixtureAddinPlanted {
-    $lb = Get-FixtureAddinLoadBehavior
-    if ($lb -ne 3) { Write-Host "           $FixtureAddinName LoadBehavior is '$lb', expected 3"; return $false }
-    return $true
-}
-function Restore-FixtureAddin {
-    param($Original)
-    $key = Get-FixtureAddinKeyPath
-    if (Test-Path -LiteralPath $key) { Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction SilentlyContinue }
-    if (-not [bool]$Original.AddinsKeyExisted) { Remove-EmptyRegKey (Get-UserAddinsKeyPath) }
-}
-
-# -- Helpers: step 4 Resiliency -------------------------------------------------
-
-function New-ResiliencyBlob {
-    # Office's REG_BINARY shape: three DWORD header fields, then two NUL-terminated UTF-16 strings.
-    # The script reports the first NUL-separated segment with three or more letters, so both strings
-    # carry the DEXTest marker and the message names it whichever one wins.
-    $p = [Text.Encoding]::Unicode.GetBytes("C:\$FixturePrefix\$FixtureAddinName.dll" + [char]0)
-    $n = [Text.Encoding]::Unicode.GetBytes($FixtureAddinName + [char]0)
-    $hdr = [BitConverter]::GetBytes([int]1) + [BitConverter]::GetBytes([int]$p.Length) + [BitConverter]::GetBytes([int]$n.Length)
-    return [byte[]]($hdr + $p + $n)
-}
 function Get-RealResiliencyValueNames {
-    # Value names under DisabledItems and StartupItems that are not ours. Plain array.
+    # Value names under DisabledItems and StartupItems. Step 2 blames 'disabled-items' when any
+    # exist, which keeps step 9 from being indicated. Plain array.
     $names = @()
     foreach ($sub in @('DisabledItems', 'StartupItems')) {
         $k = Get-ResiliencyPath $sub
-        if (Test-Path -LiteralPath $k) { $names += @((Get-Item -LiteralPath $k).GetValueNames() | Where-Object { $_ -ne $FixtureResiliencyName } | ForEach-Object { "$sub\$_" }) }
+        if (Test-Path -LiteralPath $k) { $names += @((Get-Item -LiteralPath $k).GetValueNames() | ForEach-Object { "$sub\$_" }) }
     }
     return @($names)
-}
-function Get-FixtureResiliencyBaseline {
-    @{
-        ResiliencyExisted = (Test-Path -LiteralPath (Get-ResiliencyPath))
-        DisabledExisted   = (Test-Path -LiteralPath (Get-ResiliencyPath 'DisabledItems'))
-        RealEntries       = @(Get-RealResiliencyValueNames)
-    }
-}
-function Add-FixtureDisabledItem { Set-RegValue -Path (Get-ResiliencyPath 'DisabledItems') -Name $FixtureResiliencyName -Value ([byte[]]@(New-ResiliencyBlob)) -Type Binary }
-function Test-FixtureDisabledItemPresent { (Get-RegValueInfo -Path (Get-ResiliencyPath 'DisabledItems') -Name $FixtureResiliencyName).Exists }
-function Restore-FixtureDisabledItem {
-    param($Original)
-    $k = Get-ResiliencyPath 'DisabledItems'
-    if (Test-Path -LiteralPath $k) { Remove-ItemProperty -LiteralPath $k -Name $FixtureResiliencyName -ErrorAction SilentlyContinue }
-    if (-not [bool]$Original.DisabledExisted)   { Remove-EmptyRegKey $k }
-    if (-not [bool]$Original.ResiliencyExisted) { Remove-EmptyRegKey (Get-ResiliencyPath) }
 }
 
 # -- Helpers: step 6 Normal.dotm ----------------------------------------------------
@@ -582,10 +507,10 @@ function Get-DataBakNames {
 function Get-NewDataBaks { param($Original) @(Get-DataBakNames | Where-Object { @($Original.ExistingBaks) -notcontains $_ }) }
 function Get-DataKeyBaseline { @{ DataExisted = (Test-Path -LiteralPath (Get-DataKeyPath)); ExistingBaks = @(Get-DataBakNames) } }
 function Assert-DataKeyIndicated {
-    # Step 9 fires only with the Data key present and nothing blamed by steps 3 (crash-matched add-in), 4 or 6.
+    # Step 9 fires only with the Data key present and nothing blamed by step 2 (third-party crash module, Resiliency entries) or 6.
     if (-not (Test-Path -LiteralPath (Get-DataKeyPath))) { throw "Word Data key $(Get-DataKeyPath) is absent; launch and close Word once so the step has something to reset." }
     $real = @(Get-RealResiliencyValueNames)
-    if ($real.Count -gt 0 -or (Test-FixtureDisabledItemPresent)) { throw 'Resiliency entries exist; step 4 would blame them and step 9 would not be indicated.' }
+    if ($real.Count -gt 0) { throw 'Resiliency entries exist; step 2 would blame them and step 9 would not be indicated.' }
     $tpl = Get-NormalPath
     if ((Test-Path -LiteralPath $tpl) -and ([math]::Round((Get-Item -LiteralPath $tpl).Length / 1MB, 2) -ge $TemplateWarnMB)) { throw 'Normal.dotm is at or over TemplateWarnMB; step 6 would blame it and step 9 would not be indicated.' }
 }
@@ -615,25 +540,20 @@ function Initialize-Fixture {
     $state.CacheThresholdMB = [int]([math]::Ceiling($realMB) + $FixtureCacheMarginMB)
     $tpl = Get-NormalPath
     $tplMB = if (Test-Path -LiteralPath $tpl) { [math]::Round((Get-Item -LiteralPath $tpl).Length / 1MB, 2) } else { 0 }
-    Write-DexStep -Status 'Info' -Name 'Fixture' -Message "Office $(Get-OfficeVersion) ($((Get-C2RConfig).VersionToReport)); user $user; real third-party add-ins $(@(Get-ActiveThirdPartyAddins).Count); Resiliency entries $(@(Get-RealResiliencyValueNames).Count); Normal.dotm ${tplMB}MB; cache ${realMB}MB (fixture threshold $($state.CacheThresholdMB)MB); WINWORD crash/hang 7d $(@(Get-AppCrashEvents).Count); Office running: $(Test-ProcessRunning $OfficeProcs)"
+    Write-DexStep -Status 'Info' -Name 'Fixture' -Message "Office $(Get-OfficeVersion) ($((Get-C2RConfig).VersionToReport)); user $user; Resiliency entries $(@(Get-RealResiliencyValueNames).Count); Normal.dotm ${tplMB}MB; cache ${realMB}MB (fixture threshold $($state.CacheThresholdMB)MB); WINWORD crash/hang 7d $(@(Get-AppCrashEvents).Count); Office running: $(Test-ProcessRunning $OfficeProcs)"
 }
 function Assert-RunSafe {
     # Refuses a run whose variables would make the script act on real state no break restores.
     param([hashtable]$RunEnv, [string[]]$Names)
     if ($RunEnv['AllowDestructiveActions'] -eq 'true') {
-        $real = @(Get-ActiveThirdPartyAddins)
-        if ($real.Count -gt 0) { throw "Real active third-party add-in(s) registered ($($real -join '; ')); step 3 could disable one in an ungated run. Refusing." }
         $tpl = Get-NormalPath
         if ($Names -notcontains 'NormalDotmOversized' -and (Test-Path -LiteralPath $tpl) -and ([math]::Round((Get-Item -LiteralPath $tpl).Length / 1MB, 2) -ge $TemplateWarnMB)) { throw "The user's real Normal.dotm is at or over ${TemplateWarnMB}MB; step 6 would rename it in an ungated run. Refusing." }
         if (@($Names | Where-Object { $_ -like 'DocumentCache*' }).Count -eq 0 -and ((Get-DirMB (Get-CachePath)) -ge 2048 -or (Test-CacheCorrupt))) { throw 'The real Office Document Cache already trips step 7; an ungated run would rename it. Refusing.' }
         if ($Names -notcontains 'WordDataKeyReset' -and @(Get-AppCrashEvents).Count -ge $CrashWarnDefault) { throw "WINWORD has $(@(Get-AppCrashEvents).Count) crash/hang event(s) in 7 days; step 9 could rename the real Word Data key in an ungated run. Refusing." }
     }
-    if ($RunEnv['ReenableDisabledItems'] -eq 'true' -and @(Get-RealResiliencyValueNames).Count -gt 0) { throw 'Real Resiliency entries exist; step 4 would clear them. Refusing.' }
 }
 function Remove-Fixture {
     # Sweep by prefix; per-break Restore normally did all of this. Catches what a half-finished run left behind.
-    try { $k = Get-FixtureAddinKeyPath; if (Test-Path -LiteralPath $k) { Remove-Item -LiteralPath $k -Recurse -Force -ErrorAction SilentlyContinue } } catch { }
-    try { $k = Get-ResiliencyPath 'DisabledItems'; if (Test-Path -LiteralPath $k) { Remove-ItemProperty -LiteralPath $k -Name $FixtureResiliencyName -ErrorAction SilentlyContinue } } catch { }
     try {
         $info = Get-RegValueInfo -Path (Get-OptionsPath) -Name 'AUTOSAVE-PATH'
         if ($info.Exists -and "$($info.Value)" -eq (Get-AutoRecoverFixturePath)) { Remove-ItemProperty -LiteralPath (Get-OptionsPath) -Name 'AUTOSAVE-PATH' -ErrorAction SilentlyContinue }
@@ -659,79 +579,6 @@ function Remove-Fixture {
 $GatedSuffix = ' -- set \$AllowDestructiveActions=\$true to apply\.'
 
 $BreakCatalog = @(
-
-    @{
-        Name = 'ThirdPartyAddinConflictGated'; ExpectedOutcome = 'ExpectReportedOnly'; RequiresReboot = $false
-        Env = @{ AllowDestructiveActions = '' }; Excludes = @()
-        Methods  = @(@{ Name = 'PlantUserAddin'; Apply = { Add-FixtureAddin } })
-        Capture  = { Get-FixtureAddinBaseline }
-        Verify   = { Test-FixtureAddinPlanted }
-        # Step 3: "<n> active third-party add-in(s): DEXTest.LabAddin [user]. Disabling the first one is the remediation -- set ..."
-        Validate = {
-            $lb = Get-FixtureAddinLoadBehavior
-            if ($lb -ne 3) { Write-Host "           $FixtureAddinName LoadBehavior is '$lb' after a gated run; expected 3" }
-            $reported = Test-DexRecordMatches -ValueNamePrefix 'Step03_' -Pattern "^\[Warning\] \d+ active third-party add-in\(s\): .*$([regex]::Escape($FixtureAddinName)) \[user\].*Disabling the first one is the remediation$GatedSuffix$"
-            ($lb -eq 3) -and $reported
-        }
-        Restore  = { param($Original) Restore-FixtureAddin -Original $Original }
-    },
-
-    @{
-        Name = 'ThirdPartyAddinConflict'; ExpectedOutcome = 'ExpectFixed'; RequiresReboot = $false
-        Env = @{ AllowDestructiveActions = 'true' }; Excludes = @()
-        Methods  = @(@{ Name = 'PlantUserAddin'; Apply = {
-            # The script disables the FIRST active third-party add-in it finds; with no real one the fixture is the only candidate.
-            $real = @(Get-ActiveThirdPartyAddins)
-            if ($real.Count -gt 0) { throw "A real active third-party add-in is registered ($($real -join '; ')); the ungated run could disable it instead of the fixture. Run ThirdPartyAddinConflictGated instead." }
-            Add-FixtureAddin
-        } })
-        Capture  = { Get-FixtureAddinBaseline }
-        Verify   = { Test-FixtureAddinPlanted }
-        # Resolution: "Add-in 'DEXTest.LabAddin' [user] set to LoadBehavior=0. Restart Word to take effect."
-        Validate = {
-            $lb = Get-FixtureAddinLoadBehavior
-            if ($lb -ne 0) { Write-Host "           $FixtureAddinName LoadBehavior is '$lb'; expected 0" }
-            $reported = Test-DexRecordMatches -ValueNamePrefix 'Step03_' -Pattern "^\[Remediated\] Add-in '$([regex]::Escape($FixtureAddinName))' \[user\] set to LoadBehavior=0\. Restart Word to take effect\.$"
-            ($lb -eq 0) -and $reported
-        }
-        Restore  = { param($Original) Restore-FixtureAddin -Original $Original }
-    },
-
-    @{
-        Name = 'DisabledItemGated'; ExpectedOutcome = 'ExpectReportedOnly'; RequiresReboot = $false
-        Env = @{ ReenableDisabledItems = '' }; Excludes = @('WordDataKeyReset*')
-        Methods  = @(@{ Name = 'PlantResiliencyEntry'; Apply = { Add-FixtureDisabledItem } })
-        Capture  = { Get-FixtureResiliencyBaseline }
-        Verify   = { $ok = Test-FixtureDisabledItemPresent; if (-not $ok) { Write-Host '           fixture Resiliency value missing' }; $ok }
-        # Step 4: "<n> disabled item(s), <n> disabled startup item(s): DEXTest... Set $ReenableDisabledItems=$true to clear them; ..."
-        Validate = {
-            $still = Test-FixtureDisabledItemPresent
-            if (-not $still) { Write-Host '           fixture Resiliency value was cleared during a gated run' }
-            $reported = Test-DexRecordMatches -ValueNamePrefix 'Step04_' -Pattern "^\[Warning\] \d+ disabled item\(s\), \d+ disabled startup item\(s\): .*$FixturePrefix.*\. Set \`$ReenableDisabledItems=\`$true to clear them; Office disabled these after a failure, so confirm first\.$"
-            $still -and $reported
-        }
-        Restore  = { param($Original) Restore-FixtureDisabledItem -Original $Original }
-    },
-
-    @{
-        Name = 'DisabledItem'; ExpectedOutcome = 'ExpectFixed'; RequiresReboot = $false
-        Env = @{ ReenableDisabledItems = 'true' }; Excludes = @('WordDataKeyReset*')
-        Methods  = @(@{ Name = 'PlantResiliencyEntry'; Apply = {
-            $real = @(Get-RealResiliencyValueNames)
-            if ($real.Count -gt 0) { throw "Real Resiliency entries exist ($($real -join ', ')); the script clears every entry, so an ungated run would re-enable items Office disabled. Run DisabledItemGated instead." }
-            Add-FixtureDisabledItem
-        } })
-        Capture  = { Get-FixtureResiliencyBaseline }
-        Verify   = { $ok = Test-FixtureDisabledItemPresent; if (-not $ok) { Write-Host '           fixture Resiliency value missing' }; $ok }
-        # Resolution: "Cleared 1 Resiliency entry; items load at Word's next start."
-        Validate = {
-            $gone = -not (Test-FixtureDisabledItemPresent)
-            if (-not $gone) { Write-Host '           fixture Resiliency value still present' }
-            $reported = Test-DexRecordMatches -ValueNamePrefix 'Step04_' -Pattern "^\[Remediated\] Cleared 1 Resiliency entry; items load at Word's next start\.$"
-            $gone -and $reported
-        }
-        Restore  = { param($Original) Restore-FixtureDisabledItem -Original $Original }
-    },
 
     @{
         Name = 'AutoRecoverPathMissing'; ExpectedOutcome = 'ExpectFixed'; RequiresReboot = $false
@@ -845,7 +692,7 @@ $BreakCatalog = @(
 
     @{
         Name = 'WordDataKeyResetGated'; ExpectedOutcome = 'ExpectReportedOnly'; RequiresReboot = $false
-        Env = @{ AllowDestructiveActions = ''; CrashWarnCount7d = '0' }; Excludes = @('DisabledItem*', 'NormalDotm*')
+        Env = @{ AllowDestructiveActions = ''; CrashWarnCount7d = '0' }; Excludes = @('NormalDotm*')
         Methods  = @(@{ Name = 'ZeroCrashThreshold'; Apply = { Assert-DataKeyIndicated } })
         Capture  = { Get-DataKeyBaseline }
         Verify   = { Test-DataKeyIndicated }
@@ -864,7 +711,7 @@ $BreakCatalog = @(
 
     @{
         Name = 'WordDataKeyReset'; ExpectedOutcome = 'ExpectFixed'; RequiresReboot = $false
-        Env = @{ AllowDestructiveActions = 'true'; CrashWarnCount7d = '0' }; Excludes = @('DisabledItem*', 'NormalDotm*')
+        Env = @{ AllowDestructiveActions = 'true'; CrashWarnCount7d = '0' }; Excludes = @('NormalDotm*')
         Methods  = @(@{ Name = 'ZeroCrashThreshold'; Apply = {
             if (Test-ProcessRunning 'WINWORD') { throw 'WINWORD.EXE is running; the script skips the Data key reset while Word is open and this harness does not close the user''s Word. Close it and re-run -BreakName WordDataKeyReset.' }
             Assert-DataKeyIndicated

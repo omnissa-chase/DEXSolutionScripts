@@ -8,9 +8,7 @@
     Update belong to the generic scripts -- run those first.
 
     | Step | Name                         | Remediates On                       |
-    |  2   | Crash and Hang History       | -- (report only; feeds 3, 6, 9)     |
-    |  3   | COM Add-in Conflict          | Warning/Failed ($AllowDestructive)  |
-    |  4   | Office-Disabled Items        | Warning ($ReenableDisabledItems)    |
+    |  2   | Crash and Hang History       | -- (report only; feeds 6, 9)        |
     |  5   | AutoRecover Location         | Warning                             |
     |  6   | Normal.dotm Health           | Warning ($AllowDestructive)         |
     |  7   | Office Document Cache        | Warning ($AllowDestructive)         |
@@ -19,17 +17,19 @@
     | 10   | Startup Folder               | -- (report only)                    |
 
     Step 1 (app installed) is the pre-flight: no WINWORD.EXE under the Click-to-Run
-    root means "not installed, skipping", exit 0.
+    root means "not installed, skipping", exit 0. Steps 3 (COM Add-in Conflict) and 4
+    (Office-Disabled Items) moved to ApplicationSpecific\Microsoft\Office\
+    Invoke-AutoRemediateOfficeAddins.ps1, which covers all six Office applications in
+    one run; their numbers are left as gaps so DEXRecords names stay stable.
 
     Steps 2-8 are the common Office steps (spec C2-C8) with Word's names hard-coded;
     the other five Office scripts carry the same engine. Steps 7 and 8 are suite-wide
     and ENABLED ONLY HERE. One script per product until UEM has dynamic variables.
 
-    Step 2 keeps the last faulting module. Step 3 goes Failed and targets the add-in
-    whose name matches a non-Microsoft module; step 6 treats wwlib.dll faults with no
-    add-in blamed as a template suspect; step 9 fires only when 3, 4 and 6 found
-    nothing. Add-in choice: the one step 2 named, else the first active third-party
-    one (user hive, then machine) -- key write times are not readable without P/Invoke.
+    Step 2 keeps the last faulting module and blames 'add-in' when it is not an Office
+    module, 'disabled-items' when Office's Resiliency keys hold entries (report only;
+    the suite script acts on both). Step 6 treats wwlib.dll faults with nothing blamed
+    as a template suspect; step 9 fires only when 2 and 6 found nothing.
 
     SYSTEM context: profile and hive come from Win32_ComputerSystem.UserName and
     HKU\<SID>, never $env:APPDATA. No interactive user: per-user steps Warn "skipped".
@@ -37,22 +37,22 @@
 .PARAMETER CacheSizeWarningMB
     Office Document Cache threshold in MB. Default 2048. $env:CacheSizeWarningMB.
 .PARAMETER AllowDestructiveActions
-    Enables steps 3, 6, 7 and 9. Default $false. $env:AllowDestructiveActions.
+    Enables steps 6, 7 and 9. Default $false. $env:AllowDestructiveActions.
 .PARAMETER CrashWarnCount7d
     Crash plus hang count in 7 days that turns step 2 Failed. Default 3.
 .PARAMETER TemplateWarnMB
-    Normal.dotm size that turns step 6 Warning. Default 8.
-.PARAMETER ReenableDisabledItems
-    Lets step 4 clear Office's Resiliency entries. Default $false. All inputs also
-    read $env:.
+    Normal.dotm size that turns step 6 Warning. Default 8. All inputs also read $env:.
 
 .NOTES
     Script Name  : Invoke-AutoRemediateWord.ps1
-    Version      : 1.0.2
+    Version      : 1.0.3
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (1.0.2: step 3 returns Warning, not Failed, when a crash names
+    Last Modified: 2026-11-05 (1.0.3: the COM Add-in Conflict and Office-Disabled Items steps moved to
+                   ApplicationSpecific\Microsoft\Office\Invoke-AutoRemediateOfficeAddins.ps1, which covers
+                   all six Office applications in one run; step numbering kept (3 and 4 are now gaps); the
+                   ReenableDisabledItems input moved with them. 1.0.2: step 3 returns Warning, not Failed, when a crash names
                    an add-in while AllowDestructiveActions is off, so the gate its message
                    promises holds; the engine remediates every Failed. 1.0.1: crash and hang events read through the .NET EventLogReader; Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine; 1.0.0: first build from App_Remediation_Specs.md section 8)
     Timeout      : 60 seconds
@@ -134,8 +134,7 @@ param(
     [int] $CacheSizeWarningMB      = $(if ($env:CacheSizeWarningMB) { [int]$env:CacheSizeWarningMB } else { 2048 }),
     [bool]$AllowDestructiveActions = $(if ($env:AllowDestructiveActions) { [System.Convert]::ToBoolean($env:AllowDestructiveActions) } else { $false }),
     [int] $CrashWarnCount7d        = $(if ($env:CrashWarnCount7d) { [int]$env:CrashWarnCount7d } else { 3 }),
-    [int] $TemplateWarnMB          = $(if ($env:TemplateWarnMB) { [int]$env:TemplateWarnMB } else { 8 }),
-    [bool]$ReenableDisabledItems   = $(if ($env:ReenableDisabledItems) { [System.Convert]::ToBoolean($env:ReenableDisabledItems) } else { $false })
+    [int] $TemplateWarnMB          = $(if ($env:TemplateWarnMB) { [int]$env:TemplateWarnMB } else { 8 })
 )
 
 # -- Product identity (the only product-specific constants) --
@@ -146,7 +145,6 @@ $_regApp   = 'Word'
 $_officeProcs = @('WINWORD', 'EXCEL', 'POWERPNT', 'OUTLOOK', 'ONENOTE', 'MSACCESS', 'MSPUB', 'MSOSYNC', 'msouc')
 # Office's own modules; a fault in one of these is not an add-in's fault.
 $_msModule = '^(wwlib|mso\w*|oart\w*|office|msvcr\w*|vcruntime\w*|ucrtbase|ntdll|kernelbase|kernel32|user32|gdi32|combase|ole32|oleaut32|rpcrt4|msvcp\w*|clr|coreclr|mscorwks|riched20|msptls|gfx|d2d1|dwrite|wwintl|mso20win32client|mso30win32client|mso40uiwin32client|mso50win32client|mso98win32client|mso99lwin32client|msointl\w*)\.dll$'
-$_msAddin  = '^Microsoft\.|OfficeMicrosoftTeams|Microsoft Online|SharePoint|OneDrive|Skype|Lync|Grammarly\.Microsoft|CopilotAddin'
 
 # -- Pre-flight: Click-to-Run and the exe --
 $_c2rConfig = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration' -ErrorAction SilentlyContinue
@@ -180,9 +178,9 @@ $_noUser = @{ Status = 'Warning'; Message = 'No interactive user resolved -- per
 
 $regPath = "HKLM:\Software\AirWatch\Extension\DEXRecords\${_regApp}Errors"
 
-# -- Cross-step state (filled by step 2, read by 3, 6, 9) --
+# -- Cross-step state (filled by step 2, read by 6 and 9) --
 $script:_crash = @{ Count = 0; Hangs = 0; Module = ''; ModulePath = ''; ThirdParty = $false }
-$script:_blame = @()   # step names that found something to blame
+$script:_blame = @()   # causes found so far ('add-in', 'disabled-items', 'template')
 
 function _Expand([string]$s) { if ($s) { [Environment]::ExpandEnvironmentVariables($s) } else { $s } }
 function _DirMB([string]$dir) {
@@ -193,55 +191,6 @@ function _DirMB([string]$dir) {
 function _AppOpen { [bool](Get-Process -Name $_proc -ErrorAction SilentlyContinue) }
 function _AnyOfficeOpen { [bool](Get-Process -Name $_officeProcs -ErrorAction SilentlyContinue) }
 function _Gate { if ($AllowDestructiveActions) { '' } else { ' -- set $AllowDestructiveActions=$true to apply' } }
-function _AddinKeys {
-    # Every Addins key that can load into this product, user hive first.
-    $out = @()
-    $subs = @("Software\Microsoft\Office\$_regApp\Addins", "Software\Microsoft\Office\$_officeVer\$_regApp\Addins")
-    foreach ($s in $subs) {
-        if ($_hku) { $out += "$_hku\$s" }
-        $out += "HKLM:\$s"
-        $out += "HKLM:\SOFTWARE\WOW6432Node\$($s.Substring(9))"
-    }
-    return $out | Where-Object { Test-Path $_ }
-}
-function _ActiveThirdPartyAddins {
-    $list = [System.Collections.Generic.List[PSCustomObject]]::new()
-    foreach ($k in @(_AddinKeys)) {
-        Get-ChildItem $k -ErrorAction SilentlyContinue | ForEach-Object {
-            $lb = (Get-ItemProperty $_.PSPath -Name 'LoadBehavior' -ErrorAction SilentlyContinue).LoadBehavior
-            if ($lb -eq 3 -and $_.PSChildName -notmatch $_msAddin) {
-                $list.Add([PSCustomObject]@{ Name = $_.PSChildName; Path = $_.PSPath; Scope = $(if ($k -like 'Registry::*') { 'user' } else { 'machine' }) })
-            }
-        }
-    }
-    return $list
-}
-function _AddinNamedByCrash($addins) {
-    # Match the faulting module's base name against the add-in ProgId tokens.
-    if (-not $script:_crash.ThirdParty -or -not $script:_crash.Module) { return $null }
-    $token = [IO.Path]::GetFileNameWithoutExtension($script:_crash.Module)
-    foreach ($a in $addins) {
-        foreach ($part in ($a.Name -split '[.\s_-]')) {
-            if ($part.Length -ge 4 -and ($token -like "*$part*" -or $part -like "*$token*")) { return $a }
-        }
-    }
-    return $null
-}
-function _DecodeResiliency([string]$key) {
-    # Each value is a binary blob with the item's display name and path in UTF-16.
-    $names = @()
-    if (-not (Test-Path $key)) { return $names }
-    $item = Get-Item $key -ErrorAction SilentlyContinue
-    foreach ($v in $item.GetValueNames()) {
-        $bytes = $item.GetValue($v)
-        if ($bytes -is [byte[]]) {
-            $text = [Text.Encoding]::Unicode.GetString($bytes)
-            $segs = @($text -split "`0" | Where-Object { $_ -match '[A-Za-z]{3,}' })
-            $names += $(if ($segs.Count -gt 0) { $segs[0].Trim() } else { $v })
-        } else { $names += $v }
-    }
-    return $names
-}
 
 # -- Step Definitions --
 $Steps = @(
@@ -252,6 +201,13 @@ $Steps = @(
         Enabled          = $true
         ResolveOnWarning = $false
         DetectionScript  = {
+            # Blame bookkeeping for later steps (the suite add-in script remediates both causes):
+            # any entry under Office's Resiliency keys means Office already disabled something.
+            if ($_hku) {
+                $rk = "$_hku\Software\Microsoft\Office\$_officeVer\$_regApp\Resiliency"; $rn = 0
+                foreach ($sub in 'DisabledItems', 'StartupItems') { if (Test-Path "$rk\$sub") { $rn += @((Get-Item "$rk\$sub").GetValueNames()).Count } }
+                if ($rn -gt 0) { $script:_blame += 'disabled-items' }
+            }
             # Server-side filter only: an unfiltered Application log read runs 100+ s.
             $since = (Get-Date).AddDays(-7)
             $ev = @()
@@ -278,76 +234,19 @@ $Steps = @(
                 $script:_crash.ModulePath = $modPath
                 $script:_crash.ThirdParty = ($mod -and $mod -notmatch $_msModule -and $modPath -notmatch '\\Microsoft Office\\root\\|\\Windows\\(System32|SysWOW64)\\')
             }
+            if ($script:_crash.ThirdParty) { $script:_blame += 'add-in' }
             $detail = "$($crashes.Count) crash(es), $($hangs.Count) hang(s) in 7 days"
             if ($mod) { $detail += "; last faulting module $mod$(if ($modPath) { " ($modPath)" })$(if ($script:_crash.ThirdParty) { ' -- not an Office module, likely an add-in' })" }
             if ($ev.Count -ge $CrashWarnCount7d) {
-                return @{ Status = 'Failed'; Message = "$detail (threshold $CrashWarnCount7d). Steps 3, 6 and 9 use this." }
+                return @{ Status = 'Failed'; Message = "$detail (threshold $CrashWarnCount7d). Steps 6 and 9 use this." }
             }
             return @{ Status = 'Warning'; Message = "$detail (threshold $CrashWarnCount7d)." }
         }
         ResolutionScript = $null
     },
 
-    @{
-        Name             = 'COM Add-in Conflict'
-        Order            = 3
-        Enabled          = $true
-        ResolveOnWarning = $AllowDestructiveActions
-        DetectionScript  = {
-            $addins = @(_ActiveThirdPartyAddins)
-            if ($addins.Count -eq 0) {
-                return @{ Status = 'Passed'; Message = "No active third-party $_app add-ins (user and machine hives)." }
-            }
-            $named = _AddinNamedByCrash $addins
-            $names = ($addins | ForEach-Object { "$($_.Name) [$($_.Scope)]" }) -join ', '
-            if ($named) {
-                $script:_blame += 'add-in'
-                # Failed only when the gate is open: the engine remediates every Failed, so a
-                # Failed with the flag off would disable the add-in the message says it will not.
-                return @{ Status = $(if ($AllowDestructiveActions) { 'Failed' } else { 'Warning' }); Message = "Crash module $($script:_crash.Module) matches add-in '$($named.Name)'; $($addins.Count) active third-party add-in(s): $names. Will set LoadBehavior=0 on '$($named.Name)'$(_Gate)." }
-            }
-            if ($script:_crash.ThirdParty) { $script:_blame += 'add-in' }
-            return @{ Status = 'Warning'; Message = "$($addins.Count) active third-party add-in(s): $names. Disabling the first one is the remediation$(_Gate)." }
-        }
-        ResolutionScript = {
-            $addins = @(_ActiveThirdPartyAddins)
-            if ($addins.Count -eq 0) { return @{ Remediated = $false } }
-            $target = _AddinNamedByCrash $addins
-            if (-not $target) { $target = $addins[0] }
-            Set-ItemProperty -Path $target.Path -Name 'LoadBehavior' -Value 0 -ErrorAction Stop
-            return @{ Remediated = $true; Message = "Add-in '$($target.Name)' [$($target.Scope)] set to LoadBehavior=0. Restart $_app to take effect." }
-        }
-    },
-
-    @{
-        Name             = 'Office-Disabled Items'
-        Order            = 4
-        Enabled          = $true
-        ResolveOnWarning = $ReenableDisabledItems
-        DetectionScript  = {
-            if (-not $_hku) { return $_noUser }
-            $base = "$_hku\Software\Microsoft\Office\$_officeVer\$_regApp\Resiliency"
-            $disabled = @(_DecodeResiliency "$base\DisabledItems")
-            $startup  = @(_DecodeResiliency "$base\StartupItems")
-            if ($disabled.Count -eq 0 -and $startup.Count -eq 0) {
-                return @{ Status = 'Passed'; Message = "$_app has not disabled any add-ins or startup items." }
-            }
-            $script:_blame += 'disabled-items'
-            $all = @($disabled + $startup | Select-Object -First 6) -join ', '
-            $gate = if ($ReenableDisabledItems) { 'Clearing the entries so they load next launch.' } else { 'Set $ReenableDisabledItems=$true to clear them; Office disabled these after a failure, so confirm first.' }
-            return @{ Status = 'Warning'; Message = "$($disabled.Count) disabled item(s), $($startup.Count) disabled startup item(s): $all. $gate" }
-        }
-        ResolutionScript = {
-            $base = "$_hku\Software\Microsoft\Office\$_officeVer\$_regApp\Resiliency"
-            $n = 0
-            foreach ($sub in 'DisabledItems', 'StartupItems') {
-                $k = "$base\$sub"
-                if (-not (Test-Path $k)) { continue }
-                foreach ($v in (Get-Item $k).GetValueNames()) { Remove-ItemProperty -Path $k -Name $v -ErrorAction Stop; $n++ }
-            }
-            return @{ Remediated = ($n -gt 0); Message = "Cleared $n Resiliency entr$(if ($n -eq 1) { 'y' } else { 'ies' }); items load at $_app's next start." }
-        }
-    },
+    # Orders 3 (COM Add-in Conflict) and 4 (Office-Disabled Items) live in
+    # ApplicationSpecific\Microsoft\Office\Invoke-AutoRemediateOfficeAddins.ps1.
 
     @{
         Name             = 'AutoRecover Location'
@@ -582,7 +481,7 @@ try {
         $existing.GetValueNames() | ForEach-Object { Remove-ItemProperty -Path $regPath -Name $_ -ErrorAction SilentlyContinue }
     }
     Set-ItemProperty -Path $regPath -Name 'LastScanTime'    -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') -Type String
-    Set-ItemProperty -Path $regPath -Name 'ScriptVersion'   -Value '1.0.1'       -Type String
+    Set-ItemProperty -Path $regPath -Name 'ScriptVersion'   -Value '1.0.3'       -Type String
     Set-ItemProperty -Path $regPath -Name 'TotalSteps'      -Value $results.Count -Type DWord
     Set-ItemProperty -Path $regPath -Name 'PassedCount'     -Value $passed        -Type DWord
     Set-ItemProperty -Path $regPath -Name 'WarningCount'    -Value $warnings      -Type DWord
