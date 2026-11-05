@@ -51,13 +51,17 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateZoom.ps1
-    Version      : 1.0.2
+    Version      : 1.0.3
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-11-05
     Timeout      : 60 seconds
 
+    1.0.3: the step 4 sign-in pattern matched a bare "401" anywhere in a log line (ports,
+    byte counts, ids); it now matches 401 only as a standalone number, since with
+    AllowDestructiveActions a false match deletes the user's auth files. The step 2
+    message no longer prints a doubled backslash. Found by the break-test review.
     1.0.2: install detection fixed. The candidate-path array held a bare if statement
     inside parentheses, which PowerShell ran as a command named "if"; the resulting
     CommandNotFoundException aborted the foreach, so a machine-wide install under
@@ -207,7 +211,7 @@ $Steps = @(
             $zoomUpdateKey = Get-ItemProperty 'HKLM:\SOFTWARE\Zoom\ZoomUpdate' -ErrorAction SilentlyContinue
             if ($zoomUpdateKey) {
                 if ($zoomUpdateKey.EnableAutoUpdate -eq 0) {
-                    $issues += "ZoomUpdate\\EnableAutoUpdate=0 (auto-update disabled via registry policy)"
+                    $issues += "ZoomUpdate\EnableAutoUpdate=0 (auto-update disabled via registry policy)"
                 }
             }
 
@@ -288,7 +292,9 @@ $Steps = @(
             }
             $logLines  = Get-Content $latestLog.FullName -Tail 500 -ErrorAction SilentlyContinue
             $authErrors = $logLines | Where-Object {
-                $_ -match 'sign.?in.fail|SSO.error|token.expir|auth.fail|login.fail|401|SAML.error|sso_token'
+                # 401 only as a standalone HTTP status, not inside a port, byte count or id:
+                # with AllowDestructiveActions a false match deletes the user's auth files.
+                $_ -match 'sign.?in.fail|SSO.error|token.expir|auth.fail|login.fail|(?<!\d)401(?!\d)|SAML.error|sso_token'
             }
             $errorCount = if ($authErrors) { $authErrors.Count } else { 0 }
             if ($errorCount -gt 0) {

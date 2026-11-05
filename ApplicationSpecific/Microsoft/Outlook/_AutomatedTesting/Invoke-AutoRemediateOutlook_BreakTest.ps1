@@ -233,7 +233,8 @@ $DexRecordsPath    = 'HKLM:\Software\AirWatch\Extension\DEXRecords\OutlookErrors
 $C2RConfigPath     = 'HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration'
 $SelfPath          = $MyInvocation.MyCommand.Path
 
-$modulePath = Join-Path $PSScriptRoot '..\..\..\AutomatedTesting\DEXTestFramework.psm1'
+# Four levels up since the Microsoft products moved under ApplicationSpecific\Microsoft (commit e87eaea).
+$modulePath = Join-Path $PSScriptRoot '..\..\..\..\AutomatedTesting\DEXTestFramework.psm1'
 if (-not (Test-Path -LiteralPath $modulePath)) {
     throw "DEXTestFramework.psm1 not found at $modulePath"
 }

@@ -44,11 +44,15 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateTeams.ps1
-    Version      : 1.0.2
+    Version      : 1.0.3
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-03 (1.0.2: New Teams detection uses Get-AppxPackage -AllUsers so the SYSTEM run sees the per-user MSIX; 1.0.1 reported "not installed" under Hub on a device with Teams.)
+    Last Modified: 2026-11-05 (1.0.3: step 6 returns Warning instead of Failed while
+                   AllowDestructiveActions is off, so a broken package no longer records
+                   "[Remediated]" and exit 1 for a re-registration the script declined to
+                   run; the gate is now ResolveOnWarning like the other gated steps.
+                   2026-11-03, 1.0.2: New Teams detection uses Get-AppxPackage -AllUsers so the SYSTEM run sees the per-user MSIX; 1.0.1 reported "not installed" under Hub on a device with Teams.)
                    2026-10-28 (1.0.1)
     Timeout      : 60 seconds
 
@@ -314,7 +318,7 @@ $Steps = @(
         Name             = 'New Teams Package Registration'
         Order            = 6
         Enabled          = $true   # Runs always -- checks New Teams state regardless of Classic presence
-        ResolveOnWarning = $false
+        ResolveOnWarning = $AllowDestructiveActions   # Re-registration resets local Teams state -- gated
         DetectionScript  = {
             if (-not $_teamsIsNew) {
                 return @{ Status = 'Passed'; Message = 'New Teams (MSTeams AppX) is not installed on this device -- check skipped.' }
@@ -324,16 +328,17 @@ $Steps = @(
             if ($pkg.Status -eq 'Ok' -or $null -eq $pkg.Status) {
                 return @{ Status = 'Passed'; Message = "New Teams package present. Version: $($pkg.Version)." }
             }
-            return @{ Status = 'Failed'; Message = "New Teams package is in state '$($pkg.Status)' (expected 'Ok'). Re-registration required$(if (-not $AllowDestructiveActions) { ' -- set $AllowDestructiveActions=$true to apply' } else { '' })." }
+            # Warning while the gate is closed: a Failed would run the resolution, which
+            # then only printed a skip note, and the engine recorded "[Remediated]" and
+            # exit 1 for a state the script had declined to touch (1.0.2 and earlier).
+            if (-not $AllowDestructiveActions) {
+                return @{ Status = 'Warning'; Message = "New Teams package is in state '$($pkg.Status)' (expected 'Ok'). Re-registration required -- set `$AllowDestructiveActions=`$true to apply." }
+            }
+            return @{ Status = 'Failed'; Message = "New Teams package is in state '$($pkg.Status)' (expected 'Ok'). Re-registration required." }
         }
         ResolutionScript = {
-            # Re-registers the New Teams AppX manifest for the current user.
-            # Only runs when $AllowDestructiveActions = $true since re-registration
-            # resets Teams' local user state and forces a fresh startup.
-            if (-not $AllowDestructiveActions) {
-                Write-Output '  [Info] New Teams re-registration skipped -- set $AllowDestructiveActions=$true to apply.'
-                return
-            }
+            # Re-registers the New Teams AppX manifest for the current user. Reached only
+            # with $AllowDestructiveActions = $true (detection returns Warning otherwise).
             $manifest = Join-Path $_newPackage.InstallLocation 'AppxManifest.xml'
             if (-not (Test-Path $manifest)) {
                 throw "AppxManifest.xml not found at $($_newPackage.InstallLocation). Cannot re-register."

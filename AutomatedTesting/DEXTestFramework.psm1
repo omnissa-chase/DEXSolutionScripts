@@ -277,7 +277,9 @@ function Get-DexRandomSubset {
         [int]$Count = 1
     )
 
-    $pool = @($InputObject)
+    # Clone: @() does not copy an array that is already object[], and the shuffle below
+    # would otherwise reorder the caller's catalog in place.
+    $pool = [object[]](@($InputObject)).Clone()
     for ($i = $pool.Count - 1; $i -gt 0; $i--) {
         $j = $Random.Next(0, $i + 1)
         $tmp = $pool[$i]; $pool[$i] = $pool[$j]; $pool[$j] = $tmp
