@@ -174,11 +174,11 @@
   },
   "logon_folder_redirection_map.ps1": {
     "match": "^\\{\"Status\":\"OK\"",
-    "note": "Payload was ~1.2 KB and Hub dropped it as over 1 KB on 2026-10-29; the tenant's own published copy fails the same way on every sample. Restructured the same day (redirected targets plus local folder names); confirmed stored on both devices in run 0501f4."
+    "note": "Payload was ~1.2 KB and Hub dropped it as over 1 KB on 2026-10-29; the tenant's own published copy fails the same way on every sample. Restructured the same day (redirected targets plus local folder names); confirmed stored on both devices in run 0501f4, NoResult in e505e2 (Hub timing), stored again in 25a553 on 2026-11-05."
   },
   "logon_folder_redirection_latency_probe.ps1": {
     "match": "^\\{\"Status\":\"OK\"",
-    "note": "Payload was ~2.5 KB and Hub dropped it as over 1 KB on 2026-10-29. Restructured the same day (probe details only for redirected folders); confirmed stored on both devices in run 0501f4."
+    "note": "Payload was ~2.5 KB and Hub dropped it as over 1 KB on 2026-10-29. Restructured the same day (probe details only for redirected folders); confirmed stored on both devices in run 0501f4, NoResult in e505e2 (Hub timing), stored again in 25a553 on 2026-11-05."
   },
 
   "logon_time.ps1": {
