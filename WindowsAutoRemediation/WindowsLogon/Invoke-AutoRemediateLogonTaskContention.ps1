@@ -68,7 +68,10 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateLogonTaskContention.ps1
-    Version      : 1.0.2
+    Version      : 1.0.3 (2026-11-05: full ISO 8601 duration parser, days and fractions included, and an
+                   unreadable delay is left alone instead of being read as 0 and shortened; disabled logon
+                   triggers are neither counted nor rewritten; tasks under a stored-password principal are
+                   reported instead of failing Set-ScheduledTask on every run)
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
@@ -117,7 +120,7 @@ param(
     )
 )
 
-$SCRIPT_VERSION = "1.0.2"
+$SCRIPT_VERSION = "1.0.3"
 $RegPath        = "HKLM:\Software\AirWatch\Extensions\LogonTaskContention\Remediation"
 $DexRecordsPath = "HKLM:\Software\AirWatch\Extension\DEXRecords\WindowsLogon\LogonTaskContention"
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateLogonTaskContention.log"
@@ -156,15 +159,19 @@ if (-not (Get-Command -Name Get-ScheduledTask -ErrorAction SilentlyContinue)) {
 # -- ISO 8601 duration helpers ----------------------------------------------------
 # Trigger.Delay is stored/read as an ISO 8601 duration string (e.g. 'PT1M30S').
 function ConvertFrom-Iso8601Duration {
+    # Full ISO 8601 duration (days, hours, minutes, seconds with an optional fraction).
+    # Returns $null for a form it cannot read, so the caller can leave that trigger alone;
+    # 1.0.2 read 'P1D' as 0 and would have shortened a one-day delay to the minimum.
     param([string]$Duration)
     if ([string]::IsNullOrWhiteSpace($Duration)) { return 0 }
-    if ($Duration -match '^PT(?:(?<h>\d+)H)?(?:(?<m>\d+)M)?(?:(?<s>\d+)S)?$') {
+    if ($Duration -match '^P(?:(?<d>\d+)D)?(?:T(?:(?<h>\d+)H)?(?:(?<m>\d+)M)?(?:(?<s>\d+(?:\.\d+)?)S)?)?$' -and $Duration -ne 'P' -and $Duration -ne 'PT') {
+        $d = if ($Matches.d) { [int]$Matches.d } else { 0 }
         $h = if ($Matches.h) { [int]$Matches.h } else { 0 }
         $m = if ($Matches.m) { [int]$Matches.m } else { 0 }
-        $s = if ($Matches.s) { [int]$Matches.s } else { 0 }
-        return ($h * 3600) + ($m * 60) + $s
+        $s = if ($Matches.s) { [int][math]::Ceiling([double]$Matches.s) } else { 0 }
+        return ($d * 86400) + ($h * 3600) + ($m * 60) + $s
     }
-    return 0
+    return $null
 }
 
 function ConvertTo-Iso8601Duration {
@@ -202,14 +209,31 @@ if ($AllTasks.Count -eq 0) {
 
 Write-Log "Qualifying tasks: $(($AllTasks | ForEach-Object { "$($_.TaskPath)$($_.TaskName)" }) -join ', ')"
 
+# Only enabled logon triggers count: a disabled trigger on an enabled task does not fire
+# at logon, so it adds no contention and is not rewritten (1.0.2 rewrote it).
+# A delay this parser cannot read is left alone and reported, never shortened.
+$script:UnreadableDelays = @()
 $needFix = @(
     $AllTasks | Where-Object {
-        $logonTriggers = @($_.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' })
-        $currentMin    = ($logonTriggers | ForEach-Object { ConvertFrom-Iso8601Duration $_.Delay } | Measure-Object -Minimum).Minimum
-        if ($null -eq $currentMin) { $currentMin = 0 }
-        $currentMin -lt $MinDelaySeconds
+        $task = $_
+        $logonTriggers = @($task.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' -and $_.Enabled -ne $false })
+        if ($logonTriggers.Count -eq 0) { return $false }
+        $delays = @()
+        foreach ($t in $logonTriggers) {
+            $v = ConvertFrom-Iso8601Duration $t.Delay
+            if ($null -eq $v) { $script:UnreadableDelays += "$($task.TaskPath)$($task.TaskName) ('$($t.Delay)')" } else { $delays += $v }
+        }
+        if ($delays.Count -eq 0) { return $false }   # every readable delay missing: unreadable ones are not touched
+        ($delays | Measure-Object -Minimum).Minimum -lt $MinDelaySeconds
     }
 )
+if ($script:UnreadableDelays.Count -gt 0) { Write-Log "Delays left unchanged because the form is not understood: $($script:UnreadableDelays -join ', ')" }
+
+# A principal with a stored password cannot be re-registered by Set-ScheduledTask without
+# that password, so those tasks are reported rather than attempted and failed every run.
+$script:TasksNeedingCredential = @($needFix | Where-Object { $_.Principal.LogonType -eq 'Password' } | ForEach-Object { "$($_.TaskPath)$($_.TaskName)" })
+$needFix = @($needFix | Where-Object { $_.Principal.LogonType -ne 'Password' })
+if ($script:TasksNeedingCredential.Count -gt 0) { Write-Log "Tasks with a stored-password principal, reported only: $($script:TasksNeedingCredential -join ', ')" }
 
 $TasksNeedingDelay = @()
 for ($i = 0; $i -lt $needFix.Count; $i++) {
@@ -232,11 +256,15 @@ $Steps = @(
         Enabled          = $true
         ResolveOnWarning = $false
         DetectionScript  = {
+            $credNote = if ($script:TasksNeedingCredential.Count -gt 0) { " $($script:TasksNeedingCredential.Count) more need a delay but run under a stored-password principal and are reported only: $($script:TasksNeedingCredential -join ', ')." } else { '' }
             if ($TasksNeedingDelay.Count -gt 0) {
                 $detail = ($TasksNeedingDelay | ForEach-Object {
                     "$($_.Task.TaskPath)$($_.Task.TaskName) -> +$($_.TargetSeconds)s"
                 }) -join ', '
-                return @{ Status = 'Failed'; Message = "$($TasksNeedingDelay.Count) of $($AllTasks.Count) task(s) need a delay: $detail" }
+                return @{ Status = 'Failed'; Message = "$($TasksNeedingDelay.Count) of $($AllTasks.Count) task(s) need a delay: $detail.$credNote" }
+            }
+            if ($script:TasksNeedingCredential.Count -gt 0) {
+                return @{ Status = 'Warning'; Message = "No task this script can change needs a delay.$credNote" }
             }
             return @{ Status = 'Passed'; Message = "All $($AllTasks.Count) qualifying task(s) already have at least a $MinDelaySeconds second delay" }
         }
@@ -246,9 +274,10 @@ $Steps = @(
                 $targetIso = ConvertTo-Iso8601Duration $entry.TargetSeconds
                 try {
                     foreach ($trigger in $task.Triggers) {
-                        if ($trigger.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger') {
+                        if ($trigger.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' -and $trigger.Enabled -ne $false) {
                             $current = ConvertFrom-Iso8601Duration $trigger.Delay
-                            if ($current -lt $MinDelaySeconds) { $trigger.Delay = $targetIso }
+                            # $null = unreadable: left exactly as it is
+                            if ($null -ne $current -and $current -lt $MinDelaySeconds) { $trigger.Delay = $targetIso }
                         }
                     }
                     Set-ScheduledTask -InputObject $task -ErrorAction Stop | Out-Null

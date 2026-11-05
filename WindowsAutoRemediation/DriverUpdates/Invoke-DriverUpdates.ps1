@@ -57,11 +57,14 @@
 
 .NOTES
     Script Name  : Invoke-DriverUpdates.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-07-28
+    Last Modified: 2026-11-05 (1.0.1: the driver-exclusion policies are read before the search, so a
+                   policy-blocked device reports which policy blocks it and exits 0 instead of a generic
+                   search error; the reboot signals are checked in Detect mode too and reported before
+                   the exit, so a pre-existing pending reboot is visible without installing anything)
     Timeout      : 120 seconds
 
 .DISCLAIMER
@@ -115,6 +118,37 @@ if ($wuService.Status -ne 'Running') {
     }
 }
 
+# Reboot signals shared by Detect and Install: the WU registry key and the OS pending-rename queue.
+function Get-PendingRebootSignal {
+    $signals = @()
+    if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') { $signals += 'WU registry key present' }
+    $pendingRenames = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations
+    if ($pendingRenames) { $signals += 'PendingFileRenameOperations present' }
+    if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') { $signals += 'CBS RebootPending present' }
+    return $signals
+}
+
+# -- Phase 1b: Driver-exclusion policies ---------------------------------------
+# A device whose policy keeps drivers out of Windows Update gets a clear statement of that,
+# not a generic search error (1.0.1). Nothing here changes the device.
+$policyBlocks = @()
+$wuPolicy = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' -ErrorAction SilentlyContinue
+if ($wuPolicy -and [int]$wuPolicy.ExcludeWUDriversInQualityUpdate -eq 1) { $policyBlocks += 'WindowsUpdate\ExcludeWUDriversInQualityUpdate=1 (drivers excluded from Windows Update)' }
+$dsPolicy = Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DriverSearching' -ErrorAction SilentlyContinue
+if ($dsPolicy -and [int]$dsPolicy.DontSearchWindowsUpdate -eq 1) { $policyBlocks += 'DriverSearching\DontSearchWindowsUpdate=1' }
+if ($dsPolicy -and $null -ne $dsPolicy.SearchOrderConfig -and [int]$dsPolicy.SearchOrderConfig -eq 0) { $policyBlocks += 'DriverSearching\SearchOrderConfig=0 (never search Windows Update for drivers)' }
+$dsLocal = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching' -ErrorAction SilentlyContinue
+if ($dsLocal -and $null -ne $dsLocal.SearchOrderConfig -and [int]$dsLocal.SearchOrderConfig -eq 0 -and $policyBlocks.Count -eq 0) { $policyBlocks += 'DriverSearching\SearchOrderConfig=0 in the device settings (never search Windows Update for drivers)' }
+
+$pendingBefore = @(Get-PendingRebootSignal)
+if ($pendingBefore.Count -gt 0) { Write-Output "Pending reboot already present before any install: $($pendingBefore -join '; ')." }
+
+if ($policyBlocks.Count -gt 0) {
+    Write-Output "Driver updates through Windows Update are blocked on this device by policy: $($policyBlocks -join '; ')."
+    Write-Output 'No search was attempted. Change the policy or deliver drivers through another channel.'
+    exit 0
+}
+
 # -- Phase 2: Driver Discovery -------------------------------------------------
 $wuSession    = $null
 $searchResult = $null
@@ -147,7 +181,7 @@ if ($DriverFilter) {
 }
 
 if ($filtered.Count -eq 0) {
-    Write-Output 'No driver updates to act on.'
+    Write-Output "No driver updates to act on.$(if ($pendingBefore.Count -gt 0) { ' A reboot is already pending (see above).' })"
     exit 0
 }
 
@@ -168,7 +202,7 @@ Write-Output ''
 
 # -- Phase 3: Detect mode exit -------------------------------------------------
 if ($Mode -eq 'Detect') {
-    Write-Output "$($filtered.Count) driver update(s) available. Run with -Mode Install to apply."
+    Write-Output "$($filtered.Count) driver update(s) available. Run with -Mode Install to apply.$(if ($pendingBefore.Count -gt 0) { ' A reboot is already pending (see above); install after it.' })"
     exit 1
 }
 
@@ -253,19 +287,9 @@ for ($i = 0; $i -lt $toInstall.Count; $i++) {
 Write-Output ''
 
 # -- Phase 6: Reboot Detection -------------------------------------------------
-# Signal 2: WU registry reboot pending key
-if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') {
-    Write-Output 'Reboot signal: WU registry key present.'
-    $rebootNeeded = $true
-}
-
-# Signal 3: OS-level pending file replacement queue (set when kernel files are staged)
-$pendingRenames = (Get-ItemProperty `
-    -Path  'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' `
-    -Name  PendingFileRenameOperations `
-    -ErrorAction SilentlyContinue).PendingFileRenameOperations
-if ($pendingRenames) {
-    Write-Output 'Reboot signal: PendingFileRenameOperations present.'
+# Signals 2 and 3 (and CBS): WU registry key, pending file renames, servicing stack.
+foreach ($signal in @(Get-PendingRebootSignal)) {
+    Write-Output "Reboot signal: $signal."
     $rebootNeeded = $true
 }
 
