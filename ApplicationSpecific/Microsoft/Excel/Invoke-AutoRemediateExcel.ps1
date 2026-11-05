@@ -48,11 +48,13 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateExcel.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (1.0.1: crash and hang events read through the .NET EventLogReader; Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine; 1.0.0: first build from App_Remediation_Specs.md section 9)
+    Last Modified: 2026-11-05 (1.0.2: step 3 returns Warning, not Failed, when a crash names
+                   an add-in while AllowDestructiveActions is off, so the gate its message
+                   promises holds; the engine remediates every Failed. 1.0.1: crash and hang events read through the .NET EventLogReader; Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine; 1.0.0: first build from App_Remediation_Specs.md section 9)
     Timeout      : 60 seconds
 
 .DISCLAIMER
@@ -325,7 +327,9 @@ $Steps = @(
             $names = ($addins | ForEach-Object { "$($_.Name) [$($_.Scope)]" }) -join ', '
             if ($named) {
                 $script:_blame += 'add-in'
-                return @{ Status = 'Failed'; Message = "Crash module $($script:_crash.Module) matches add-in '$($named.Name)'; $($addins.Count) active third-party add-in(s): $names. Will set LoadBehavior=0 on '$($named.Name)'$(_Gate)." }
+                # Failed only when the gate is open: the engine remediates every Failed, so a
+                # Failed with the flag off would disable the add-in the message says it will not.
+                return @{ Status = $(if ($AllowDestructiveActions) { 'Failed' } else { 'Warning' }); Message = "Crash module $($script:_crash.Module) matches add-in '$($named.Name)'; $($addins.Count) active third-party add-in(s): $names. Will set LoadBehavior=0 on '$($named.Name)'$(_Gate)." }
             }
             if ($script:_crash.ThirdParty) { $script:_blame += 'add-in' }
             return @{ Status = 'Warning'; Message = "$($addins.Count) active third-party add-in(s): $names. Disabling the first one is the remediation$(_Gate)." }
@@ -417,7 +421,8 @@ $Steps = @(
             $open  = if (_AppOpen) { " $_app is open, so the move waits for a run with $_app closed." } else { '' }
             $msg   = "$($items.Count) file(s) open at every $_app launch: $names. A corrupt one crashes $_app at start. Move to XLSTART_quarantine_<stamp> beside the folder$(_Gate).$open"
             if ($script:_crash.Count -ge $CrashWarnCount7d) {
-                return @{ Status = 'Failed'; Message = "Repeated crashes and $msg" }
+                # Failed only when the gate is open; the engine remediates every Failed.
+                return @{ Status = $(if ($AllowDestructiveActions) { 'Failed' } else { 'Warning' }); Message = "Repeated crashes and $msg" }
             }
             return @{ Status = 'Warning'; Message = $msg }
         }
