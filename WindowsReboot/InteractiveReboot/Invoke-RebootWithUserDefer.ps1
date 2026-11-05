@@ -7,7 +7,10 @@
 #>
 
 # Script version for tracking. Bump here, not in the filename.
-$SCRIPT_VERSION = "1.2.1.1"
+$SCRIPT_VERSION = "1.2.1.2"
+# 1.2.1.2 (2026-11-05): toast helper keeps its per-user state under the bare user name (was host\user,
+# which nested the key), the deadline re-sync writes the value name it reads (DeadlineAt), and the
+# dead deferral-counter code is gone: "Not now" is a dismiss, the cadence and deadline govern.
 # 1.2.1.1 (2026-11-04): every cleanup (install of a stale task, post-reboot, test mode) also removes
 # leftover one-shot RebootPrompt-Toast-* tasks; a July relic survived on the lab VM.
 # 1.2.1.0 (2026-11-04): TestMode (admin value below, or script variable TestMode=true). The install
@@ -242,16 +245,15 @@ If(!$Force.IsPresent){
     if ($nextNotification -gt $now) { Write-Verbose "Notification not available.  Next notification not until: $($nextNotification.ToString())" ; return }
 }
 
-# Mandatory if beyond deadline or deferrals >= max
+# Mandatory once the deadline has passed. A shorter MaxHours on a later run pulls the stored deadline in.
 $deadline  = [datetime]::Parse($s.DeadlineAt)
 if($diffDeadline){
     if($diffDeadline.Subtract($deadline).TotalSeconds -lt 0){
         $deadline = $diffDeadline
-        Set-State @{ Deadline = $diffDeadline.ToString("o") }
+        Set-State @{ DeadlineAt = $diffDeadline.ToString("o") }
     }
 }
 
-$deferrals = If($s.Deferrals){ $s.Deferrals } Else{ 0 }
 $mandatory = ($now -ge $deadline) -and -not $TestMode
 
 $timeleft=$deadline.Subtract((Get-Date))
@@ -283,7 +285,8 @@ $shutdown="$env:WINDIR\System32\shutdown.exe"
 
 # Start countdown + show confirm toast (hidden)
 $rebootCmd = "`"$shutdown`" /r /t 10 /f"
-# Increment deferrals (hidden; no inline -Command parsing issues)
+# "Not now" only dismisses the toast (a silent no-op handler); the next prompt follows the
+# ShowEveryMinutes cadence and the deadline is the only end. There is no deferral count.
 $deferCmd = 'mshta.exe "javascript:close()"'
 If($TestMode){
     # Test mode: a button press only records which button, in the user's hive, where the
@@ -352,7 +355,8 @@ If(($WorkspaceOne | Measure).Count -gt 0){
 
 
 If([string]::IsNullOrEmpty($UserId)){
-    $UserId = whoami
+    # Bare user name: whoami returns host\user, and the backslash nested the state key two levels down.
+    $UserId = [Environment]::UserName
     if($UserId -like "*System*"){
         return
     }
