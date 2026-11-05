@@ -81,6 +81,11 @@
 .NOTES
     PowerShell 5.1 compatible.
 
+    1.1.4 (2026-11-05): ShellReadyTime is the session's explorer.exe creation time (Winlogon
+    7001 only as a fallback; on Windows 11 it never names the Shell subscriber), and the
+    Group Policy 4001 is the oldest one inside the logon window rather than the user's
+    newest, which could be a later refresh cycle. TEST-VALIDATION.md 8.3.
+
     Every run ends by printing the contents of the registry key, re-read from the
     registry rather than echoed from memory, so an admin testing a deployment sees what
     a sensor will actually find. A write that failed shows as a stale or absent value
@@ -133,7 +138,7 @@ $script:ToolsDir   = 'C:\ProgramData\AirWatch\Extensions\DEXTools'
 $script:ScriptName = 'Measure-LogonDuration.ps1'
 $script:TaskName   = 'DEXTools_MeasureLogonDuration'
 $script:RegPath    = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration'
-$script:Version    = '1.1.3'   # 2026-11-05: event queries via .NET EventLogReader (no Get-WinEvent)
+$script:Version    = '1.1.4'   # 2026-11-05: shell-ready from the session's explorer.exe, GP 4001 bounded to the logon window; 1.1.3 same day: .NET EventLogReader
 $script:ValidModes = @('RunNow', 'DeployScheduledTask', 'ConfigureLogging')
 
 # Exit code the run will finish with. Script scope so the trailing entry-point block can
@@ -343,22 +348,36 @@ if ($tsEvent) {
 #endregion
 
 #region --- Shell / Desktop Ready + Total Logon Duration ---
-# Winlogon EID 7001 fires when the Shell subscriber (Explorer) begins executing
-# the logon notification — the closest reliable proxy for "desktop appeared".
-# Properties[0] = subscriber name ('Shell'), filtered to avoid other subscribers.
-# Written to the System log.
+# Shell-ready is the creation time of the session's explorer.exe (the earliest one; a shell
+# restart spawns another), the moment the desktop was handed to the user. Winlogon 7001 was
+# the previous proxy, but on Windows 11 that event carries [1, <SID>], fires before TS-LSM 21
+# and never names the 'Shell' subscriber, so it stays only as a fallback for builds that
+# still log it, used when no explorer.exe is alive for the session.
 $shellReadyTime     = $null
 $totalLogonDurSec   = $null
 
 if ($logonTime) {
-    $shellEvent = Get-DexEvent -LogName 'System' -ProviderName 'Microsoft-Windows-Winlogon' -Id 7001 `
-        -StartTime $logonTime -EndTime $logonTime.AddMinutes(10) |
-        Where-Object { $_.Properties[0].Value -eq 'Shell' } |
-        Sort-Object TimeCreated |
-        Select-Object -First 1
-
-    if ($shellEvent) {
-        $shellReadyTime   = $shellEvent.TimeCreated
+    $explorerStart = $null
+    if ($null -ne $sessionId) {
+        try {
+            foreach ($proc in @(Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" -ErrorAction Stop)) {
+                if ($null -eq $proc.CreationDate -or [int]$proc.SessionId -ne $sessionId) { continue }
+                if ($null -eq $explorerStart -or $proc.CreationDate -lt $explorerStart) { $explorerStart = $proc.CreationDate }
+            }
+        } catch { $explorerStart = $null }
+    }
+    if ($explorerStart -and $explorerStart -ge $logonTime) {
+        $shellReadyTime = $explorerStart
+    }
+    else {
+        $shellEvent = Get-DexEvent -LogName 'System' -ProviderName 'Microsoft-Windows-Winlogon' -Id 7001 `
+            -StartTime $logonTime -EndTime $logonTime.AddMinutes(10) |
+            Where-Object { $_.Properties[0].Value -eq 'Shell' } |
+            Sort-Object TimeCreated |
+            Select-Object -First 1
+        if ($shellEvent) { $shellReadyTime = $shellEvent.TimeCreated }
+    }
+    if ($shellReadyTime) {
         $totalLogonDurSec = [math]::Round(($shellReadyTime - $logonTime).TotalSeconds, 2)
     }
 }
@@ -372,13 +391,21 @@ $gpStartTime    = $null
 $gpStartEvent   = $null
 
 $gpLog   = 'Microsoft-Windows-GroupPolicy/Operational'
-$gpXPath = "*[EventData[Data[@Name='PrincipalSamName'] and (Data='$loggedOnUser')]] and *[System[(EventID='4001')]]"
-$gpStartEvent = Get-DexEvent -LogName $gpLog -XPath $gpXPath -MaxEvents 1 | Select-Object -First 1
+# Bounded to the logon window: the user's newest 4001 can be a background refresh cycle (both
+# lab VMs reported one exactly ten minutes after logon, TEST-VALIDATION.md 8.3), so only a
+# cycle that started within a minute before the logon and ten minutes after it counts, oldest
+# first because the logon's own processing is the first cycle in that window. The 8001 that
+# closes it is looked for in the thirty minutes after the 4001, ActivityId match first.$gpWindow = ''
+if ($logonTime) {
+    $gpWindow = " and TimeCreated[@SystemTime>='" + $logonTime.AddMinutes(-1).ToUniversalTime().ToString('o') + "' and @SystemTime<='" + $logonTime.AddMinutes(10).ToUniversalTime().ToString('o') + "']"
+}
+$gpXPath = "*[EventData[Data[@Name='PrincipalSamName'] and (Data='$loggedOnUser')]] and *[System[(EventID='4001')$gpWindow]]"
+$gpStartEvent = Get-DexEvent -LogName $gpLog -XPath $gpXPath -MaxEvents 1 -Oldest:([bool]$logonTime) | Select-Object -First 1
 
 if ($gpStartEvent) {
     $gpStartTime    = $gpStartEvent.TimeCreated
-    $gpEndXPath     = "*[EventData[Data[@Name='PrincipalSamName'] and (Data='$loggedOnUser')]] and *[System[(EventID='8001')]]"
-    $gpEndCandidates = @(Get-DexEvent -LogName $gpLog -XPath $gpEndXPath -MaxEvents 20)
+    $gpEndXPath     = "*[EventData[Data[@Name='PrincipalSamName'] and (Data='$loggedOnUser')]] and *[System[(EventID='8001') and TimeCreated[@SystemTime>='" + $gpStartTime.ToUniversalTime().ToString('o') + "' and @SystemTime<='" + $gpStartTime.AddMinutes(30).ToUniversalTime().ToString('o') + "']]]"
+    $gpEndCandidates = @(Get-DexEvent -LogName $gpLog -XPath $gpEndXPath -MaxEvents 20 -Oldest)
 
     # Group Policy stamps one ActivityId per processing cycle. Taking the newest 8001 to
     # pair with the newest 4001 can straddle two different cycles and produce a duration
@@ -397,6 +424,14 @@ if ($gpStartEvent) {
         $gpSpan = ($gpEndEvent.TimeCreated - $gpStartEvent.TimeCreated).TotalSeconds
         if ($gpSpan -ge 0) { $gpDurationSec = [math]::Round($gpSpan, 2) }
     }
+}
+elseif ($logonTime) {
+    # No user cycle inside the logon window. A workgroup device has no domain policy to
+    # process at logon (the lab VMs log their 4001/8001 pairs only as later refreshes, ten
+    # minutes after logon and on Hub syncs), so that is N/A rather than Unknown.
+    try {
+        if (-not [bool](Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop).PartOfDomain) { $gpDurationSec = 'N/A' }
+    } catch { }
 }
 #endregion
 

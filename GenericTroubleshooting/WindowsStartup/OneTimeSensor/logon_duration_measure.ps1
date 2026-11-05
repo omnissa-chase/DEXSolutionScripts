@@ -6,7 +6,10 @@
     Architecture : Any (x86/x64/ARM64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (1.1.0: every event query goes through the .NET
+    Last Modified: 2026-11-05 (1.1.1: ShellReadyTime from the session's explorer.exe
+                   creation time, Winlogon 7001 only as a fallback, and the Group Policy
+                   4001 bounded to the logon window instead of the user's newest cycle;
+                   1.1.0: every event query goes through the .NET
                    EventLogReader with an explicit log name instead of Get-WinEvent,
                    which throws "Cannot marshal 'parameter #8'" under the PowerShell
                    7.2 engine Hub embeds on ARM64 and enumerates provider metadata on
@@ -33,8 +36,8 @@
     Phases captured (same event sources as Measure-LogonDuration.ps1), with the log
     each one is read from:
       - Logon timestamp           (TerminalServices-LocalSessionManager/Operational EID 21/25)
-      - Shell / Desktop ready     (System log, Microsoft-Windows-Winlogon EID 7001)
-      - Total logon duration      (EID 21 -> Winlogon EID 7001)
+      - Shell / Desktop ready     (session explorer.exe creation time; Winlogon EID 7001 fallback)
+      - Total logon duration      (EID 21 -> shell ready)
       - Group Policy total        (GroupPolicy/Operational EID 4001 -> 8001, by PrincipalSamName)
       - GP Logon Scripts          (GroupPolicy/Operational EID 4018 -> 5018, ScriptType=1)
       - Folder Redirection        (Folder Redirection/Operational EID 501 -> 502)
@@ -204,20 +207,32 @@ try {
         $sessionId = [int]$tsEvent.Properties[1].Value
     }
 
-    # Winlogon EID 7001 (Shell subscriber) is the closest reliable proxy for "desktop appeared".
-    # It is written to the System log.
+    # Shell-ready is the creation time of the session's explorer.exe (the earliest one; a shell
+    # restart spawns another). Winlogon 7001 is only a fallback: on Windows 11 it carries
+    # [1, <SID>], fires before TS-LSM 21 and never names the 'Shell' subscriber.
     $shellReadyTime   = $null
     $totalLogonDurSec = $null
     if ($logonTime) {
         try {
-            $shellEvent = Get-DexEvent -LogName 'System' -ProviderName 'Microsoft-Windows-Winlogon' -Id 7001 `
-                -StartTime $logonTime -EndTime $logonTime.AddMinutes(10) |
-                Where-Object { $_.Properties[0].Value -eq 'Shell' } |
-                Sort-Object TimeCreated |
-                Select-Object -First 1
-
-            if ($shellEvent) {
-                $shellReadyTime   = $shellEvent.TimeCreated
+            $explorerStart = $null
+            if ($null -ne $sessionId) {
+                foreach ($proc in @(Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" -ErrorAction Stop)) {
+                    if ($null -eq $proc.CreationDate -or [int]$proc.SessionId -ne $sessionId) { continue }
+                    if ($null -eq $explorerStart -or $proc.CreationDate -lt $explorerStart) { $explorerStart = $proc.CreationDate }
+                }
+            }
+            if ($explorerStart -and $explorerStart -ge $logonTime) {
+                $shellReadyTime = $explorerStart
+            }
+            else {
+                $shellEvent = Get-DexEvent -LogName 'System' -ProviderName 'Microsoft-Windows-Winlogon' -Id 7001 `
+                    -StartTime $logonTime -EndTime $logonTime.AddMinutes(10) |
+                    Where-Object { $_.Properties[0].Value -eq 'Shell' } |
+                    Sort-Object TimeCreated |
+                    Select-Object -First 1
+                if ($shellEvent) { $shellReadyTime = $shellEvent.TimeCreated }
+            }
+            if ($shellReadyTime) {
                 $totalLogonDurSec = [math]::Round(($shellReadyTime - $logonTime).TotalSeconds, 2)
             }
         } catch {}
@@ -232,13 +247,21 @@ try {
         $timedOut = $true; $gpDurationSec = 'TimedOut'
     } else {
         try {
-            $gpXPath = "*[EventData[Data[@Name='PrincipalSamName'] and (Data='$loggedOnUser')]] and *[System[(EventID='4001')]]"
-            $gpStartEvent = Get-DexEvent -LogName $gpLog -XPath $gpXPath -MaxEvents 1 | Select-Object -First 1
+            # Bounded to the logon window: the user's newest 4001 can be a background refresh cycle (both
+            # lab VMs reported one exactly ten minutes after logon, TEST-VALIDATION.md 8.3), so only a
+            # cycle that started within a minute before the logon and ten minutes after it counts, oldest
+            # first because the logon's own processing is the first cycle in that window. The 8001 that
+            # closes it is looked for in the thirty minutes after the 4001, ActivityId match first.            $gpWindow = ''
+            if ($logonTime) {
+                $gpWindow = " and TimeCreated[@SystemTime>='" + $logonTime.AddMinutes(-1).ToUniversalTime().ToString('o') + "' and @SystemTime<='" + $logonTime.AddMinutes(10).ToUniversalTime().ToString('o') + "']"
+            }
+            $gpXPath = "*[EventData[Data[@Name='PrincipalSamName'] and (Data='$loggedOnUser')]] and *[System[(EventID='4001')$gpWindow]]"
+            $gpStartEvent = Get-DexEvent -LogName $gpLog -XPath $gpXPath -MaxEvents 1 -Oldest:([bool]$logonTime) | Select-Object -First 1
 
             if ($gpStartEvent) {
                 $gpStartTime = $gpStartEvent.TimeCreated
-                $gpEndXPath  = "*[EventData[Data[@Name='PrincipalSamName'] and (Data='$loggedOnUser')]] and *[System[(EventID='8001')]]"
-                $gpEndCandidates = @(Get-DexEvent -LogName $gpLog -XPath $gpEndXPath -MaxEvents 20)
+                $gpEndXPath  = "*[EventData[Data[@Name='PrincipalSamName'] and (Data='$loggedOnUser')]] and *[System[(EventID='8001') and TimeCreated[@SystemTime>='" + $gpStartTime.ToUniversalTime().ToString('o') + "' and @SystemTime<='" + $gpStartTime.AddMinutes(30).ToUniversalTime().ToString('o') + "']]]"
+                $gpEndCandidates = @(Get-DexEvent -LogName $gpLog -XPath $gpEndXPath -MaxEvents 20 -Oldest)
 
                 # Group Policy stamps one ActivityId per processing cycle; pairing the newest
                 # 8001 with the newest 4001 can straddle two cycles and go negative.
@@ -254,6 +277,11 @@ try {
                     $gpSpan = ($gpEndEvent.TimeCreated - $gpStartEvent.TimeCreated).TotalSeconds
                     if ($gpSpan -ge 0) { $gpDurationSec = [math]::Round($gpSpan, 2) }
                 }
+            }
+            elseif ($logonTime) {
+                # No user cycle inside the logon window: on a workgroup device that is N/A
+                # (no domain policy at logon; the lab VMs log 4001/8001 only as later refreshes).
+                if (-not [bool](Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop).PartOfDomain) { $gpDurationSec = 'N/A' }
             }
         } catch {}
     }

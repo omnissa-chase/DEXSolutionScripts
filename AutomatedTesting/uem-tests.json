@@ -184,12 +184,16 @@
   "logon_time.ps1": {
     "note": "Passed with a value on both devices in run e5d833 (2026-11-05) once collector 1.1.3 had run under Hub (d17a02); before that the cache held LogonTime = Unknown and the sensor emitted nothing."
   },
+  "logon_gp_duration_ms.ps1": {
+    "min": -2,
+    "note": "-2 (not applicable) on the workgroup lab VMs from collector 1.1.4: no user GP cycle inside the logon window and the device is not domain-joined. Earlier 40/70 ms values came from a refresh cycle ten minutes after logon (run 8c7790 probe, TEST-VALIDATION.md 8.3). A domain-joined device returns the real logon processing time."
+  },
   "logon_shell_ready_time.ps1": {
-    "expectNoValue": true,
-    "note": "No value by design until the collector's Winlogon 7001 filter is fixed: on Windows 11 the event carries [1, SID], never the Shell subscriber name, so ShellReadyTime stays Unknown (TEST-VALIDATION.md 8.3). Confirmed no value in e5d833 with everything else populated."
+    "note": "Passed with a value on both devices in run b9b16e (2026-11-05) once collector 1.1.4 took shell-ready from the session's explorer.exe creation time; before that the Winlogon 7001 filter never matched on Windows 11 and the sensor emitted nothing."
   },
   "logon_gp_start_time.ps1": {
-    "note": "Passed with a value on both devices in run e5d833 (2026-11-05); note the value is the newest GP refresh for the user, not the logon's own processing (TEST-VALIDATION.md 8.3)."
+    "expectNoValue": true,
+    "note": "No value on the workgroup lab VMs by design from collector 1.1.4: the Group Policy 4001 is now bounded to the logon window, and a probe of the GP log under Hub (run 8c7790, 2026-11-05) showed these devices log their user 4001/8001 pairs only as later refresh cycles (ten minutes after logon and on Hub syncs), never at logon. The value e5d833 returned earlier was one of those refreshes. Passes with a value on a domain-joined device."
   },
   "vpn_last_connect_time.ps1": {
     "expectNoValue": true,
