@@ -6,7 +6,7 @@
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-21
+    Last Modified: 2026-11-05 (Operations Manager and ESENT events read through the .NET EventLogReader; Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine)
     Timeout      : One-time / run-once only. Self-enforced 25 s budget, 30 s UEM hard
                    ceiling. MUST NOT be scheduled as a recurring sensor. See
                    GENERAL-SCRIPTS-SENSORS_RUNBOOK.md section 10.
@@ -67,6 +67,72 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
+
+#region --- Event log reader --------------------------------------------------------------------
+# Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine ("Cannot marshal
+# 'parameter #8'"), so events are read through System.Diagnostics.Eventing.Reader, which behaves
+# the same on Windows PowerShell 5.1 and PowerShell 7. Get-WinEvent semantics are kept: newest
+# first unless -Oldest, StartTime/EndTime are whole-second bounds, a failed read yields an empty
+# result unless -ErrorStop. Each record carries a Message property (FormatDescription(), falling
+# back to the raw property values when the provider ships no message metadata).
+function Get-DexEvent {
+    param(
+        [Parameter(Mandatory = $true)][string]$LogName,
+        [int[]]$Id,
+        [string[]]$ProviderName,
+        [int[]]$Level,
+        [datetime]$StartTime,
+        [datetime]$EndTime,
+        [string]$XPath,
+        [int]$MaxEvents = 0,
+        [switch]$Oldest,
+        [switch]$ErrorStop
+    )
+    $sys = New-Object System.Collections.Generic.List[string]
+    if ($Id)           { $sys.Add('(' + (@($Id | ForEach-Object { "EventID=$_" }) -join ' or ') + ')') }
+    if ($ProviderName) { $sys.Add('(' + (@($ProviderName | ForEach-Object { "Provider[@Name='$_']" }) -join ' or ') + ')') }
+    if ($Level)        { $sys.Add('(' + (@($Level | ForEach-Object { "Level=$_" }) -join ' or ') + ')') }
+    $when = New-Object System.Collections.Generic.List[string]
+    if ($PSBoundParameters.ContainsKey('StartTime')) {
+        $t = $StartTime.ToUniversalTime(); $t = $t.AddTicks(-($t.Ticks % [TimeSpan]::TicksPerSecond))
+        $when.Add("@SystemTime>='" + $t.ToString('o') + "'")
+    }
+    if ($PSBoundParameters.ContainsKey('EndTime')) {
+        $t = $EndTime.ToUniversalTime()
+        if ($t.Ticks % [TimeSpan]::TicksPerSecond) { $t = $t.AddTicks([TimeSpan]::TicksPerSecond - ($t.Ticks % [TimeSpan]::TicksPerSecond)) }
+        $when.Add("@SystemTime<='" + $t.ToString('o') + "'")
+    }
+    if ($when.Count -gt 0) { $sys.Add('TimeCreated[' + ($when -join ' and ') + ']') }
+    $query = if ($XPath) { $XPath } elseif ($sys.Count -gt 0) { '*[System[' + ($sys -join ' and ') + ']]' } else { '*' }
+    $getMessage = {
+        $m = $null
+        try { $m = $this.FormatDescription() } catch { }
+        if (-not $m) { $m = (@($this.Properties | ForEach-Object { "$($_.Value)" }) -join "`n") }
+        $m
+    }
+    $out = New-Object System.Collections.Generic.List[object]
+    $reader = $null
+    try {
+        $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery($LogName, [System.Diagnostics.Eventing.Reader.PathType]::LogName, $query)
+        $q.ReverseDirection = -not $Oldest
+        $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($q)
+        while (($MaxEvents -le 0 -or $out.Count -lt $MaxEvents) -and ($null -ne ($record = $reader.ReadEvent()))) {
+            $po = [System.Management.Automation.PSObject]::AsPSObject($record)
+            $po.PSObject.Properties.Add((New-Object System.Management.Automation.PSScriptProperty('Message', $getMessage)))
+            $out.Add($po)
+        }
+    } catch {
+        if ($ErrorStop) { throw }
+    } finally {
+        if ($reader) { $reader.Dispose() }
+    }
+    return $out.ToArray()
+}
+function Get-DexEventLog {
+    param([Parameter(Mandatory = $true)][string]$LogName)
+    try { return New-Object System.Diagnostics.Eventing.Reader.EventLogConfiguration($LogName) } catch { return $null }
+}
+#endregion
 
 # -- Tunables --
 # 25 s leaves a 5 s margin under the 30 s UEM one-time ceiling for JSON
@@ -475,15 +541,10 @@ try {
     if (Test-Budget) {
         $counts = @{}
         try {
-            # LogName + StartTime only. Adding ProviderName or Id to the same
-            # hashtable is the combination that throws a TERMINATING "parameter is
-            # incorrect" on hosts where the provider is not registered -- straight
-            # past -ErrorAction SilentlyContinue.
+            # .NET reader with -ErrorStop: a missing Operations Manager log (no agent
+            # installed) lands in the catch below and reports OpsLogAvailable = false.
             $since  = (Get-Date).AddHours(-$script:EventLookbackHrs)
-            $events = @(Get-WinEvent -FilterHashtable @{
-                LogName   = 'Operations Manager'
-                StartTime = $since
-            } -MaxEvents $script:MaxEventsScanned -ErrorAction SilentlyContinue)
+            $events = @(Get-DexEvent -LogName 'Operations Manager' -StartTime $since -MaxEvents $script:MaxEventsScanned -ErrorStop)
 
             # An empty result is still a readable log. A quiet agent is a healthy agent.
             $r.OpsLogAvailable = $true
@@ -517,12 +578,7 @@ try {
         # not in Operations Manager -- a second, separately-guarded query.
         if (Test-Budget) {
             try {
-                $esentEvents = @(Get-WinEvent -FilterHashtable @{
-                    LogName      = 'Application'
-                    ProviderName = 'ESENT'
-                    StartTime    = (Get-Date).AddHours(-$script:EventLookbackHrs)
-                    Id           = 477, 490, 623
-                } -MaxEvents 200 -ErrorAction SilentlyContinue)
+                $esentEvents = @(Get-DexEvent -LogName 'Application' -ProviderName 'ESENT' -Id 477, 490, 623 -StartTime (Get-Date).AddHours(-$script:EventLookbackHrs) -MaxEvents 200)
 
                 # ESENT is used by many Windows components. Only errors naming the
                 # agent's own database are ours.

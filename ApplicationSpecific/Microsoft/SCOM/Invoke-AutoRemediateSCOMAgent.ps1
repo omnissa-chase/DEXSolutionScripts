@@ -37,10 +37,10 @@
       which blocks for the full ~30s SCM timeout on a wedged agent.
     - CPU is derived from TotalProcessorTime over process lifetime -- an average since
       start, not an instantaneous figure, and labelled as such.
-    - Get-WinEvent -FilterHashtable can throw a TERMINATING error even under
-      -ErrorAction SilentlyContinue when a log or provider is absent, so the engine wraps
-      every detection call and three steps carry their own inner try/catch for local
-      recovery.
+    - Event logs are read through the .NET EventLogReader (Get-DexEvent) because
+      Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine. The engine
+      still wraps every detection call and three steps carry their own inner try/catch for
+      local recovery.
 
     >> Deployment guidance, the health-score reason table, sensor contract, VDI/golden-image
        notes, tunable reference and troubleshooting are in
@@ -48,11 +48,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateSCOMAgent.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : x64
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-25
+    Last Modified: 2026-11-05 (1.0.1: Operations Manager and ESENT events read through the .NET EventLogReader; Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine)
     Timeout      : 45 seconds (deploy with a 120 second UEM timeout)
 
     Environment variables:
@@ -64,11 +64,77 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
+#region --- Event log reader --------------------------------------------------------------------
+# Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine ("Cannot marshal
+# 'parameter #8'"), so events are read through System.Diagnostics.Eventing.Reader, which behaves
+# the same on Windows PowerShell 5.1 and PowerShell 7. Get-WinEvent semantics are kept: newest
+# first unless -Oldest, StartTime/EndTime are whole-second bounds, a failed read yields an empty
+# result unless -ErrorStop. Each record carries a Message property (FormatDescription(), falling
+# back to the raw property values when the provider ships no message metadata).
+function Get-DexEvent {
+    param(
+        [Parameter(Mandatory = $true)][string]$LogName,
+        [int[]]$Id,
+        [string[]]$ProviderName,
+        [int[]]$Level,
+        [datetime]$StartTime,
+        [datetime]$EndTime,
+        [string]$XPath,
+        [int]$MaxEvents = 0,
+        [switch]$Oldest,
+        [switch]$ErrorStop
+    )
+    $sys = New-Object System.Collections.Generic.List[string]
+    if ($Id)           { $sys.Add('(' + (@($Id | ForEach-Object { "EventID=$_" }) -join ' or ') + ')') }
+    if ($ProviderName) { $sys.Add('(' + (@($ProviderName | ForEach-Object { "Provider[@Name='$_']" }) -join ' or ') + ')') }
+    if ($Level)        { $sys.Add('(' + (@($Level | ForEach-Object { "Level=$_" }) -join ' or ') + ')') }
+    $when = New-Object System.Collections.Generic.List[string]
+    if ($PSBoundParameters.ContainsKey('StartTime')) {
+        $t = $StartTime.ToUniversalTime(); $t = $t.AddTicks(-($t.Ticks % [TimeSpan]::TicksPerSecond))
+        $when.Add("@SystemTime>='" + $t.ToString('o') + "'")
+    }
+    if ($PSBoundParameters.ContainsKey('EndTime')) {
+        $t = $EndTime.ToUniversalTime()
+        if ($t.Ticks % [TimeSpan]::TicksPerSecond) { $t = $t.AddTicks([TimeSpan]::TicksPerSecond - ($t.Ticks % [TimeSpan]::TicksPerSecond)) }
+        $when.Add("@SystemTime<='" + $t.ToString('o') + "'")
+    }
+    if ($when.Count -gt 0) { $sys.Add('TimeCreated[' + ($when -join ' and ') + ']') }
+    $query = if ($XPath) { $XPath } elseif ($sys.Count -gt 0) { '*[System[' + ($sys -join ' and ') + ']]' } else { '*' }
+    $getMessage = {
+        $m = $null
+        try { $m = $this.FormatDescription() } catch { }
+        if (-not $m) { $m = (@($this.Properties | ForEach-Object { "$($_.Value)" }) -join "`n") }
+        $m
+    }
+    $out = New-Object System.Collections.Generic.List[object]
+    $reader = $null
+    try {
+        $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery($LogName, [System.Diagnostics.Eventing.Reader.PathType]::LogName, $query)
+        $q.ReverseDirection = -not $Oldest
+        $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($q)
+        while (($MaxEvents -le 0 -or $out.Count -lt $MaxEvents) -and ($null -ne ($record = $reader.ReadEvent()))) {
+            $po = [System.Management.Automation.PSObject]::AsPSObject($record)
+            $po.PSObject.Properties.Add((New-Object System.Management.Automation.PSScriptProperty('Message', $getMessage)))
+            $out.Add($po)
+        }
+    } catch {
+        if ($ErrorStop) { throw }
+    } finally {
+        if ($reader) { $reader.Dispose() }
+    }
+    return $out.ToArray()
+}
+function Get-DexEventLog {
+    param([Parameter(Mandatory = $true)][string]$LogName)
+    try { return New-Object System.Diagnostics.Eventing.Reader.EventLogConfiguration($LogName) } catch { return $null }
+}
+#endregion
+
 function Invoke-AutoRemediateSCOMAgent {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param()
 
-$SCRIPT_VERSION = '1.0.0'
+$SCRIPT_VERSION = '1.0.1'
 $RegPath        = 'HKLM:\Software\AirWatch\Extensions\SCOM'
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateSCOMAgent.log"
 
@@ -210,13 +276,9 @@ $Script:OpsEventCounts  = @{}
 $since = (Get-Date).AddHours(-$EventLookbackHours)
 
 try {
-    # Deliberately LogName + StartTime only. Adding ProviderName/Id to the same
-    # hashtable is the combination that throws "The parameter is incorrect" as a
-    # terminating error on hosts where the provider is not registered.
-    $opsEvents = @(Get-WinEvent -FilterHashtable @{
-        LogName   = 'Operations Manager'
-        StartTime = $since
-    } -MaxEvents $MaxEventsScanned -ErrorAction SilentlyContinue)
+    # .NET reader with -ErrorStop: a missing Operations Manager log (no agent installed)
+    # lands in the catch below and marks the log unavailable.
+    $opsEvents = @(Get-DexEvent -LogName 'Operations Manager' -StartTime $since -MaxEvents $MaxEventsScanned -ErrorStop)
 
     if ($opsEvents.Count -gt 0) {
         $Script:OpsLogAvailable = $true
@@ -469,12 +531,7 @@ $Steps = @(
             # filter hashtable is precisely the combination that can throw a
             # terminating error when the provider is not registered on this build.
             try {
-                $esent = @(Get-WinEvent -FilterHashtable @{
-                    LogName      = 'Application'
-                    ProviderName = 'ESENT'
-                    Id           = 477, 490, 623
-                    StartTime    = (Get-Date).AddHours(-$EventLookbackHours)
-                } -MaxEvents 200 -ErrorAction SilentlyContinue)
+                $esent = @(Get-DexEvent -LogName 'Application' -ProviderName 'ESENT' -Id 477, 490, 623 -StartTime (Get-Date).AddHours(-$EventLookbackHours) -MaxEvents 200)
 
                 # Scope to the agent's own store; ESENT is shared with other products.
                 $Script:StoreDbErrors = @($esent | Where-Object {

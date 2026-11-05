@@ -116,7 +116,7 @@
     "note": "No Trend Micro on the lab VM; Completed proves only the not-found path."
   },
   "Invoke-AutoRemediateOutlook.ps1": {
-    "note": "Classic Outlook 16.0.18925 is on CBRADLEYSWIN11 since 2026-11-02 (outlook.com IMAP profile), so that device takes the product path; CHASEWIN11_2 has no Office and proves the [Skipped] path. Watch the run time: two lab runs took over 100 s, the time spent before the script's first line while the host was busy (TEST-VALIDATION.md 13.2.s); 1.1.1 bounds the step 3 event query. Published timeout is 30 s."
+    "note": "Classic Outlook 16.0.18925 is on CBRADLEYSWIN11 since 2026-11-02 (outlook.com IMAP profile), so that device takes the product path; CHASEWIN11_2 has no Office and proves the [Skipped] path. Watch the run time: two lab runs took over 100 s, the time spent before the script's first line while the host was busy (TEST-VALIDATION.md 13.2.s); 1.1.1 bounds the step 3 event query. 1.1.2 reads the Application log through the .NET EventLogReader: proven in run 4ea50e (2026-11-05), step 3 reported 2 Outlook error events on CBRADLEYSWIN11 where every earlier Hub run had failed the query. Published timeout is 30 s."
   },
   "Invoke-AutoRemediateTeams.ps1": {
     "note": "New Teams (MSTeams 26276.x) is on CBRADLEYSWIN11 since 2026-11-02, so that device takes the product path; CHASEWIN11_2 has no Teams and proves the [Skipped] path. Device-side proof: DEXRecords TeamsErrors on CBRADLEYSWIN11."
@@ -170,7 +170,7 @@
   },
   "performance_defender_scanorupdateactive.ps1": {
     "match": "^(Idle|FullScanActive|Updating|FullScanActive;Updating)$",
-    "note": "Hub rejected 1.0.0 as 'failed sanity' on both lab devices (2026-10-29) while an interactive run printed Idle. 1.0.1 silences the Get-WinEvent error stream; confirmed Idle on both devices in run 0501f4."
+    "note": "Hub rejected 1.0.0 as 'failed sanity' on both lab devices (2026-10-29) while an interactive run printed Idle. 1.0.1 silences the Get-WinEvent error stream; confirmed Idle on both devices in run 0501f4. 1.0.2 (2026-11-05) reads the Defender log through the .NET EventLogReader, so the full-scan branch is live under Hub for the first time (every Get-WinEvent form failed there, so 1.0.1 could only ever fall back to Get-MpComputerStatus)."
   },
   "logon_folder_redirection_map.ps1": {
     "match": "^\\{\"Status\":\"OK\"",
@@ -182,16 +182,14 @@
   },
 
   "logon_time.ps1": {
-    "expectNoValue": true,
-    "note": "Lab VMs hold LogonTime = Unknown in the LogonDuration cache, so the sensor emits nothing and Hub rejects the empty DateTime. Passes with a value on a device where Measure-LogonDuration.ps1 has parsed a logon."
+    "note": "Passed with a value on both devices in run e5d833 (2026-11-05) once collector 1.1.3 had run under Hub (d17a02); before that the cache held LogonTime = Unknown and the sensor emitted nothing."
   },
   "logon_shell_ready_time.ps1": {
     "expectNoValue": true,
-    "note": "Same cache state as logon_time.ps1 on the lab VMs."
+    "note": "No value by design until the collector's Winlogon 7001 filter is fixed: on Windows 11 the event carries [1, SID], never the Shell subscriber name, so ShellReadyTime stays Unknown (TEST-VALIDATION.md 8.3). Confirmed no value in e5d833 with everything else populated."
   },
   "logon_gp_start_time.ps1": {
-    "expectNoValue": true,
-    "note": "Same cache state as logon_time.ps1 on the lab VMs."
+    "note": "Passed with a value on both devices in run e5d833 (2026-11-05); note the value is the newest GP refresh for the user, not the logon's own processing (TEST-VALIDATION.md 8.3)."
   },
   "vpn_last_connect_time.ps1": {
     "expectNoValue": true,

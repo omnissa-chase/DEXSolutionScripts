@@ -16,11 +16,11 @@
 
 .NOTES
     Script Name  : Invoke-HorizonAgentStateCollection.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-03
+    Last Modified: 2026-11-05 (1.0.1: session and Application events read through the .NET EventLogReader; Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine)
     Timeout      : 30 seconds budget (deploy with a 60 second UEM timeout)
     Schedule     : Every 15-30 minutes on session hosts
     Built from   : VDI/Horizon/SPEC.md rev 1
@@ -31,11 +31,77 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
+#region --- Event log reader --------------------------------------------------------------------
+# Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine ("Cannot marshal
+# 'parameter #8'"), so events are read through System.Diagnostics.Eventing.Reader, which behaves
+# the same on Windows PowerShell 5.1 and PowerShell 7. Get-WinEvent semantics are kept: newest
+# first unless -Oldest, StartTime/EndTime are whole-second bounds, a failed read yields an empty
+# result unless -ErrorStop. Each record carries a Message property (FormatDescription(), falling
+# back to the raw property values when the provider ships no message metadata).
+function Get-DexEvent {
+    param(
+        [Parameter(Mandatory = $true)][string]$LogName,
+        [int[]]$Id,
+        [string[]]$ProviderName,
+        [int[]]$Level,
+        [datetime]$StartTime,
+        [datetime]$EndTime,
+        [string]$XPath,
+        [int]$MaxEvents = 0,
+        [switch]$Oldest,
+        [switch]$ErrorStop
+    )
+    $sys = New-Object System.Collections.Generic.List[string]
+    if ($Id)           { $sys.Add('(' + (@($Id | ForEach-Object { "EventID=$_" }) -join ' or ') + ')') }
+    if ($ProviderName) { $sys.Add('(' + (@($ProviderName | ForEach-Object { "Provider[@Name='$_']" }) -join ' or ') + ')') }
+    if ($Level)        { $sys.Add('(' + (@($Level | ForEach-Object { "Level=$_" }) -join ' or ') + ')') }
+    $when = New-Object System.Collections.Generic.List[string]
+    if ($PSBoundParameters.ContainsKey('StartTime')) {
+        $t = $StartTime.ToUniversalTime(); $t = $t.AddTicks(-($t.Ticks % [TimeSpan]::TicksPerSecond))
+        $when.Add("@SystemTime>='" + $t.ToString('o') + "'")
+    }
+    if ($PSBoundParameters.ContainsKey('EndTime')) {
+        $t = $EndTime.ToUniversalTime()
+        if ($t.Ticks % [TimeSpan]::TicksPerSecond) { $t = $t.AddTicks([TimeSpan]::TicksPerSecond - ($t.Ticks % [TimeSpan]::TicksPerSecond)) }
+        $when.Add("@SystemTime<='" + $t.ToString('o') + "'")
+    }
+    if ($when.Count -gt 0) { $sys.Add('TimeCreated[' + ($when -join ' and ') + ']') }
+    $query = if ($XPath) { $XPath } elseif ($sys.Count -gt 0) { '*[System[' + ($sys -join ' and ') + ']]' } else { '*' }
+    $getMessage = {
+        $m = $null
+        try { $m = $this.FormatDescription() } catch { }
+        if (-not $m) { $m = (@($this.Properties | ForEach-Object { "$($_.Value)" }) -join "`n") }
+        $m
+    }
+    $out = New-Object System.Collections.Generic.List[object]
+    $reader = $null
+    try {
+        $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery($LogName, [System.Diagnostics.Eventing.Reader.PathType]::LogName, $query)
+        $q.ReverseDirection = -not $Oldest
+        $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($q)
+        while (($MaxEvents -le 0 -or $out.Count -lt $MaxEvents) -and ($null -ne ($record = $reader.ReadEvent()))) {
+            $po = [System.Management.Automation.PSObject]::AsPSObject($record)
+            $po.PSObject.Properties.Add((New-Object System.Management.Automation.PSScriptProperty('Message', $getMessage)))
+            $out.Add($po)
+        }
+    } catch {
+        if ($ErrorStop) { throw }
+    } finally {
+        if ($reader) { $reader.Dispose() }
+    }
+    return $out.ToArray()
+}
+function Get-DexEventLog {
+    param([Parameter(Mandatory = $true)][string]$LogName)
+    try { return New-Object System.Diagnostics.Eventing.Reader.EventLogConfiguration($LogName) } catch { return $null }
+}
+#endregion
+
 function Invoke-HorizonAgentStateCollection {
 [CmdletBinding()]
 param()
 
-$SCRIPT_VERSION = '1.0.0'
+$SCRIPT_VERSION = '1.0.1'
 $SCRIPT_VARIANT = ''      # internal build: 'internal' (ScriptVersion is written as <version>+internal)
 $RegPath = 'HKLM:\Software\AirWatch\Extensions\VDI\Horizon\Agent'
 $LogPath = "$env:SystemRoot\Temp\UEM_HorizonAgentStateCollection.log"
@@ -224,8 +290,7 @@ try {
     # ---- Phase 2: session inventory --------------------------------------------------------------
     $brokersSeen = New-Object System.Collections.Generic.List[string]
     try {
-        $ev = @(Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational'; Id = 21, 23, 24, 25
-                                                 StartTime = (Get-Date).AddHours(-$SessionLookbackHours) } -MaxEvents $MaxEventsScanned -ErrorAction Stop)
+        $ev = @(Get-DexEvent -LogName 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational' -Id 21, 23, 24, 25 -StartTime (Get-Date).AddHours(-$SessionLookbackHours) -MaxEvents $MaxEventsScanned -ErrorStop)
         $decided = @{}
         foreach ($e in $ev) {   # newest first: the first event per session decides its state
             $x = [xml]$e.ToXml(); $u = $x.Event.UserData.EventXML
@@ -381,7 +446,7 @@ try {
 
     # ---- Phase 5: agent errors -----------------------------------------------------------------------
     try {
-        $errs = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Level = 1, 2; StartTime = (Get-Date).AddHours(-$EventLookbackHours) } -MaxEvents $MaxEventsScanned -ErrorAction Stop |
+        $errs = @(Get-DexEvent -LogName 'Application' -Level 1, 2 -StartTime (Get-Date).AddHours(-$EventLookbackHours) -MaxEvents $MaxEventsScanned -ErrorStop |
                   Where-Object { $_.ProviderName -match $AgentEventProviderPattern })
         $m.AgentErrorCount24h = $errs.Count
         $m.AgentEventProvider = (@($errs | Select-Object -ExpandProperty ProviderName -Unique) -join ';')

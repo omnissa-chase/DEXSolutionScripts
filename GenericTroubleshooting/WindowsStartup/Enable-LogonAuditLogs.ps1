@@ -23,7 +23,7 @@
 
 .NOTES
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-12
+    Last Modified: 2026-11-05 (log state read through .NET EventLogConfiguration; Get-WinEvent -ListLog fails under Hub's ARM64 PowerShell 7.2 engine)
     Requires     : Local administrator / SYSTEM context (wevtutil.exe sl requires elevation).
 
 .DISCLAIMER
@@ -32,6 +32,15 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
+#region --- Event log configuration reader -------------------------------------------------------
+# Get-WinEvent -ListLog fails under Hub's ARM64 PowerShell 7.2 engine; the .NET
+# EventLogConfiguration class carries the same IsEnabled flag on 5.1 and 7.
+function Get-DexEventLog {
+    param([Parameter(Mandatory = $true)][string]$LogName)
+    try { return New-Object System.Diagnostics.Eventing.Reader.EventLogConfiguration($LogName) } catch { return $null }
+}
+#endregion
+
 function Enable-LogonAuditLogs {
 param(
     [switch]$Force
@@ -64,7 +73,7 @@ Write-Output ''
 Write-Output '=== DEX Audit Log Configuration ==='
 
 foreach ($target in $targets) {
-    $log = Get-WinEvent -ListLog $target.LogName -ErrorAction SilentlyContinue
+    $log = Get-DexEventLog -LogName $target.LogName
 
     if (-not $log) {
         Write-Output "  [NOT FOUND] $($target.LogName)"
@@ -79,7 +88,7 @@ foreach ($target in $targets) {
         try {
             wevtutil.exe sl $target.LogName /e:true 2>&1 | Out-Null
             # Re-query to confirm
-            $verify = Get-WinEvent -ListLog $target.LogName -ErrorAction SilentlyContinue
+            $verify = Get-DexEventLog -LogName $target.LogName
             if ($verify.IsEnabled) {
                 Write-Output "  [ENABLED]   $($target.LogName)"
                 Write-Output "              Now enabled -- $($target.Description)"
