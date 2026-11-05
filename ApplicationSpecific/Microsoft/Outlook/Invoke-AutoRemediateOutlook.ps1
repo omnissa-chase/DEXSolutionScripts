@@ -59,11 +59,15 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateOutlook.ps1
-    Version      : 1.1.1
-    Architecture : Any (x86/x64)
+    Version      : 1.1.2
+    Architecture : Any (x86/x64/ARM64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-03 (1.1.1: step 3 event filter server-side; unfiltered ran 100+ s.)
+    Last Modified: 2026-11-05 (1.1.2: step 3 reads the Application log through the .NET
+                   EventLogReader; Get-WinEvent fails in every form under Hub's
+                   PowerShell 7.2 engine on ARM64, which left the step inert in
+                   production.)
+                   2026-11-03 (1.1.1: step 3 event filter server-side; unfiltered ran 100+ s.)
                    2026-11-02 (1.1.0: two-tier step 2 -- sync window, then rename after
                    OstTier2AfterDays with AllowOstRename; deferred Outlook close via a
                    per-user helper task; five new inputs; Ost* DEXRecords values persist;
@@ -373,9 +377,22 @@ $Steps = @(
         ResolveOnWarning = $false
         DetectionScript  = {
             # No MAPI from SYSTEM; Outlook error events (7 days) are the proxy.
+            # Read through the .NET EventLogReader: Get-WinEvent fails in every form under
+            # the PowerShell 7.2 engine Hub embeds on ARM64 (TEST-VALIDATION.md 13.2.z), and
+            # the server-side filter keeps this under a second on a busy Application log.
             $cutoff = (Get-Date).AddDays(-7)
             try {
-                $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = '*Outlook*'; Level = 1, 2, 3; StartTime = $cutoff } -ErrorAction SilentlyContinue)
+                $since  = $cutoff.ToUniversalTime().ToString('o')
+                $xpath  = "*[System[(Level=1 or Level=2 or Level=3) and TimeCreated[@SystemTime>='$since']]]"
+                $query  = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery('Application', [System.Diagnostics.Eventing.Reader.PathType]::LogName, $xpath)
+                $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($query)
+                $events = New-Object System.Collections.Generic.List[int]
+                try {
+                    while ($null -ne ($record = $reader.ReadEvent())) {
+                        if ($record.ProviderName -like '*Outlook*') { $events.Add($record.Id) }
+                        $record.Dispose()
+                    }
+                } finally { $reader.Dispose() }
                 if ($events.Count -eq 0) {
                     return @{ Status = 'Passed'; Message = 'No Outlook error events in Application log (last 7 days). Soft signal only -- mailbox sync health requires server-side confirmation.' }
                 }

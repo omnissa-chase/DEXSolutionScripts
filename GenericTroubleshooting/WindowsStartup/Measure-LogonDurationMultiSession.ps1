@@ -183,11 +183,15 @@
 
 .NOTES
     Script Name  : Measure-LogonDurationMultiSession.ps1
-    Version      : 2.1.0
-    Architecture : Any (x86/x64)
+    Version      : 2.1.1
+    Architecture : Any (x86/x64/ARM64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-03
+    Last Modified: 2026-11-05 (2.1.1: event queries through the .NET EventLogReader
+                   instead of Get-WinEvent, which fails in every form under the
+                   PowerShell 7.2 engine Hub embeds on ARM64; provider fallback reads
+                   System and Application)
+                   2026-11-03 (2.1.0)
     Timeout      : 300 seconds
 
     PowerShell 5.1 compatible.
@@ -308,7 +312,7 @@ $script:TaskName     = 'DEXTools_MeasureLogonDurationMultiSession'
 $script:RegRoot      = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration'
 $script:SessionsRoot = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration\Sessions'
 $script:AggRoot      = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration\Aggregate'
-$script:Version      = '2.1.0'
+$script:Version      = '2.1.1'   # 2026-11-05: event queries via .NET EventLogReader (no Get-WinEvent)
 $script:ValidModes   = @('RunNow', 'DeployScheduledTask', 'ConfigureLogging')
 $script:ValidScopes  = @('LastLogon', 'AllActive', 'AllSince', 'AllUsers')
 
@@ -561,12 +565,79 @@ $script:SourceTable = [ordered]@{
 # phase has no events, so "Unknown" can be told apart from "this log is switched off".
 $script:SourceState = @{}
 
+#region --- Event log access (.NET EventLogReader; no Get-WinEvent) ---
+# Get-WinEvent throws "Cannot marshal 'parameter #8': Non-blittable generic types cannot be
+# marshaled" in every form under the PowerShell 7.2 engine Hub embeds on ARM64 (probe run
+# 07e3c1, 2026-11-05; TEST-VALIDATION.md 13.2.v and 13.2.z). Every query goes through
+# System.Diagnostics.Eventing.Reader with an explicit log name and an XPath filter.
+# Records come back newest first, like Get-WinEvent, and carry the members this file uses
+# (TimeCreated, Id, ProviderName, Properties, UserId, ActivityId, ToXml). Errors yield no
+# output rather than throwing.
+function Get-DexEvent {
+    param(
+        [Parameter(Mandatory = $true)][string]$LogName,
+        [int[]]$Id,
+        [string]$ProviderName,
+        [datetime]$StartTime,
+        [datetime]$EndTime,
+        [string]$UserSid,
+        [string]$XPath,
+        [int]$MaxEvents = 0,
+        [switch]$Oldest
+    )
+    $sys = New-Object System.Collections.Generic.List[string]
+    if ($Id)           { $sys.Add('(' + (@($Id | ForEach-Object { "EventID=$_" }) -join ' or ') + ')') }
+    if ($ProviderName) { $sys.Add("Provider[@Name='$ProviderName']") }
+    if ($UserSid)      { $sys.Add("Security[@UserID='$UserSid']") }
+    # Whole-second bounds, as Get-WinEvent's StartTime/EndTime are.
+    $when = New-Object System.Collections.Generic.List[string]
+    if ($PSBoundParameters.ContainsKey('StartTime')) {
+        $t = $StartTime.ToUniversalTime(); $t = $t.AddTicks(-($t.Ticks % [TimeSpan]::TicksPerSecond))
+        $when.Add("@SystemTime>='" + $t.ToString('o') + "'")
+    }
+    if ($PSBoundParameters.ContainsKey('EndTime')) {
+        $t = $EndTime.ToUniversalTime(); if ($t.Ticks % [TimeSpan]::TicksPerSecond) { $t = $t.AddTicks([TimeSpan]::TicksPerSecond - ($t.Ticks % [TimeSpan]::TicksPerSecond)) }
+        $when.Add("@SystemTime<='" + $t.ToString('o') + "'")
+    }
+    if ($when.Count -gt 0) { $sys.Add('TimeCreated[' + ($when -join ' and ') + ']') }
+    $query = if ($XPath) { $XPath } elseif ($sys.Count -gt 0) { '*[System[' + ($sys -join ' and ') + ']]' } else { '*' }
+
+    $out    = New-Object System.Collections.Generic.List[object]
+    $reader = $null
+    try {
+        $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery($LogName, [System.Diagnostics.Eventing.Reader.PathType]::LogName, $query)
+        $q.ReverseDirection = -not $Oldest
+        $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($q)
+        while (($MaxEvents -le 0 -or $out.Count -lt $MaxEvents) -and ($null -ne ($record = $reader.ReadEvent()))) { $out.Add($record) }
+    } catch { }
+    finally { if ($reader) { $reader.Dispose() } }
+    return $out.ToArray()
+}
+
+# Log configuration (IsEnabled and friends) without Get-WinEvent -ListLog; $null when
+# the channel does not exist on this device.
+function Get-DexEventLog {
+    param([Parameter(Mandatory = $true)][string]$LogName)
+    try { return New-Object System.Diagnostics.Eventing.Reader.EventLogConfiguration($LogName) } catch { return $null }
+}
+
+# Whether a provider is registered, by name only (no metadata object is created).
+function Test-DexEventProvider {
+    param([Parameter(Mandatory = $true)][string]$ProviderName)
+    try {
+        $names = [System.Diagnostics.Eventing.Reader.EventLogSession]::GlobalSession.GetProviderNames()
+        foreach ($n in $names) { if ($n -eq $ProviderName) { return $true } }
+    } catch { }
+    return $false
+}
+#endregion
+
 function Resolve-EventSources {
     foreach ($key in $script:SourceTable.Keys) {
         $spec   = $script:SourceTable[$key]
         $state  = @{ Identity = $null; Status = 'ProviderMissing'; Resolved = 'None' }
 
-        $log = Get-WinEvent -ListLog $spec.LogName -ErrorAction SilentlyContinue
+        $log = Get-DexEventLog -LogName $spec.LogName
         if ($log) {
             if ($log.IsEnabled) {
                 $state.Identity = @{ LogName = $spec.LogName }
@@ -585,8 +656,7 @@ function Resolve-EventSources {
         # workgroup machine the GroupPolicy channel does not exist but the provider
         # does, writing to System instead.
         if ($state.Status -ne 'OK') {
-            $provider = Get-WinEvent -ListProvider $spec.ProviderName -ErrorAction SilentlyContinue
-            if ($provider) {
+            if (Test-DexEventProvider -ProviderName $spec.ProviderName) {
                 $state.Identity = @{ ProviderName = $spec.ProviderName }
                 # A disabled dedicated channel still means the data is not being
                 # written, even though the provider is registered. Keep LogDisabled.
@@ -643,15 +713,22 @@ function Get-EventSet {
         return @()
     }
 
-    $spec   = $script:SourceTable[$SourceKey]
-    $filter = @{}
-    foreach ($k in $state.Identity.Keys) { $filter[$k] = $state.Identity[$k] }
-    if ($spec.Ids.Count -gt 0) { $filter['Id'] = $spec.Ids }
-    $filter['StartTime'] = $StartTime
-    $filter['EndTime']   = $EndTime
+    $spec = $script:SourceTable[$SourceKey]
+    $args = @{ StartTime = $StartTime; EndTime = $EndTime }
+    if ($spec.Ids.Count -gt 0) { $args['Id'] = [int[]]$spec.Ids }
 
-    $events = @(Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue |
-                    Sort-Object TimeCreated)
+    if ($state.Identity.ContainsKey('LogName')) {
+        $raw = @(Get-DexEvent -LogName $state.Identity.LogName @args)
+    }
+    else {
+        # Provider fallback: the dedicated channel is absent, so the provider writes to
+        # the classic logs. Read both and merge.
+        $raw = @()
+        foreach ($classic in 'System', 'Application') {
+            $raw += @(Get-DexEvent -LogName $classic -ProviderName $state.Identity.ProviderName @args)
+        }
+    }
+    $events = @($raw | Sort-Object TimeCreated)
 
     if ($spec.NeedsData) {
         foreach ($evt in $events) {
@@ -2173,7 +2250,7 @@ function Enable-DEXAuditLogs {
     Write-Output '=== DEX Audit Log Configuration ==='
 
     foreach ($target in $targets) {
-        $log = Get-WinEvent -ListLog $target.LogName -ErrorAction SilentlyContinue
+        $log = Get-DexEventLog -LogName $target.LogName
 
         if (-not $log) {
             Write-Output "  [NOT FOUND] $($target.LogName)"
@@ -2188,8 +2265,8 @@ function Enable-DEXAuditLogs {
         else {
             try {
                 wevtutil.exe sl $target.LogName /e:true 2>&1 | Out-Null
-                $verify = Get-WinEvent -ListLog $target.LogName -ErrorAction SilentlyContinue
-                if ($verify.IsEnabled) {
+                $verify = Get-DexEventLog -LogName $target.LogName
+                if ($verify -and $verify.IsEnabled) {
                     Write-Output "  [ENABLED]   $($target.LogName)"
                     Write-Output "              Now enabled $($target.Description)"
                 }

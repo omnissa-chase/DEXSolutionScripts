@@ -89,7 +89,28 @@ Endpoints may have no internet access, no PSGallery trust, and no pre-staged mod
 | Archives | 7-Zip, external DLLs | `Expand-Archive` / `Compress-Archive`, `System.IO.Compression` |
 | HTTP | External REST modules | `Invoke-RestMethod` / `Invoke-WebRequest` (never in a recurring sensor; only inside a one-time/run-once sensor, self-deadlined per [§10](#10-sensor-authoring-rules)) |
 | AD queries | `ActiveDirectory` module (RSAT, not guaranteed) | `System.DirectoryServices` / ADSI |
+| Event logs | `Get-WinEvent` (any form) | `System.Diagnostics.Eventing.Reader.EventLogQuery` + `EventLogReader` with an explicit log name and an XPath filter; `EventLogConfiguration` for exists/IsEnabled. See the note below |
 | Folder sizing | External utilities | See [§18](#18-measuring-disk-space) |
+
+### Hub's Engine Is Not Yours
+
+Workspace ONE Intelligent Hub runs scripts and sensors through its own host (`AW.ProtectionAgent.PowershellExecutor64`, script fed through stdin, as SYSTEM). On x64 devices that is Windows PowerShell 5.1. On ARM64 devices Hub embeds its own PowerShell 7.2 engine instead, so the same script runs under two engines across a mixed fleet. Windows PowerShell 5.1 stays the target: every script and sensor must run unchanged on 5.1, and nothing may be added that only 7 provides. The ARM64 engine adds constraints on top, and the fix for each must itself be 5.1-compatible:
+
+- **`Get-WinEvent` fails in every form under Hub's ARM64 engine** with "Cannot marshal 'parameter #8': Non-blittable generic types cannot be marshaled" (`-FilterHashtable`, `-FilterXPath`, `-LogName`, `-ProviderName`, `-ListLog`, all of them; proven 2026-11-05 by a ten-form probe run as a sensor on both lab VMs). The .NET reader in `System.Diagnostics.Eventing.Reader` ships with .NET Framework, so it works on 5.1, on 7, and under both Hub engines. Use this shape and nothing else:
+
+  ```powershell
+  $xpath  = "*[System[(EventID=21 or EventID=25) and TimeCreated[@SystemTime>='2026-11-05T13:00:00.0000000Z']]]"
+  $query  = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery('Microsoft-Windows-TerminalServices-LocalSessionManager/Operational', [System.Diagnostics.Eventing.Reader.PathType]::LogName, $xpath)
+  $query.ReverseDirection = $true      # newest first, like Get-WinEvent
+  $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($query)
+  try { while ($null -ne ($e = $reader.ReadEvent())) { <# $e.TimeCreated, $e.Id, $e.Properties[n].Value, $e.UserId #> } }
+  finally { $reader.Dispose() }
+  ```
+
+  Name the log, not the provider (the provider-only forms made the cmdlet enumerate provider metadata, which is the slow path on every engine). Time bounds are whole seconds in the cmdlet; floor the start and ceil the end when you build XPath, or events a few hundred ms before the anchoring event drop out. `Measure-LogonDuration.ps1` carries a reusable `Get-DexEvent` / `Get-DexEventLog` pair to paste.
+- `$PSCommandPath` and `$PSScriptRoot` are empty (stdin); use `$MyInvocation.MyCommand.ScriptBlock.ToString()` captured at script scope.
+- A child process that inherits the host's stdout keeps Hub waiting until the step times out; use `Start-Process`.
+- A 5.1 child spawned from a Hub script inherits a 7-shaped `PSModulePath` and can lose module cmdlets (`Get-FileHash` did); prefer .NET calls in anything a sensor launches.
 
 ---
 
@@ -1398,6 +1419,7 @@ The agent MUST NOT generate these patterns.
 | Smart quotes or Unicode from copy-paste | Silent parse failures | Retype quotes; validate encoding |
 | Staging to `ProgramData\AirWatch\Extensions` without documenting the AV exception | Payload quarantined; task "succeeds" doing nothing | State the exclusion requirement in the deliverable |
 | PowerShell 7 syntax in a PS5 script | Incompatible syntax or module failures | Target PS5 unless explicitly confirmed |
+| `Get-WinEvent` in a script or sensor | Throws "Cannot marshal 'parameter #8'" under Hub's embedded 7.2 engine; the step or sensor fails on every device | .NET `EventLogReader` with an explicit log name and XPath ([§2](#2-runtime-target)) |
 
 ---
 
@@ -1407,6 +1429,7 @@ The agent MUST NOT generate these patterns.
 
 - [ ] Targets Windows PowerShell 5.1 x64
 - [ ] No third-party modules or packages
+- [ ] No `Get-WinEvent`; event logs read through the .NET `EventLogReader` ([§2](#2-runtime-target))
 - [ ] Runs as SYSTEM (or specified context)
 - [ ] Completes within 30 s (60 s absolute ceiling) or dispatches asynchronously
 - [ ] `[CmdletBinding(SupportsShouldProcess=$true)]` with the `$env:WhatIf` bridge, defaulting to `$false`

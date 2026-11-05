@@ -133,13 +133,73 @@ $script:ToolsDir   = 'C:\ProgramData\AirWatch\Extensions\DEXTools'
 $script:ScriptName = 'Measure-LogonDuration.ps1'
 $script:TaskName   = 'DEXTools_MeasureLogonDuration'
 $script:RegPath    = 'HKLM:\Software\AirWatch\Extensions\DEXRecords\LogonDuration'
-$script:Version    = '1.1.2'
+$script:Version    = '1.1.3'   # 2026-11-05: event queries via .NET EventLogReader (no Get-WinEvent)
 $script:ValidModes = @('RunNow', 'DeployScheduledTask', 'ConfigureLogging')
 
 # Exit code the run will finish with. Script scope so the trailing entry-point block can
 # read it after the function returns, which is how -NoExit reports what it suppressed.
 $script:ExitCode     = 0
 $script:SuppressExit = [bool]$NoExit
+#endregion
+
+#region --- Event log access (.NET EventLogReader; no Get-WinEvent) ---
+# Get-WinEvent throws "Cannot marshal 'parameter #8': Non-blittable generic types cannot be
+# marshaled" in every form under the PowerShell 7.2 engine Hub embeds on ARM64 (probe run
+# 07e3c1, 2026-11-05; TEST-VALIDATION.md 13.2.v and 13.2.z), and the forms that take
+# -ProviderName without a log name enumerate provider metadata on every engine. Every
+# query goes through System.Diagnostics.Eventing.Reader with an explicit log name and an
+# XPath filter instead. Records come back newest first, like Get-WinEvent, and carry the
+# members this file uses (TimeCreated, Id, ProviderName, Properties, UserId, ActivityId).
+# Errors (missing channel, access denied) yield no output rather than throwing.
+function Get-DexEvent {
+    param(
+        [Parameter(Mandatory = $true)][string]$LogName,
+        [int[]]$Id,
+        [string]$ProviderName,
+        [datetime]$StartTime,
+        [datetime]$EndTime,
+        [string]$UserSid,
+        [string]$XPath,
+        [int]$MaxEvents = 0,
+        [switch]$Oldest
+    )
+    $sys = New-Object System.Collections.Generic.List[string]
+    if ($Id)           { $sys.Add('(' + (@($Id | ForEach-Object { "EventID=$_" }) -join ' or ') + ')') }
+    if ($ProviderName) { $sys.Add("Provider[@Name='$ProviderName']") }
+    if ($UserSid)      { $sys.Add("Security[@UserID='$UserSid']") }
+    # Whole-second bounds, as Get-WinEvent's StartTime/EndTime are: the profile and
+    # Winlogon events of a logon land a few hundred ms before the session manager's
+    # EID 21 that anchors the window, and an exact bound would drop them.
+    $when = New-Object System.Collections.Generic.List[string]
+    if ($PSBoundParameters.ContainsKey('StartTime')) {
+        $t = $StartTime.ToUniversalTime(); $t = $t.AddTicks(-($t.Ticks % [TimeSpan]::TicksPerSecond))
+        $when.Add("@SystemTime>='" + $t.ToString('o') + "'")
+    }
+    if ($PSBoundParameters.ContainsKey('EndTime')) {
+        $t = $EndTime.ToUniversalTime(); if ($t.Ticks % [TimeSpan]::TicksPerSecond) { $t = $t.AddTicks([TimeSpan]::TicksPerSecond - ($t.Ticks % [TimeSpan]::TicksPerSecond)) }
+        $when.Add("@SystemTime<='" + $t.ToString('o') + "'")
+    }
+    if ($when.Count -gt 0) { $sys.Add('TimeCreated[' + ($when -join ' and ') + ']') }
+    $query = if ($XPath) { $XPath } elseif ($sys.Count -gt 0) { '*[System[' + ($sys -join ' and ') + ']]' } else { '*' }
+
+    $out    = New-Object System.Collections.Generic.List[object]
+    $reader = $null
+    try {
+        $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery($LogName, [System.Diagnostics.Eventing.Reader.PathType]::LogName, $query)
+        $q.ReverseDirection = -not $Oldest
+        $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($q)
+        while (($MaxEvents -le 0 -or $out.Count -lt $MaxEvents) -and ($null -ne ($record = $reader.ReadEvent()))) { $out.Add($record) }
+    } catch { }
+    finally { if ($reader) { $reader.Dispose() } }
+    return $out.ToArray()
+}
+
+# Log configuration (IsEnabled and friends) without Get-WinEvent -ListLog; $null when
+# the channel does not exist on this device.
+function Get-DexEventLog {
+    param([Parameter(Mandatory = $true)][string]$LogName)
+    try { return New-Object System.Diagnostics.Eventing.Reader.EventLogConfiguration($LogName) } catch { return $null }
+}
 #endregion
 
 #region --- Configuration normalisation ---
@@ -268,10 +328,8 @@ try {
 #region --- Logon timestamp and Session ID (TerminalServices-LocalSessionManager EID 21) ---
 # EID 21  = user logon;  Properties[0] = DOMAIN\user,  Properties[1] = SessionID
 # EID 25  = session reconnect — we check both so a reconnect-triggered run still captures data
-$tsEvent = Get-WinEvent -FilterHashtable @{
-    ProviderName = 'Microsoft-Windows-TerminalServices-LocalSessionManager'
-    Id           = @(21, 25)
-} -MaxEvents 100 -ErrorAction SilentlyContinue |
+$tsEvent = Get-DexEvent -LogName 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational' `
+    -Id 21, 25 -MaxEvents 100 |
     Where-Object { $_.Properties[0].Value -like "*\$username" } |
     Sort-Object TimeCreated -Descending |
     Select-Object -First 1
@@ -288,16 +346,13 @@ if ($tsEvent) {
 # Winlogon EID 7001 fires when the Shell subscriber (Explorer) begins executing
 # the logon notification — the closest reliable proxy for "desktop appeared".
 # Properties[0] = subscriber name ('Shell'), filtered to avoid other subscribers.
+# Written to the System log.
 $shellReadyTime     = $null
 $totalLogonDurSec   = $null
 
 if ($logonTime) {
-    $shellEvent = Get-WinEvent -FilterHashtable @{
-        ProviderName = 'Microsoft-Windows-Winlogon'
-        Id           = 7001
-        StartTime    = $logonTime
-        EndTime      = $logonTime.AddMinutes(10)
-    } -ErrorAction SilentlyContinue |
+    $shellEvent = Get-DexEvent -LogName 'System' -ProviderName 'Microsoft-Windows-Winlogon' -Id 7001 `
+        -StartTime $logonTime -EndTime $logonTime.AddMinutes(10) |
         Where-Object { $_.Properties[0].Value -eq 'Shell' } |
         Sort-Object TimeCreated |
         Select-Object -First 1
@@ -316,15 +371,14 @@ $gpDurationSec  = $null
 $gpStartTime    = $null
 $gpStartEvent   = $null
 
+$gpLog   = 'Microsoft-Windows-GroupPolicy/Operational'
 $gpXPath = "*[EventData[Data[@Name='PrincipalSamName'] and (Data='$loggedOnUser')]] and *[System[(EventID='4001')]]"
-$gpStartEvent = Get-WinEvent -ProviderName 'Microsoft-Windows-GroupPolicy' `
-    -FilterXPath $gpXPath -MaxEvents 1 -ErrorAction SilentlyContinue
+$gpStartEvent = Get-DexEvent -LogName $gpLog -XPath $gpXPath -MaxEvents 1 | Select-Object -First 1
 
 if ($gpStartEvent) {
     $gpStartTime    = $gpStartEvent.TimeCreated
     $gpEndXPath     = "*[EventData[Data[@Name='PrincipalSamName'] and (Data='$loggedOnUser')]] and *[System[(EventID='8001')]]"
-    $gpEndCandidates = Get-WinEvent -ProviderName 'Microsoft-Windows-GroupPolicy' `
-        -FilterXPath $gpEndXPath -MaxEvents 20 -ErrorAction SilentlyContinue
+    $gpEndCandidates = @(Get-DexEvent -LogName $gpLog -XPath $gpEndXPath -MaxEvents 20)
 
     # Group Policy stamps one ActivityId per processing cycle. Taking the newest 8001 to
     # pair with the newest 4001 can straddle two different cycles and produce a duration
@@ -356,10 +410,8 @@ if ($gpStartEvent) {
     $gpScriptEndXPath   = "*[EventData[Data[@Name='PrincipalSamName'] and (Data='$loggedOnUser')] " +
         "and [Data[@Name='ScriptType'] and (Data='1')]] and *[System[(EventID='5018')]]"
 
-    $gpScriptStart = Get-WinEvent -ProviderName 'Microsoft-Windows-GroupPolicy' `
-        -FilterXPath $gpScriptStartXPath -MaxEvents 1 -ErrorAction SilentlyContinue
-    $gpScriptEndCandidates = Get-WinEvent -ProviderName 'Microsoft-Windows-GroupPolicy' `
-        -FilterXPath $gpScriptEndXPath   -MaxEvents 20 -ErrorAction SilentlyContinue
+    $gpScriptStart         = Get-DexEvent -LogName $gpLog -XPath $gpScriptStartXPath -MaxEvents 1 | Select-Object -First 1
+    $gpScriptEndCandidates = @(Get-DexEvent -LogName $gpLog -XPath $gpScriptEndXPath -MaxEvents 20)
 
     if ($gpScriptStart) {
         # Same cycle-straddling risk as the 4001/8001 pair above.
@@ -386,20 +438,12 @@ if ($gpStartEvent) {
 # Multiple 501/502 pairs are expected (one per redirected folder); we measure the total span.
 $folderRedirDurSec = $null
 
+$frLog = 'Microsoft-Windows-Folder Redirection/Operational'
 if ($logonTime) {
-    $frStart = Get-WinEvent -FilterHashtable @{
-        ProviderName = 'Microsoft-Windows-Folder Redirection'
-        Id           = 501
-        StartTime    = $logonTime
-        EndTime      = $logonTime.AddMinutes(10)
-    } -ErrorAction SilentlyContinue | Sort-Object TimeCreated | Select-Object -First 1
-
-    $frEnd   = Get-WinEvent -FilterHashtable @{
-        ProviderName = 'Microsoft-Windows-Folder Redirection'
-        Id           = 502
-        StartTime    = $logonTime
-        EndTime      = $logonTime.AddMinutes(10)
-    } -ErrorAction SilentlyContinue | Sort-Object TimeCreated -Descending | Select-Object -First 1
+    $frStart = Get-DexEvent -LogName $frLog -Id 501 -StartTime $logonTime -EndTime $logonTime.AddMinutes(10) |
+        Sort-Object TimeCreated | Select-Object -First 1
+    $frEnd   = Get-DexEvent -LogName $frLog -Id 502 -StartTime $logonTime -EndTime $logonTime.AddMinutes(10) |
+        Sort-Object TimeCreated -Descending | Select-Object -First 1
 
     if ($frStart -and $frEnd) {
         $folderRedirDurSec = [math]::Round(($frEnd.TimeCreated - $frStart.TimeCreated).TotalSeconds, 2)
@@ -415,34 +459,20 @@ if ($logonTime) {
 # Fallback: correlate via Session ID in Properties[0] if SID resolution failed.
 $profileDurationSec = $null
 
+$profLog = 'Microsoft-Windows-User Profile Service/Operational'
 if ($logonTime) {
     if ($userSID) {
-        $profStartXPath = "*[System[(EventID='1') and Security[@UserID='$userSID'] and " +
-            "TimeCreated[@SystemTime>='$($logonTime.ToUniversalTime().ToString('o'))']]]" 
-        $profEndXPath   = "*[System[(EventID='2') and Security[@UserID='$userSID'] and " +
-            "TimeCreated[@SystemTime>='$($logonTime.ToUniversalTime().ToString('o'))']]]" 
-
-        $profStartEvent = Get-WinEvent -ProviderName 'Microsoft-Windows-User Profiles Service' `
-            -FilterXPath $profStartXPath -MaxEvents 1 -ErrorAction SilentlyContinue
-        $profEndEvent   = Get-WinEvent -ProviderName 'Microsoft-Windows-User Profiles Service' `
-            -FilterXPath $profEndXPath   -MaxEvents 1 -ErrorAction SilentlyContinue
+        $profStartEvent = Get-DexEvent -LogName $profLog -Id 1 -UserSid $userSID -StartTime $logonTime -MaxEvents 1 | Select-Object -First 1
+        $profEndEvent   = Get-DexEvent -LogName $profLog -Id 2 -UserSid $userSID -StartTime $logonTime -MaxEvents 1 | Select-Object -First 1
     }
 
     # Fallback to Session ID if SID lookup yielded nothing
     if ((-not $profStartEvent -or -not $profEndEvent) -and $null -ne $sessionId) {
-        $profStartEvent = Get-WinEvent -FilterHashtable @{
-            ProviderName = 'Microsoft-Windows-User Profiles Service'
-            Id           = 1
-            StartTime    = $logonTime
-        } -MaxEvents 100 -ErrorAction SilentlyContinue |
+        $profStartEvent = Get-DexEvent -LogName $profLog -Id 1 -StartTime $logonTime -MaxEvents 100 |
             Where-Object { $_.Properties[0].Value -eq $sessionId } |
             Sort-Object TimeCreated | Select-Object -First 1
 
-        $profEndEvent   = Get-WinEvent -FilterHashtable @{
-            ProviderName = 'Microsoft-Windows-User Profiles Service'
-            Id           = 2
-            StartTime    = $logonTime
-        } -MaxEvents 100 -ErrorAction SilentlyContinue |
+        $profEndEvent   = Get-DexEvent -LogName $profLog -Id 2 -StartTime $logonTime -MaxEvents 100 |
             Where-Object { $_.Properties[0].Value -eq $sessionId } |
             Sort-Object TimeCreated | Select-Object -First 1
     }
@@ -460,19 +490,17 @@ if ($logonTime) {
 # Measures span from first to last FSLogix event in a 5-minute window after logon.
 $fslogixDurationSec = 'N/A'
 
-$fslogixLogExists = Get-WinEvent -ListLog 'Microsoft-FSLogix-Apps/Operational' -ErrorAction SilentlyContinue
+$fsLog = 'Microsoft-FSLogix-Apps/Operational'
+$fslogixLogExists = Get-DexEventLog -LogName $fsLog
 if ($fslogixLogExists -and $logonTime) {
-    $fsEvents = Get-WinEvent -FilterHashtable @{
-        LogName   = 'Microsoft-FSLogix-Apps/Operational'
-        StartTime = $logonTime.AddSeconds(-30)
-        EndTime   = $logonTime.AddMinutes(5)
-    } -ErrorAction SilentlyContinue | Sort-Object TimeCreated
+    $fsEvents = @(Get-DexEvent -LogName $fsLog -StartTime $logonTime.AddSeconds(-30) -EndTime $logonTime.AddMinutes(5) |
+        Sort-Object TimeCreated)
 
-    if ($fsEvents -and $fsEvents.Count -ge 2) {
+    if ($fsEvents.Count -ge 2) {
         $fslogixDurationSec = [math]::Round(
             ($fsEvents[-1].TimeCreated - $fsEvents[0].TimeCreated).TotalSeconds, 2
         )
-    } elseif ($fsEvents -and $fsEvents.Count -eq 1) {
+    } elseif ($fsEvents.Count -eq 1) {
         $fslogixDurationSec = '0'
     }
 }
@@ -483,23 +511,11 @@ if ($fslogixLogExists -and $logonTime) {
 # Filtered to the current user via the Security/UserID attribute (UserId property).
 $activeSetupDurSec = 'N/A'
 
+$shellLog = 'Microsoft-Windows-Shell-Core/Operational'
 if ($logonTime -and $userSID) {
-    $asStart = Get-WinEvent -FilterHashtable @{
-        ProviderName = 'Microsoft-Windows-Shell-Core'
-        Id           = 62170
-        StartTime    = $logonTime
-        EndTime      = $logonTime.AddMinutes(10)
-    } -ErrorAction SilentlyContinue |
-        Where-Object { $null -ne $_.UserId -and $_.UserId.Value -eq $userSID } |
+    $asStart = Get-DexEvent -LogName $shellLog -Id 62170 -UserSid $userSID -StartTime $logonTime -EndTime $logonTime.AddMinutes(10) |
         Sort-Object TimeCreated | Select-Object -First 1
-
-    $asEnd = Get-WinEvent -FilterHashtable @{
-        ProviderName = 'Microsoft-Windows-Shell-Core'
-        Id           = 62171
-        StartTime    = $logonTime
-        EndTime      = $logonTime.AddMinutes(10)
-    } -ErrorAction SilentlyContinue |
-        Where-Object { $null -ne $_.UserId -and $_.UserId.Value -eq $userSID } |
+    $asEnd   = Get-DexEvent -LogName $shellLog -Id 62171 -UserSid $userSID -StartTime $logonTime -EndTime $logonTime.AddMinutes(10) |
         Sort-Object TimeCreated -Descending | Select-Object -First 1
 
     if ($asStart -and $asEnd) {
@@ -515,17 +531,14 @@ if ($logonTime -and $userSID) {
 # Properties[0] = User (SID or username). Returns 'N/A' if AppReadiness is absent.
 $appxDurSec = 'N/A'
 
+# EID 209 is written to the AppReadiness Admin log, not Operational.
+$appxLog = 'Microsoft-Windows-AppReadiness/Admin'
 if ($logonTime -and $userSID) {
-    $appxEvents = Get-WinEvent -FilterHashtable @{
-        ProviderName = 'Microsoft-Windows-AppReadiness'
-        Id           = 209
-        StartTime    = $logonTime
-        EndTime      = $logonTime.AddMinutes(10)
-    } -ErrorAction SilentlyContinue |
+    $appxEvents = @(Get-DexEvent -LogName $appxLog -Id 209 -StartTime $logonTime -EndTime $logonTime.AddMinutes(10) |
         Where-Object { $_.Properties[0].Value -eq $userSID -or $_.Properties[0].Value -eq $username } |
-        Sort-Object TimeCreated
+        Sort-Object TimeCreated)
 
-    if ($appxEvents) {
+    if ($appxEvents.Count -gt 0) {
         $appxStart = $appxEvents | Where-Object { [int]$_.Properties[1].Value -eq 2 -and [int]$_.Properties[2].Value -eq 0 } | Select-Object -First 1
         $appxEnd   = $appxEvents | Where-Object { [int]$_.Properties[1].Value -eq 1 -and [int]$_.Properties[2].Value -eq 2 } | Select-Object -First 1
 
@@ -546,31 +559,21 @@ if ($logonTime -and $userSID) {
 $printerCount  = 'N/A'
 $printerDurSec = 'N/A'
 
-$printLogInfo = Get-WinEvent -ListLog 'Microsoft-Windows-PrintService/Operational' -ErrorAction SilentlyContinue
+$printLog     = 'Microsoft-Windows-PrintService/Operational'
+$printLogInfo = Get-DexEventLog -LogName $printLog
 if (-not $printLogInfo -or -not $printLogInfo.IsEnabled) {
     $printerCount  = 'LogDisabled'
     $printerDurSec = 'LogDisabled'
 } elseif ($logonTime) {
-    $printStart = Get-WinEvent -FilterHashtable @{
-        LogName   = 'Microsoft-Windows-PrintService/Operational'
-        Id        = 300
-        StartTime = $logonTime
-        EndTime   = $logonTime.AddMinutes(10)
-    } -ErrorAction SilentlyContinue | Sort-Object TimeCreated
+    $printStart = @(Get-DexEvent -LogName $printLog -Id 300 -StartTime $logonTime -EndTime $logonTime.AddMinutes(10) |
+        Sort-Object TimeCreated)
+    $printEnd   = @(Get-DexEvent -LogName $printLog -Id 306 -StartTime $logonTime -EndTime $logonTime.AddMinutes(10) |
+        Sort-Object TimeCreated -Descending)
 
-    $printEnd = Get-WinEvent -FilterHashtable @{
-        LogName   = 'Microsoft-Windows-PrintService/Operational'
-        Id        = 306
-        StartTime = $logonTime
-        EndTime   = $logonTime.AddMinutes(10)
-    } -ErrorAction SilentlyContinue | Sort-Object TimeCreated -Descending
-
-    if ($printStart) {
-        $printerCount = [string](@($printStart)).Count
-        if ($printEnd) {
-            $printerDurSec = [math]::Round(
-                ((@($printEnd) | Select-Object -First 1).TimeCreated - (@($printStart) | Select-Object -First 1).TimeCreated).TotalSeconds, 2
-            )
+    if ($printStart.Count -gt 0) {
+        $printerCount = [string]$printStart.Count
+        if ($printEnd.Count -gt 0) {
+            $printerDurSec = [math]::Round(($printEnd[0].TimeCreated - $printStart[0].TimeCreated).TotalSeconds, 2)
         }
     } else {
         $printerCount  = '0'
@@ -586,30 +589,20 @@ if (-not $printLogInfo -or -not $printLogInfo.IsEnabled) {
 $logonTaskCount    = 'N/A'
 $logonTaskTotalSec = 'N/A'
 
-$taskLogInfo = Get-WinEvent -ListLog 'Microsoft-Windows-TaskScheduler/Operational' -ErrorAction SilentlyContinue
+$taskLog     = 'Microsoft-Windows-TaskScheduler/Operational'
+$taskLogInfo = Get-DexEventLog -LogName $taskLog
 if (-not $taskLogInfo -or -not $taskLogInfo.IsEnabled) {
     $logonTaskCount    = 'LogDisabled'
     $logonTaskTotalSec = 'LogDisabled'
 } elseif ($logonTime) {
-    $taskStartEvents = Get-WinEvent -FilterHashtable @{
-        LogName   = 'Microsoft-Windows-TaskScheduler/Operational'
-        Id        = 100
-        StartTime = $logonTime
-        EndTime   = $logonTime.AddMinutes(5)
-    } -ErrorAction SilentlyContinue
+    $taskStartEvents = @(Get-DexEvent -LogName $taskLog -Id 100 -StartTime $logonTime -EndTime $logonTime.AddMinutes(5))
+    $taskEndEvents   = @(Get-DexEvent -LogName $taskLog -Id 102 -StartTime $logonTime -EndTime $logonTime.AddMinutes(5))
 
-    $taskEndEvents = Get-WinEvent -FilterHashtable @{
-        LogName   = 'Microsoft-Windows-TaskScheduler/Operational'
-        Id        = 102
-        StartTime = $logonTime
-        EndTime   = $logonTime.AddMinutes(5)
-    } -ErrorAction SilentlyContinue
-
-    if ($taskStartEvents) {
-        $logonTaskCount = [string](@($taskStartEvents)).Count
-        if ($taskEndEvents) {
-            $firstStart        = @($taskStartEvents) | Sort-Object TimeCreated | Select-Object -First 1
-            $lastEnd           = @($taskEndEvents)   | Sort-Object TimeCreated -Descending | Select-Object -First 1
+    if ($taskStartEvents.Count -gt 0) {
+        $logonTaskCount = [string]$taskStartEvents.Count
+        if ($taskEndEvents.Count -gt 0) {
+            $firstStart        = $taskStartEvents | Sort-Object TimeCreated | Select-Object -First 1
+            $lastEnd           = $taskEndEvents   | Sort-Object TimeCreated -Descending | Select-Object -First 1
             $logonTaskTotalSec = [string][math]::Round(($lastEnd.TimeCreated - $firstStart.TimeCreated).TotalSeconds, 2)
         }
     } else {
@@ -792,7 +785,7 @@ function Enable-DEXAuditLogs {
     Write-Output '=== DEX Audit Log Configuration ==='
 
     foreach ($target in $targets) {
-        $log = Get-WinEvent -ListLog $target.LogName -ErrorAction SilentlyContinue
+        $log = Get-DexEventLog -LogName $target.LogName
 
         if (-not $log) {
             Write-Output "  [NOT FOUND] $($target.LogName)"
@@ -807,8 +800,8 @@ function Enable-DEXAuditLogs {
             try {
                 wevtutil.exe sl $target.LogName /e:true 2>&1 | Out-Null
                 # Re-query to confirm
-                $verify = Get-WinEvent -ListLog $target.LogName -ErrorAction SilentlyContinue
-                if ($verify.IsEnabled) {
+                $verify = Get-DexEventLog -LogName $target.LogName
+                if ($verify -and $verify.IsEnabled) {
                     Write-Output "  [ENABLED]   $($target.LogName)"
                     Write-Output "              Now enabled $($target.Description)"
                 } else {

@@ -1,0 +1,16 @@
+# Line endings: the repository stores every text file with LF and that is what every
+# clone should check out. This overrides core.autocrlf on Windows clones, which would
+# otherwise convert to CRLF on checkout and warn ("LF will be replaced by CRLF") on
+# every LF file written by an editor or tool. PowerShell, Markdown, JSON and CSV are
+# all fine with LF on Windows.
+* text=auto eol=lf
+
+# Binary content: never touch line endings.
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.zip  binary
+*.dll  binary
+*.exe  binary
+*.pfx  binary
+*.cer  binary
