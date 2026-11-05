@@ -24,8 +24,10 @@
     |  6   | Stale NativeMessaging Hosts          | Warning (auto -- safe prune)  |
     +------+--------------------------------------+-------------------------------+
 
-    Step 3 note: Google Update (gupdate/gupdatem) service state is reported
-    but not restarted. In MDM-managed fleets Chrome versioning is controlled
+    Step 3 note: the Google updater service state is reported but not restarted.
+    Current Chrome ships GoogleUpdaterService<version> / GoogleUpdaterInternalService<version>
+    (Automatic, normally Stopped between runs); older installs have gupdate / gupdatem.
+    Either family counts as present; only a Disabled service or no service at all is flagged. In MDM-managed fleets Chrome versioning is controlled
     through deployment packages -- restarting the update service outside that
     pipeline may conflict with approved version targeting or update ring controls.
 
@@ -51,11 +53,16 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateChrome.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-11-05 (1.0.2: step 3 recognises the current GoogleUpdaterService* pair and
+                   no longer warns on every machine; step 4 reads UpdateDefault from Policies\Google\Update
+                   and the Chrome app GUID override, where the policy actually lives; step 6 reads the
+                   logged-on user's hive through HKEY_USERS\<SID> so per-user orphaned hosts are found
+                   under SYSTEM; step 1 reports a deferred clear when Chrome is running and counts files
+                   it could not delete instead of throwing)
     Timeout      : 60 seconds
 
 .DISCLAIMER
@@ -111,6 +118,31 @@ if (-not $_chromeExe) {
 $_chromeUserDataPath = if ($_userProfile) { Join-Path $_userProfile 'AppData\Local\Google\Chrome\User Data' } else { $null }
 $_chromeDefaultPath  = if ($_chromeUserDataPath) { Join-Path $_chromeUserDataPath 'Default' } else { $null }
 
+# The logged-on user's hive. Under SYSTEM, HKCU: is SYSTEM's own hive, so per-user
+# NativeMessaging hosts were never seen; HKEY_USERS\<SID> is the user's hive from any context.
+$_userHive = $null
+if ($_loggedOnUser) {
+    try {
+        $_sid = ([System.Security.Principal.NTAccount]$_loggedOnUser).Translate([System.Security.Principal.SecurityIdentifier]).Value
+        if (Test-Path "Registry::HKEY_USERS\$_sid") { $_userHive = "Registry::HKEY_USERS\$_sid" }
+    } catch { $_userHive = $null }
+}
+# Step 6 search paths: the user's hive (or HKCU when it is the same user, or no user resolved), then the machine hives.
+$_nmhSearchPaths = {
+    $paths = @()
+    if ($_userHive) { $paths += "$_userHive\Software\Google\Chrome\NativeMessagingHosts" }
+    $paths += 'HKCU:\Software\Google\Chrome\NativeMessagingHosts'
+    $paths += 'HKLM:\SOFTWARE\Google\Chrome\NativeMessagingHosts'
+    $paths += 'HKLM:\SOFTWARE\WOW6432Node\Google\Chrome\NativeMessagingHosts'
+    # HKCU and the resolved hive are the same key for an interactive run; keep one of each target.
+    $seen = @{}
+    foreach ($p in $paths) {
+        $key = $p
+        try { $item = Get-Item -Path $p -ErrorAction SilentlyContinue; if ($item) { $key = $item.Name } } catch { }
+        if (-not $seen.ContainsKey($key)) { $seen[$key] = $true; $p }
+    }
+}
+
 # -- Step Definitions ---------------------------------------------------------
 $Steps = @(
 
@@ -138,18 +170,22 @@ $Steps = @(
         }
         ResolutionScript = {
             if (Get-Process -Name chrome -ErrorAction SilentlyContinue) {
-                throw 'Chrome is running -- cache folders are locked. Stop Chrome before running this remediation.'
+                # Not an error: the cache is locked while Chrome runs. Say so and leave the
+                # Warning standing, so the next run (with Chrome closed) does the clear.
+                Write-Output '  [Info] Cache clear deferred: Chrome is running and holds its cache folders. It will be cleared on a run when Chrome is closed.'
+                return
             }
-            $cleared = 0
+            $cleared = 0; $failed = 0
             foreach ($folder in @('Cache', 'Code Cache')) {
                 $fullPath = Join-Path $_chromeDefaultPath $folder
                 if (Test-Path $fullPath) {
-                    Get-ChildItem $fullPath -Recurse -File -ErrorAction SilentlyContinue |
-                        Remove-Item -Force -ErrorAction SilentlyContinue
+                    foreach ($file in @(Get-ChildItem $fullPath -Recurse -File -ErrorAction SilentlyContinue)) {
+                        try { Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop } catch { $failed++ }
+                    }
                     $cleared++
                 }
             }
-            Write-Output "  [Info] Cleared $cleared Chrome cache folder(s). Chrome will rebuild cache on next launch."
+            Write-Output "  [Info] Cleared $cleared Chrome cache folder(s)$(if ($failed) { ", $failed file(s) could not be deleted (still in use)" }). Chrome will rebuild cache on next launch."
         }
     },
 
@@ -198,26 +234,25 @@ $Steps = @(
         Enabled          = $true
         ResolveOnWarning = $false
         DetectionScript  = {
-            $issues = @()
-            foreach ($svcName in @('gupdate', 'gupdatem')) {
-                $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
-                if (-not $svc) {
-                    $issues += "${svcName}: not found"
-                    continue
-                }
-                if ($svc.StartType -eq 'Disabled') {
-                    $issues += "${svcName}: Disabled (Chrome may not receive component/security updates)"
-                }
-                # gupdatem is on-demand (Manual) by design -- only flag if gupdate itself is stopped
-                if ($svcName -eq 'gupdate' -and $svc.Status -ne 'Running' -and $svc.StartType -ne 'Disabled') {
-                    $issues += "${svcName}: Status=$($svc.Status) (expected Running)"
-                }
+            # Two generations: legacy Google Update (gupdate, gupdatem) and the current Google
+            # Updater (GoogleUpdaterService<ver>, GoogleUpdaterInternalService<ver>). Both run on
+            # a schedule and sit Stopped in between, so Stopped is not a fault; Disabled is.
+            # Name lookups only: a full Get-Service enumeration aborts on protected services
+            # under PowerShell 7.
+            $updaters = @()
+            foreach ($n in 'gupdate', 'gupdatem') { $s = Get-Service -Name $n -ErrorAction SilentlyContinue; if ($s) { $updaters += $s } }
+            $names = @(Get-CimInstance -ClassName Win32_Service -Filter "Name LIKE 'GoogleUpdater%'" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+            foreach ($n in $names) { $s = Get-Service -Name $n -ErrorAction SilentlyContinue; if ($s) { $updaters += $s } }
+
+            if ($updaters.Count -eq 0) {
+                return @{ Status = 'Warning'; Message = 'No Google updater service found (neither GoogleUpdaterService* nor gupdate). Chrome component and security updates may not arrive unless the fleet updates Chrome through MDM packages.' }
             }
-            if ($issues.Count -gt 0) {
-                return @{ Status = 'Warning'; Message = "Google Update service issue(s): $($issues -join '; '). Chrome component and security updates may be affected. Review via MDM update policy before restarting." }
+            $disabled = @($updaters | Where-Object { $_.StartType -eq 'Disabled' } | ForEach-Object { $_.Name })
+            if ($disabled.Count -gt 0) {
+                return @{ Status = 'Warning'; Message = "Google updater service(s) Disabled: $($disabled -join ', '). Chrome component and security updates may be affected. Review via MDM update policy before changing." }
             }
-            $gupdateSvc = Get-Service -Name 'gupdate' -ErrorAction SilentlyContinue
-            return @{ Status = 'Passed'; Message = "Google Update service is running (StartType: $($gupdateSvc.StartType))." }
+            $summary = ($updaters | ForEach-Object { "$($_.Name) $($_.Status)/$($_.StartType)" }) -join '; '
+            return @{ Status = 'Passed'; Message = "Google updater service(s) present: $summary." }
         }
         ResolutionScript = $null   # Updates managed via MDM deployment -- restarting gupdate outside that pipeline may conflict with version targeting
     },
@@ -241,12 +276,26 @@ $Steps = @(
                            Select-Object -ExpandProperty Name
             $policyCount = $policyNames.Count
 
-            # Flag specific high-impact policies that commonly cause user issues
+            # Flag specific high-impact policies that commonly cause user issues.
+            # The update policy does not live under Policies\Google\Chrome: UpdateDefault sits under
+            # Policies\Google\Update, and the per-app override for Chrome is the value
+            # Update{8A69D345-D564-463C-AFF1-A69D9E530F96} on the same key (0 AutoUpdate, 1 Manual,
+            # 2 Disabled, 3 AutoUpdate-manual-allowed). The override wins when present.
             $cbcmToken    = $props.CloudManagementEnrollmentToken
-            $updatePolicy = $props.UpdateDefault   # 0=AutoUpdate, 1=ManualUpdate, 2=Disabled
+            $updatePolicy = $null
+            foreach ($updPath in 'HKLM:\SOFTWARE\Policies\Google\Update', 'HKLM:\SOFTWARE\WOW6432Node\Policies\Google\Update') {
+                if (-not (Test-Path $updPath)) { continue }
+                $upd = Get-ItemProperty $updPath -ErrorAction SilentlyContinue
+                if ($null -ne $upd.'Update{8A69D345-D564-463C-AFF1-A69D9E530F96}') { $updatePolicy = $upd.'Update{8A69D345-D564-463C-AFF1-A69D9E530F96}'; $updateSource = 'Chrome app override' }
+                elseif ($null -ne $upd.UpdateDefault)                                 { $updatePolicy = $upd.UpdateDefault; $updateSource = 'UpdateDefault' }
+                if ($null -ne $updatePolicy) { break }
+            }
             $issues = @()
             if ($updatePolicy -eq 2) {
-                $issues += 'UpdateDefault=2 (auto-updates disabled via policy)'
+                $issues += "$updateSource=2 (auto-updates disabled via Google Update policy)"
+            }
+            elseif ($updatePolicy -eq 1) {
+                $issues += "$updateSource=1 (manual updates only via Google Update policy)"
             }
             if ($issues) {
                 return @{ Status = 'Warning'; Message = "$policyCount Chrome policy value(s) applied. Potential issues: $($issues -join '; ')." }
@@ -294,11 +343,7 @@ $Steps = @(
             # entries are often left behind. Chrome logs errors for missing manifest paths
             # and, in some cases, slows its startup loading process cycling through them.
             $orphaned = @()
-            $searchPaths = @(
-                'HKCU:\Software\Google\Chrome\NativeMessagingHosts',
-                'HKLM:\SOFTWARE\Google\Chrome\NativeMessagingHosts',
-                'HKLM:\SOFTWARE\WOW6432Node\Google\Chrome\NativeMessagingHosts'
-            )
+            $searchPaths = @(& $_nmhSearchPaths)
             foreach ($regPath in $searchPaths) {
                 if (-not (Test-Path $regPath)) { continue }
                 Get-ChildItem $regPath -ErrorAction SilentlyContinue | ForEach-Object {
@@ -322,11 +367,7 @@ $Steps = @(
             # Re-enumerate orphaned hosts and remove their registry keys.
             # Chrome handles missing NativeMessaging hosts gracefully (it logs a warning
             # and continues). Removing stale entries cleans up Chrome's startup log noise.
-            $searchPaths = @(
-                'HKCU:\Software\Google\Chrome\NativeMessagingHosts',
-                'HKLM:\SOFTWARE\Google\Chrome\NativeMessagingHosts',
-                'HKLM:\SOFTWARE\WOW6432Node\Google\Chrome\NativeMessagingHosts'
-            )
+            $searchPaths = @(& $_nmhSearchPaths)
             $removedCount = 0
             foreach ($regPath in $searchPaths) {
                 if (-not (Test-Path $regPath)) { continue }
