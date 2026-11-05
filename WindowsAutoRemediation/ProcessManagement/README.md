@@ -20,13 +20,26 @@ object limit.
 Launcher (Hub thread)  ->  Watchdog (Task Scheduler)  ->  Sensor (reads result)
 ```
 
-**Launcher** — discovers processes matching `FileDescription`, self-extracts the watchdog
-to `%ProgramData%\AirWatch\Extensions\ProcessGraceful\Watch-ProcessClose.ps1`, writes
-`state.json` beside it, registers scheduled task `WS1_ProcessGracefulWatchdog` with no
-trigger, starts it on demand, and exits 0 in ~1–2 seconds.
+**Launcher** — mirrors the previous `result.json` into DEXRecords (see *Reading the
+result*), discovers processes matching `FileDescription` (wildcards escaped), self-extracts
+the watchdog to `%ProgramData%\AirWatch\Extensions\ProcessGraceful\Watch-ProcessClose.ps1`,
+writes `state.json` beside it, registers scheduled task `WS1_ProcessGracefulWatchdog` with a
+one-shot trigger 5 s out (`StartWhenAvailable`, so a slow registration still runs it), an
+end boundary of the timing budget plus 60 s and `DeleteExpiredTaskAfter` one minute, and
+exits 0 in ~1–2 seconds.
 
 **Watchdog** — sends the graceful close signal, polls each target once per second,
-optionally restarts, writes `result.json`, and self-unregisters.
+optionally restarts, writes `result.json`, and unregisters the task when its token allows.
+A Limited watchdog cannot delete a task SYSTEM registered; that is what the end boundary is
+for, and `watchdog.log` says which of the two happened.
+
+### Elevated targets
+
+The launcher runs as SYSTEM and sees every process. The watchdog runs with the user's
+Limited token and cannot read an elevated process's `Description`, send it `WM_CLOSE`
+(UIPI) or `Stop-Process` it. A PID the launcher matched that is still alive but invisible
+to the watchdog is therefore reported `Inaccessible`, left running, and blocks a restart.
+Closing an elevated process needs an elevated close; this script does not attempt one.
 
 ### Why a scheduled task, not `Start-Job`
 
@@ -120,10 +133,14 @@ reported by the app itself.
 | `ForceKilled` | Confirmed hung, or deadline reached with `ForceOnlyIfUnresponsive = $false` | No |
 | `UserActionRequired` | Still responding at the deadline after every attempt — almost certainly a save prompt | **Yes** |
 | `UnsavedWorkSuspected` | Title showed a modified marker and `SkipIfUnsavedWork` was on — never signalled | **Yes** |
-| `Error` | Force-kill was attempted and failed | Yes |
+| `Inaccessible` | Matched by the launcher but out of the Limited watchdog's reach (elevated process) — never signalled | **Yes** |
+| `Error` | Force-kill was attempted and refused or failed; the PID was checked and is still running | Yes |
 
-A restart is skipped when any process ends `UserActionRequired`, `UnsavedWorkSuspected`, or
-`Error` — those are still running, and relaunching would leave the user with two instances.
+A restart is skipped when any process ends `UserActionRequired`, `UnsavedWorkSuspected`,
+`Inaccessible` or `Error` — those are still running, and relaunching would leave the user
+with two instances. The relaunch path is taken from a windowed match first, so a helper
+binary sharing the description, or a packaged app's `WindowsApps` alias, is not what comes
+back.
 
 ---
 
@@ -154,9 +171,17 @@ it returns before the watchdog finishes. The authoritative record is:
 
 - `%ProgramData%\AirWatch\Extensions\ProcessGraceful\state\result.json` — full detail,
   including per-process `Outcome`, `Attempts`, and `UnsavedHint`
-- `HKLM:\Software\AirWatch\Extension\DEXRecords\ProcessGraceful` — best-effort summary
-  mirror, including `UnsavedWorkSuspectedCount`
-- the companion sensor `process_graceful_lastresult.ps1`
+- `HKLM:\Software\AirWatch\Extension\DEXRecords\ProcessGraceful` — `Status` is
+  `Dispatched` / `NoMatch` / `Error` from the launcher. The watchdog's own mirror of the
+  counts only succeeds when it ran as SYSTEM (no user session); as the user it cannot write
+  HKLM. The next launcher run, which is SYSTEM, copies the previous `result.json` in as
+  `LastResultStatus`, `LastResultCompletedAt`, `LastResultMatchedCount`,
+  `LastResultClosedGracefullyCount`, `LastResultForceKilledCount`,
+  `LastResultUserActionRequiredCount`, `LastResultUnsavedWorkSuspectedCount`,
+  `LastResultInaccessibleCount`, `LastResultErrorCount`, `LastResultRestarted` and
+  `LastResultTargetDescription`, so a sensor reading the key sees the last completed outcome
+  one run late rather than never.
+- No companion sensor ships yet; one would read `result.json` and the `LastResult*` values.
 
 Use `-Mode Inline` for lab testing when you need the exit code to reflect the real outcome.
 It blocks the caller and is not for production.
@@ -179,4 +204,8 @@ still reports success because dispatch succeeded.
 `FileDescription` is required — pass it as a parameter or set `$env:FileDescription`. It is
 matched case-insensitively as a substring against each process's `Description` field (the
 `FileDescription` from the binary's version info), e.g. `Microsoft Teams`, `Zoom`,
-`Google Chrome`.
+`Google Chrome`. Wildcard characters in it are escaped, so a product name containing `[`
+or `*` matches literally.
+
+Boolean variables (`Restart`, `ForceOnlyIfUnresponsive`, `SkipIfUnsavedWork`) accept
+`true`/`false`, `1`/`0`, `yes`/`no` and `on`/`off`; anything else falls back to the default.

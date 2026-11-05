@@ -75,7 +75,7 @@
   },
   "Restart-WinProcessGraceful.ps1": {
     "variables": { "FileDescription": "Google Chrome", "Restart": "true", "GracefulTimeoutSec": "15" },
-    "note": "High impact: run with -IncludeHighImpact. Dispatch-only script: Completed proves the watchdog task was registered and started. The outcome is in %ProgramData%\\AirWatch\\Extensions\\ProcessGraceful (watchdog.log, result.json) and the process_graceful_lastresult sensor. Chrome must be open on the device for anything to happen."
+    "note": "High impact: run with -IncludeHighImpact. Dispatch-only script: Completed proves the watchdog task was registered and started. The outcome is in %ProgramData%\\AirWatch\\Extensions\\ProcessGraceful (watchdog.log, result.json); from 2.2.0 the next launcher run mirrors it into the DEXRecords key as LastResult* values, so a second run shows the first run's outcome. Chrome must be open on the device for anything to happen."
   },
 
   "Invoke-AutoRemediateSCOMAgentPart1.ps1": {

@@ -18,7 +18,9 @@
     Restart-WinProcessGraceful.ps1 is a dispatch-only launcher: it finds every process
     whose FileDescription contains $env:FileDescription, stages a watchdog, registers
     'WS1_ProcessGracefulWatchdog' as an Interactive/Limited task for the logged-on
-    user, starts it and exits 0. The watchdog sends the graceful close signal, waits
+    user (2.2.0: a one-shot trigger 5 s out with an end boundary, so Task Scheduler
+    deletes the task when the Limited watchdog cannot) and exits 0. The watchdog
+    sends the graceful close signal, waits
     up to GracefulTimeoutSec, optionally relaunches one instance, and writes the
     authoritative outcome to
     %ProgramData%\AirWatch\Extensions\ProcessGraceful\state\result.json. The launcher

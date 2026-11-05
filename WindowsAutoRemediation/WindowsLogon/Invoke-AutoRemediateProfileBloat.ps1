@@ -73,15 +73,19 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateProfileBloat.ps1
-    Version      : 1.0.2
+    Version      : 1.0.3
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-02 (1.0.2: header and $SCRIPT_VERSION now agree; per-step
-                   results are also written to the DEXRecords registry key like the
-                   rest of the family, so a runbook can tell which step warned. The
-                   summary counters under Extensions\ProfileBloat\Remediation are
-                   unchanged.)
+    Last Modified: 2026-11-05 (1.0.3: step 8 sizes AppData\Roaming with an iterative
+                   .NET walk that stops as soon as the warn threshold is reached or a
+                   90 s step budget runs out, instead of piping every file through
+                   Get-ChildItem; a tree too large to size inside the budget is itself
+                   reported as a Warning. Reparse points are not followed. Profile
+                   folders whose names contain [ or ] are escaped before the wildcard
+                   expansion so they are no longer read as character classes.
+                   1.0.2: header and $SCRIPT_VERSION agree; per-step results also go
+                   to the DEXRecords key. Summary counters unchanged.)
     Timeout      : 300 seconds
 
     Environment variables:
@@ -133,7 +137,7 @@ param(
     )
 )
 
-$SCRIPT_VERSION = "1.0.2"
+$SCRIPT_VERSION = "1.0.3"
 $RegPath        = "HKLM:\Software\AirWatch\Extensions\ProfileBloat\Remediation"
 $DexRecordsPath = "HKLM:\Software\AirWatch\Extension\DEXRecords\WindowsLogon\ProfileBloat"
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateProfileBloat.log"
@@ -185,10 +189,42 @@ function Get-ProfilePaths {
     $out = @()
     foreach ($userProfile in $UserProfiles) {
         foreach ($rel in $RelativePaths) {
-            $out += (Join-Path $userProfile.LocalPath $rel)
+            # The profile folder is literal (a user named 'j[doe]' must not become a
+            # character class in Resolve-Path); only the relative part carries wildcards.
+            $out += (Join-Path ([WildcardPattern]::Escape($userProfile.LocalPath)) $rel)
         }
     }
     return $out
+}
+
+function Measure-DirectoryBudgeted {
+    # Size check for a report-only step: an iterative .NET walk with no age filter that
+    # stops as soon as StopAtBytes is reached (the answer is already "over") or the time
+    # budget runs out, so a huge roaming tree can no longer eat the 300 s script timeout.
+    # Reparse points (junctions, OneDrive placeholders) are not followed.
+    param([string]$Path, [long]$StopAtBytes, [int]$BudgetSec)
+    $bytes = [long]0; $count = 0; $partial = $false
+    $sw    = [System.Diagnostics.Stopwatch]::StartNew()
+    $stack = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+    $root  = New-Object System.IO.DirectoryInfo($Path)
+    if ($root.Exists) { $stack.Push($root) }
+    while ($stack.Count -gt 0) {
+        if ($bytes -ge $StopAtBytes -or $sw.Elapsed.TotalSeconds -ge $BudgetSec) { $partial = $true; break }
+        $dir = $stack.Pop()
+        try {
+            foreach ($f in $dir.EnumerateFiles()) { $bytes += $f.Length; $count++ }
+            foreach ($d in $dir.EnumerateDirectories()) {
+                if (($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) { $stack.Push($d) }
+            }
+        } catch { }   # access denied or removed mid-walk: skip that folder
+    }
+    return [PSCustomObject]@{
+        Bytes     = $bytes
+        MB        = [math]::Round($bytes / 1MB, 1)
+        FileCount = $count
+        Partial   = $partial
+        Seconds   = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+    }
 }
 
 function Expand-TargetPath {
@@ -423,16 +459,27 @@ $Steps = @(
         Enabled          = $true
         ResolveOnWarning = $false
         DetectionScript  = {
-            $oversized = @()
+            $oversized  = @()
+            $unmeasured = @()
+            $stepClock  = [System.Diagnostics.Stopwatch]::StartNew()
             foreach ($userProfile in $UserProfiles) {
                 $roaming = Join-Path $userProfile.LocalPath 'AppData\Roaming'
-                $m = Measure-CacheTarget -Paths @($roaming) -AgeDays 0
-                if ($m.MB -ge $RoamingWarnMB) {
-                    $oversized += "$(Split-Path $userProfile.LocalPath -Leaf) ($($m.MB) MB)"
+                $leaf    = Split-Path $userProfile.LocalPath -Leaf
+                # 90 s for the whole step, shared across profiles, at least 5 s each.
+                $left = [int][math]::Max(5, 90 - $stepClock.Elapsed.TotalSeconds)
+                $m    = Measure-DirectoryBudgeted -Path $roaming -StopAtBytes ($RoamingWarnMB * 1MB) -BudgetSec $left
+                Write-Log "Roaming AppData for ${leaf}: $($m.MB) MB in $($m.FileCount) file(s), $($m.Seconds) s$(if ($m.Partial) { ', stopped early' })"
+                if ($m.Bytes -ge ($RoamingWarnMB * 1MB)) {
+                    $oversized += "$leaf ($(if ($m.Partial) { 'at least ' })$($m.MB) MB)"
+                } elseif ($m.Partial) {
+                    $unmeasured += "$leaf ($($m.MB) MB counted before the $left s budget ran out)"
                 }
             }
-            if ($oversized) {
-                return @{ Status = 'Warning'; Message = "Roaming AppData over $RoamingWarnMB MB: $($oversized -join ', '). Investigate which application is writing there; not auto-remediated." }
+            if ($oversized -or $unmeasured) {
+                $parts = @()
+                if ($oversized)  { $parts += "Roaming AppData over $RoamingWarnMB MB: $($oversized -join ', ')" }
+                if ($unmeasured) { $parts += "Roaming AppData too large to size in time: $($unmeasured -join ', ')" }
+                return @{ Status = 'Warning'; Message = "$($parts -join '; '). Investigate which application is writing there; not auto-remediated." }
             }
             return @{ Status = 'Passed'; Message = "All roaming profiles under $RoamingWarnMB MB" }
         }
