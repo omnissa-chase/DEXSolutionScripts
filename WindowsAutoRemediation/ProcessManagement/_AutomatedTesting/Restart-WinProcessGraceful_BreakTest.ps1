@@ -524,7 +524,23 @@ function Wait-WatchdogResult {
         if (Test-Path -LiteralPath $WatchdogResultFile) {
             try {
                 $r = Get-Content -LiteralPath $WatchdogResultFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-                if ($r -and $r.CompletedAt) { return $r }
+                if ($r -and $r.CompletedAt) {
+                    # result.json is written before the watchdog's own cleanup (HKLM mirror,
+                    # state file, task). Give it up to 20 s to log 'Watchdog end.' so Restore
+                    # does not stop the task mid-cleanup and the cleanup line is observable
+                    # (run 1ac93c400483 lost it that way). Only this run's lines count.
+                    $since = [datetime]::Parse([string]$script:state.StartedAt)
+                    $endBy = (Get-Date).AddSeconds(20); $done = $false; $mine = @()
+                    while ((Get-Date) -lt $endBy) {
+                        $mine = @(Get-Content -LiteralPath $WatchdogLogFile -Tail 15 -ErrorAction SilentlyContinue |
+                            Where-Object { $_ -match '^(\S+)\s' -and ([datetime]$Matches[1]) -gt $since })
+                        if (@($mine | Where-Object { $_ -match 'Watchdog end\.' }).Count -gt 0) { $done = $true; break }
+                        Start-Sleep -Milliseconds 500
+                    }
+                    $cleanup = @($mine | Where-Object { $_ -match "Scheduled task '" } | ForEach-Object { $_ -replace '^\S+\s+', '' }) | Select-Object -Last 1
+                    Write-Host "           - watchdog self-cleanup: $(if ($done) { 'finished' } else { 'did not log its end within 20 s' })$(if ($cleanup) { '; ' + $cleanup } else { '; no task line logged' })" -ForegroundColor Gray
+                    return $r
+                }
             } catch { }
         }
         Start-Sleep -Seconds 1
