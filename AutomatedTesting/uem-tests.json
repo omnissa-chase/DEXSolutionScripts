@@ -219,8 +219,8 @@
     "note": "Empty by design when the VPN cache has no HealthReason (lab VMs)."
   },
   "scom_agent_health_reason.ps1": {
-    "allowEmpty": true,
-    "note": "Empty by design without a SCOM agent (lab VMs)."
+    "match": "^(NoAgentInstalled|CacheNotPopulated|CacheReadError|[A-Za-z]+)$",
+    "note": "Since 2026-11-05 the reader names the no-cache case (NoAgentInstalled on the lab VMs) instead of emitting an empty string, which Hub drops."
   },
   "scom_agent_version.ps1": {
     "allowEmpty": true,

@@ -6,7 +6,8 @@
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-21
+    Last Modified: 2026-11-05 (no-cache case now reports NoAgentInstalled, CacheNotPopulated
+                   or CacheReadError instead of an empty string, which Hub drops)
     Timeout      : < 2 seconds
     Requires     : Invoke-AutoRemediateSCOMAgent.ps1 (scheduled, writes the cache this reads)
 
@@ -49,7 +50,16 @@ try {
                 -Name "HealthReason" -ErrorAction SilentlyContinue
 
     if ($null -eq $prop -or [string]::IsNullOrWhiteSpace([string]$prop.HealthReason)) {
-        Write-Output ""
+        # No cache yet. Hub rejects an empty String sample ("value is empty"), so say why
+        # (2026-11-05): no agent on the device is the standalone twin's sentinel; an agent
+        # with no cache means the scheduled sweep has not run here.
+        $agentPresent = $false
+        foreach ($candidate in @('HKLM:\SOFTWARE\Microsoft\Microsoft Operations Manager\3.0',
+                                 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Microsoft Operations Manager\3.0')) {
+            if (Test-Path $candidate -ErrorAction SilentlyContinue) { $agentPresent = $true; break }
+        }
+        if (-not $agentPresent -and (Get-Service -Name 'HealthService' -ErrorAction SilentlyContinue)) { $agentPresent = $true }
+        if ($agentPresent) { Write-Output 'CacheNotPopulated' } else { Write-Output 'NoAgentInstalled' }
         return
     }
 
@@ -57,6 +67,6 @@ try {
     return
 }
 catch {
-    Write-Output ""
+    Write-Output 'CacheReadError'
     return
 }

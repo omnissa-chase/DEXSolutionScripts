@@ -24,7 +24,7 @@
       $DAYS_INACTIVE = 30               -> $DAYS_INACTIVE = 0
       $SIZE_THRESHOLD_MB = 500          -> $SIZE_THRESHOLD_MB = 32
       $ENROLLMENTUSER="Administrator"   -> $ENROLLMENTUSER="DEXTestEnroll"
-      ($_.SID -in $DomainUsersSID)      -> ($_.SID -in $DomainUsersSID) -and ($_.SID -in @('<fixture SIDs>'))
+      $_.SID -ne $EnrollmentSID         -> $_.SID -ne $EnrollmentSID -and ($_.SID -in @('<fixture SIDs>'))   (1.1.0 filter)
     The fourth is the safety net: with the thresholds at 0 and 32 the unmodified
     filter would make every idle local profile on the host a deletion candidate.
     The scratch copy is regenerated after each fixture user is created so the SID
@@ -97,10 +97,10 @@
 
 .NOTES
     Script Name  : Start-UserProfileCleanup_BreakTest.ps1
-    Version      : 1.0.0
+    Version      : 1.1.0 (2026-11-05: scratch anchor follows the script's 1.1.0 candidate filter,
+                   which considers every non-special, unloaded profile except the enrollment user's)
     Architecture : Any (x86/x64)
-    Context      : Administrator (elevated) on a WORKGROUP host (the script only considers
-                   accounts whose Win32_UserAccount.Domain equals the machine's domain)
+    Context      : Administrator (elevated); local DEXTest accounts are candidates on any host
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-11-02
     Reporting    : C:\Temp\FixReport\Start-UserProfileCleanup\
@@ -163,7 +163,7 @@ function Initialize-Fixture {
 
     $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue
     if ($cs -and $cs.PartOfDomain) {
-        Write-DexStep -Status 'Warning' -Name 'Fixture' -Message "Host is joined to '$($cs.Domain)'. The script only considers accounts whose Win32_UserAccount.Domain equals that domain, so local DEXTest accounts will not be selected and the ExpectFixed break will fail validation."
+        Write-DexStep -Status 'Info' -Name 'Fixture' -Message "Host is joined to '$($cs.Domain)'. Since script 1.1.0 local accounts are candidates too, so the local DEXTest fixtures are selected here as on a workgroup host."
     }
 
     # A fresh profile is a copy of C:\Users\Default; the under-threshold fixture relies on that
@@ -469,7 +469,8 @@ function Update-ScratchScript {
         @{ Old = '$DAYS_INACTIVE = 30';             New = "`$DAYS_INACTIVE = $ScratchDaysInactive" },
         @{ Old = '$SIZE_THRESHOLD_MB = 500';        New = "`$SIZE_THRESHOLD_MB = $ScratchSizeThresholdMB" },
         @{ Old = '$ENROLLMENTUSER="Administrator"'; New = "`$ENROLLMENTUSER=`"$FixtureEnrollUser`"" },
-        @{ Old = '($_.SID -in $DomainUsersSID)';    New = "(`$_.SID -in `$DomainUsersSID) -and (`$_.SID -in @($sidList))" }
+        # 1.1.0 (2026-11-05) replaced the Win32_UserAccount domain filter with a SID exclusion of the enrollment user.
+        @{ Old = '$_.SID -ne $EnrollmentSID';       New = "`$_.SID -ne `$EnrollmentSID -and (`$_.SID -in @($sidList))" }
     )
     foreach ($e in $edits) {
         if (-not $text.Contains($e.Old)) {

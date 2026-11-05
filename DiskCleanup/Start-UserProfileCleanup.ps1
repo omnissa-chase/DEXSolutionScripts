@@ -6,6 +6,15 @@
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
 
+# Script version for tracking. Bump here, not in the filename.
+$SCRIPT_VERSION = "1.1.0"
+# 1.1.0 (2026-11-05): a profile with no LastUseTime (kiosk and system-created accounts) no longer
+# ends the run, it falls back to the NTUSER.DAT write time or is skipped; every line also goes to
+# the log file, which 1.0 created but never wrote; candidates are every non-special, unloaded
+# profile except the enrollment user's, resolved by SID, instead of only accounts whose
+# Win32_UserAccount Domain matched (which enumerated the whole directory on a domain member
+# and never considered local accounts there); exit 1 when a deletion failed.
+
 # Configuration
 $ENROLLMENTUSER="Administrator"     # Name of the Windows User Used for enrollment.  Deleting the Windows user that enrolled can have adverse effects
 $DAYS_INACTIVE = 30         # Number of days since last use
@@ -17,19 +26,27 @@ If (!(Test-Path (Split-Path $LOG_PATH))) {
    New-Item -Path (Split-Path $LOG_PATH) -ItemType Directory -Force | Out-Null
 }
 
-# Get domain info
-$Domain = (Get-WmiObject -Class Win32_ComputerSystem).Domain
-If ($Domain -eq "WORKGROUP") {
-   $Domain = (Get-WmiObject -Class Win32_ComputerSystem).Name
+# Every line goes to the console (Hub captures it) and to the log file.
+Function Write-Line($Text) {
+   Write-Output $Text
+   Try { Add-Content -LiteralPath $LOG_PATH -Value $Text -ErrorAction Stop } Catch { }
 }
 
-# Get domain user SIDs
-$DomainUsersSID = (Get-WmiObject -Class Win32_UserAccount | Where-Object { $_.Domain -eq $Domain -and $_.Name -ne $ENROLLMENTUSER }).SID
-
-# Get all non-special user profiles
-$Profiles = Get-WmiObject -Class Win32_UserProfile | Where-Object {
-   !$_.Special -and ($_.SID -in $DomainUsersSID)
+# The enrollment user's SID (local account first, then the machine's domain). A name that does
+# not resolve excludes nothing, and says so.
+$EnrollmentSID = $null
+$ComputerName = (Get-WmiObject -Class Win32_ComputerSystem).Name
+foreach ($Candidate in @("$ComputerName\$ENROLLMENTUSER", $ENROLLMENTUSER)) {
+   Try {
+       $EnrollmentSID = ([System.Security.Principal.NTAccount]$Candidate).Translate([System.Security.Principal.SecurityIdentifier]).Value
+       break
+   } Catch { }
 }
+
+# Candidates: every non-special profile that is not loaded (in use) and not the enrollment user's.
+$Profiles = @(Get-WmiObject -Class Win32_UserProfile | Where-Object {
+   -not $_.Special -and -not $_.Loaded -and $_.SID -ne $EnrollmentSID
+})
 
 # Function to calculate folder size in MB using native .NET enumeration (no Get-ChildItem pipeline overhead)
 Function Get-FolderSizeMB($Path) {
@@ -62,30 +79,51 @@ Function Get-FolderSizeMB($Path) {
 }
 
 # Initialize log
-echo "`r`n[$(Get-Date)] Starting profile cleanup..."
+Write-Line "`r`n[$(Get-Date)] Starting profile cleanup (v$SCRIPT_VERSION): $($Profiles.Count) candidate profile(s), inactive > $DAYS_INACTIVE day(s), size > $SIZE_THRESHOLD_MB MB"
+If (-not $EnrollmentSID) { Write-Line "[$(Get-Date)] Warning: enrollment user '$ENROLLMENTUSER' did not resolve to a SID; no profile is excluded on that basis." }
+
+$DeleteErrors = 0
+$Deleted = 0
 
 # Loop through profiles and evaluate conditions
 foreach ($Profile in $Profiles) {
-   $LastUsed = $Profile.ConvertToDateTime($Profile.LastUseTime)
    $ProfilePath = $Profile.LocalPath
-   $ProfileSizeMB = Get-FolderSizeMB $ProfilePath
-   echo "[$(Get-Date)] Examining profile: $($Profile.LocalPath | Split-Path -Leaf)"
+   $Leaf = Split-Path -Path $ProfilePath -Leaf
+   Write-Line "[$(Get-Date)] Examining profile: $Leaf"
 
+   # LastUseTime is null for profiles Windows created without an interactive logon (kiosk
+   # accounts, some service accounts); ConvertToDateTime on null throws. Fall back to the
+   # registry hive's write time, and skip the profile when neither is available.
+   $LastUsed = $null
+   Try { If ($Profile.LastUseTime) { $LastUsed = $Profile.ConvertToDateTime($Profile.LastUseTime) } } Catch { $LastUsed = $null }
+   If (-not $LastUsed) {
+       $Hive = Join-Path $ProfilePath 'NTUSER.DAT'
+       If (Test-Path -LiteralPath $Hive) { Try { $LastUsed = (Get-Item -LiteralPath $Hive -Force -ErrorAction Stop).LastWriteTime } Catch { } }
+   }
+   If (-not $LastUsed) {
+       Write-Line "[$(Get-Date)] Profile, $Leaf, has no last-use time and no readable NTUSER.DAT; left alone."
+       Continue
+   }
+
+   $ProfileSizeMB = Get-FolderSizeMB $ProfilePath
    $Inactive = ($LastUsed -lt (Get-Date).AddDays(-$DAYS_INACTIVE))
    $TooLarge = ($ProfileSizeMB -gt $SIZE_THRESHOLD_MB)
 
-   echo "[$(Get-Date)] Profile, $($Profile.LocalPath | Split-Path -Leaf), has size $ProfileSizeMB MB, and has been inactive, $([math]::Round(((Get-Date).Subtract($LastUsed)).TotalDays,2)) day(s)"
+   Write-Line "[$(Get-Date)] Profile, $Leaf, has size $ProfileSizeMB MB, and has been inactive, $([math]::Round(((Get-Date).Subtract($LastUsed)).TotalDays,2)) day(s)"
 
    If ($Inactive -and $TooLarge) {
        Try {
-           echo "[$(Get-Date)] Deleted profile: $ProfilePath"
-           Remove-WmiObject -InputObject $Profile
+           Remove-WmiObject -InputObject $Profile -ErrorAction Stop
+           $Deleted++
+           Write-Line "[$(Get-Date)] Deleted profile: $ProfilePath"
        } Catch {
-           echo "[$(Get-Date)] Error deleting profile: $ProfilePath | $_"
+           $DeleteErrors++
+           Write-Line "[$(Get-Date)] Error deleting profile: $ProfilePath | $($_.Exception.Message)"
        }
    }
 }
 
-echo "[$(Get-Date)] Profile cleanup complete."
+Write-Line "[$(Get-Date)] Profile cleanup complete: $Deleted deleted, $DeleteErrors error(s)."
 
+If ($DeleteErrors -gt 0) { Exit 1 }
 Exit 0
