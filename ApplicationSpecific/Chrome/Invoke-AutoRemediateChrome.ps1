@@ -53,11 +53,15 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateChrome.ps1
-    Version      : 1.0.2
+    Version      : 1.0.3
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (1.0.2: step 3 recognises the current GoogleUpdaterService* pair and
+    Last Modified: 2026-11-05 (1.0.3: the per-user candidate in the install fallback was a
+                   bare if inside parentheses, which PowerShell ran as a command named "if";
+                   the error aborted the fallback foreach, so a Chrome without an HKLM App
+                   Paths entry was reported as not installed. Same defect as Zoom 1.0.1.
+                   1.0.2: step 3 recognises the current GoogleUpdaterService* pair and
                    no longer warns on every machine; step 4 reads UpdateDefault from Policies\Google\Update
                    and the Chrome app GUID override, where the policy actually lives; step 6 reads the
                    logged-on user's hive through HKEY_USERS\<SID> so per-user orphaned hosts are found
@@ -97,11 +101,11 @@ if ($_appPathKey -and $_appPathKey.'(default)' -and (Test-Path $_appPathKey.'(de
     $_chromeExe = $_appPathKey.'(default)'
 }
 if (-not $_chromeExe) {
-    foreach ($candidate in @(
-        "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
-        "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
-        (if ($_userProfile) { "$_userProfile\AppData\Local\Google\Chrome\Application\chrome.exe" } else { $null })
-    )) {
+    # Built as a list first: a bare if inside @( ) is parsed as a command named "if",
+    # and the error aborted the whole foreach, so 1.0.2 never reached these paths.
+    $_candidates = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe")
+    if ($_userProfile) { $_candidates += "$_userProfile\AppData\Local\Google\Chrome\Application\chrome.exe" }
+    foreach ($candidate in $_candidates) {
         if ($candidate -and (Test-Path $candidate)) { $_chromeExe = $candidate; break }
     }
 }

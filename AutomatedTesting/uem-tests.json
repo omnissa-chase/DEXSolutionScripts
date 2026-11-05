@@ -122,7 +122,7 @@
     "note": "New Teams (MSTeams 26276.x) is on CBRADLEYSWIN11 since 2026-11-02, so that device takes the product path; CHASEWIN11_2 has no Teams and proves the [Skipped] path. Device-side proof: DEXRecords TeamsErrors on CBRADLEYSWIN11."
   },
   "Invoke-AutoRemediateZoom.ps1": {
-    "note": "Zoom is not on the lab VM; Completed proves only the [Skipped] path."
+    "note": "Zoom 7.2.5 is installed machine-wide on CBRADLEYSWIN11 since 2026-11-05 (Program Files, no App Paths entry), so that device takes the product path from 1.0.2 on (1.0.1 misdetected it as not installed, 13.2.dd); CHASEWIN11_2 has no Zoom and proves the [Skipped] path. Device-side proof: DEXRecords ZoomErrors with ZoomVersion and TotalSteps 5."
   },
   "Invoke-AutoRemediateAppXBloat.ps1": {
     "note": "Deprovisions consumer inbox AppX packages on the test device. Expected and acceptable on a disposable VM; the first run changes the image."

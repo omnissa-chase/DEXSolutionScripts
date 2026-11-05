@@ -51,12 +51,19 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateZoom.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-11-05
     Timeout      : 60 seconds
+
+    1.0.2: install detection fixed. The candidate-path array held a bare if statement
+    inside parentheses, which PowerShell ran as a command named "if"; the resulting
+    CommandNotFoundException aborted the foreach, so a machine-wide install under
+    Program Files without an HKLM App Paths entry was reported as "not installed"
+    (seen on the lab VM with Zoom 7.2.5 in C:\Program Files\Zoom\bin). The
+    logged-on user's own App Paths entry (HKU\<sid>) is now checked as well.
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -95,12 +102,19 @@ $_appPathKey = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion
 if ($_appPathKey -and $_appPathKey.'(default)' -and (Test-Path $_appPathKey.'(default)')) {
     $_zoomExe = $_appPathKey.'(default)'
 }
+if (-not $_zoomExe -and $_userSid) {
+    # Per-user installs register their own App Paths entry in the user's hive.
+    $_userAppPath = Get-ItemProperty "Registry::HKEY_USERS\$_userSid\Software\Microsoft\Windows\CurrentVersion\App Paths\Zoom.exe" -ErrorAction SilentlyContinue
+    if ($_userAppPath -and $_userAppPath.'(default)' -and (Test-Path $_userAppPath.'(default)')) {
+        $_zoomExe = $_userAppPath.'(default)'
+    }
+}
 if (-not $_zoomExe) {
-    foreach ($candidate in @(
-        "$env:ProgramFiles\Zoom\bin\Zoom.exe",
-        "${env:ProgramFiles(x86)}\Zoom\bin\Zoom.exe",
-        (if ($_userProfile) { "$_userProfile\AppData\Roaming\Zoom\bin\Zoom.exe" } else { $null })
-    )) {
+    # Built as a list first: a bare if inside @( ) is parsed as a command named "if",
+    # and the error aborted the whole foreach, so 1.0.1 never looked in Program Files.
+    $_candidates = @("$env:ProgramFiles\Zoom\bin\Zoom.exe", "${env:ProgramFiles(x86)}\Zoom\bin\Zoom.exe")
+    if ($_userProfile) { $_candidates += "$_userProfile\AppData\Roaming\Zoom\bin\Zoom.exe" }
+    foreach ($candidate in $_candidates) {
         if ($candidate -and (Test-Path $candidate)) { $_zoomExe = $candidate; break }
     }
 }
