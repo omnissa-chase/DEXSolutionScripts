@@ -255,7 +255,7 @@ the precedent of `ApplicationSpecific/Microsoft/SCOM/OneTimeSensor/scom_agent_he
 | Cache | Reads **no** cache for its own component: it measures live, so it works on a device where the collector has never run and its numbers are current at the moment the analyst asks. It **does** read the caches of related components (below). Writes nothing. |
 | Sentinels | `-1` unknown, `-2` not applicable, `-4` timed out before this phase ran; `TimedOut` true means `HealthScore` is a floor, not a verdict |
 | Score | Same deduction table, thresholds and reason names as the collector, kept in sync by hand in the same edit, and checked by a parity test (6.2) |
-| Size | Target under 4 KB compressed; `Sessions` capped at 10 (worst RTT first), `Errors24h` at 5 event IDs |
+| Size | Under 1,024 bytes compressed, by construction: Hub drops any sensor value over 1 KB (UEM-API-TESTING-SPEC.md, found 2026-11-05), so the sensor serializes, measures, and drops rows from its arrays until the string fits (pattern: `WindowsAutoRemediation\Performance\OneTimeSensor\startup_apps_health.ps1`). `Sessions` and `Errors24h` therefore carry only the few worst rows, and the flat scalar keys must fit on their own. The earlier 4 KB target predates the cap being measured. |
 
 **JSON shape** (flat top level so a console can map keys to columns without walking a
 tree; arrays only where the data is genuinely per-row):
