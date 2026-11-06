@@ -139,7 +139,7 @@ $DexRecordsPath    = 'HKLM:\Software\AirWatch\Extension\DEXRecords\PowerPointErr
 $C2RConfigPath     = 'HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration'
 $SelfPath          = $MyInvocation.MyCommand.Path
 
-$modulePath = Join-Path $PSScriptRoot '..\..\..\..\AutomatedTesting\DEXTestFramework.psm1'
+$modulePath = Join-Path $PSScriptRoot '..\..\..\..\..\AutomatedTesting\DEXTestFramework.psm1'
 if (-not (Test-Path -LiteralPath $modulePath)) { throw "DEXTestFramework.psm1 not found at $modulePath" }
 Import-Module $modulePath -Force
 if (-not (Test-Path -LiteralPath $RemediationScript)) { throw "Script under test not found at $RemediationScript" }
