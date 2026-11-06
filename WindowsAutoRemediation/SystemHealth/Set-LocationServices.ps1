@@ -74,32 +74,33 @@ Write-Output ("  Requested: {0} (Value={1}){2}" -f $mode, $target, $(if ($whatIf
 $consentSubPath = 'SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location'
 $failed = 0
 
+# Writes its status line to the output stream and counts a failed write in $script:failed.
+# It returns nothing: a bool return would join the status line in an array that is always truthy.
 function Set-ConsentValue {
     param([string]$KeyPath, [string]$Label)
     $current = $null
     try { $current = (Get-ItemProperty -Path $KeyPath -Name Value -ErrorAction Stop).Value } catch { }
     if ($current -eq $target) {
         Write-Output ("  {0}: already {1}" -f $Label, $target)
-        return $true
+        return
     }
     $shown = if ($null -eq $current) { '(not set)' } else { $current }
     if ($whatIf) {
         Write-Output ("  {0}: {1} -> {2} (WhatIf)" -f $Label, $shown, $target)
-        return $true
+        return
     }
     try {
         if (-not (Test-Path $KeyPath)) { New-Item -Path $KeyPath -Force | Out-Null }
         New-ItemProperty -Path $KeyPath -Name Value -PropertyType String -Value $target -Force | Out-Null
         Write-Output ("  {0}: {1} -> {2}" -f $Label, $shown, $target)
-        return $true
     } catch {
         Write-Output ("  {0}: FAILED to set {1}: {2}" -f $Label, $target, $_.Exception.Message)
-        return $false
+        $script:failed++
     }
 }
 
 # -- Device ---------------------------------------------------------------------
-if (-not (Set-ConsentValue -KeyPath "HKLM:\$consentSubPath" -Label 'Device')) { $failed++ }
+Set-ConsentValue -KeyPath "HKLM:\$consentSubPath" -Label 'Device'
 
 # -- Users (loaded hives only) ----------------------------------------------------
 $sids = @(Get-ChildItem -Path 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue |
