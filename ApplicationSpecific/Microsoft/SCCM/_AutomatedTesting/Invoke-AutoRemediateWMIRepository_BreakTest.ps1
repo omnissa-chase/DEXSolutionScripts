@@ -637,7 +637,7 @@ try {
         Write-DexStep -Status 'Info' -Name 'Baseline' -Message "Winmgmt $($w.State) (PID $($w.ProcessId)); CcmExec $(if (Get-Service -Name 'CcmExec' -ErrorAction SilentlyContinue) { 'present' } else { 'absent (step 3 Failed by design)' }); TrustedInstaller $(if (Test-TrustedInstallerRunning) { 'running (guard may trip legitimately)' } else { 'idle' }); staged payload copy $(if (Test-Path -LiteralPath $PayloadStagePath) { 'present from an earlier dispatch' } else { 'absent' })"
 
         $candidates = if ($BreakName) {
-            @($BreakCatalog | Where-Object { $BreakName -contains $_.Name })
+            @($BreakCatalog | Where-Object { @($BreakName -split ',' | ForEach-Object { $_.Trim() }) -contains $_.Name })
         } else {
             @($BreakCatalog | Where-Object { $IncludeRebootBreaks -or -not $_.RequiresReboot })
         }

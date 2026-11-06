@@ -426,7 +426,7 @@ try {
     if ($state.Phase -eq 'Init') {
 
         $candidates = if ($BreakName) {
-            @($BreakCatalog | Where-Object { $BreakName -contains $_.Name })
+            @($BreakCatalog | Where-Object { @($BreakName -split ',' | ForEach-Object { $_.Trim() }) -contains $_.Name })
         } else {
             @($BreakCatalog)
         }

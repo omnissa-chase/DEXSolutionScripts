@@ -547,7 +547,7 @@ try {
         Write-DexStep -Status 'Info' -Name 'Baseline' -Message "BITS is $($baseline.State), StartMode $($baseline.StartMode); CcmExec $(if (Get-Service -Name 'CcmExec' -ErrorAction SilentlyContinue) { 'present' } else { 'absent (step 2 Passed by design)' })"
 
         $candidates = if ($BreakName) {
-            @($BreakCatalog | Where-Object { $BreakName -contains $_.Name })
+            @($BreakCatalog | Where-Object { @($BreakName -split ',' | ForEach-Object { $_.Trim() }) -contains $_.Name })
         } else {
             @($BreakCatalog | Where-Object { $IncludeRebootBreaks -or -not $_.RequiresReboot })
         }
