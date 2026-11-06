@@ -86,16 +86,8 @@
                    offset against the local clock as Passed)
     Timeout      : 60 seconds (worst case: two bounded resync waits of ResyncWaitSeconds)
 
-    Environment variables:
-      WhatIf                 = true   Dry run. Absent/unparseable => live run.
-      KerberosMaxSkewSeconds = 300
-      StaleSyncWarnSeconds   = 86400
-      ConfigureWorkgroupNtp  = false
-      WorkgroupNtpServer     = time.windows.com,0x9
-      AllowLargeCorrection   = true
-      ResyncWaitSeconds      = 20
-
-    Explicit parameters win over environment variables.
+    Environment variables: WhatIf=true (dry run; absent or unparseable means live) and
+    one per parameter above, same names. Explicit parameters win over the environment.
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility

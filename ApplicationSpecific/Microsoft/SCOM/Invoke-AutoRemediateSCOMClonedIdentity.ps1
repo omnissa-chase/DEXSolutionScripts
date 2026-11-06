@@ -12,23 +12,12 @@
     State Detection, 4 Rejection Evidence Confirmation, 5 Identity Reset, 6 Post-Reset
     Verification. Steps 1-4 are all abort gates and ALL must pass.
 
-    An agent's identity lives in its Health Service State folder, not in its registry
-    configuration -- so every machine cloned from an image captured with the agent
-    already started inherits one identity, and the management group accepts one and
-    rejects the rest. Steps 3 and 4 must BOTH find their signal, because a device-side
-    script cannot see that another device shares its identity; it can only observe
-    that this agent is rejected AND that its state predates this machine. Either
-    signal alone aborts.
-
-    The state folder is RENAMED, not deleted, and restored automatically if the agent
-    does not come back. Deletion happens only after step 6 confirms recovery. A
-    cooldown marker prevents a device churning the management group with repeat
-    registrations.
-
-    The management server may still hold a stale record for the old identity. Where
-    the management group does not auto-approve, an administrator must approve the new
-    registration or delete the stale one -- step 6 says so rather than reporting a
-    success the console will not agree with.
+    The identity lives in the Health Service State folder, so every clone of an image
+    captured with the agent started shares one. Steps 3 and 4 must BOTH find their
+    signal (rejected AND state older than this machine). The folder is RENAMED, not
+    deleted, restored if the agent does not come back, deleted after step 6 confirms
+    recovery; a cooldown marker stops repeat registrations. A stale server-side record
+    may still need an administrator: step 6 says so.
 
     >> Full rationale -- the golden-image failure mode, why the correct fix is upstream
        in the image, why this is the WRONG TOOL for non-persistent VDI, and rollout
@@ -41,17 +30,15 @@
     Architecture : x64
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (1.0.3: Operations Manager events read through the .NET EventLogReader; Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine)
+    Last Modified: 2026-11-05 (1.0.3: Operations Manager events via the .NET EventLogReader, inline to stay under the 32,767 limit; Get-WinEvent fails under Hub's ARM64 engine)
     Timeout      : ~5 seconds (launcher exits immediately; payload runs via scheduled task, self-capped at 15 minutes)
 
     Environment variables:
       ConfirmHighImpact = true   REQUIRED. Absent/unparseable => nothing is reset.
       WhatIf            = true   Dry run. Absent/unparseable => live run.
 
-    ADMIN PREREQUISITE
-      Add an AV/EDR exclusion for C:\ProgramData\AirWatch\Extensions\ and subfolders.
-      Without it the staged payload may be quarantined and the scheduled task will
-      appear to succeed while doing nothing.
+    ADMIN PREREQUISITE: AV/EDR exclusion for C:\ProgramData\AirWatch\Extensions\ and
+      subfolders, or the staged payload may be quarantined and the task does nothing.
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -59,72 +46,6 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-#region --- Event log reader --------------------------------------------------------------------
-# Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine ("Cannot marshal
-# 'parameter #8'"), so events are read through System.Diagnostics.Eventing.Reader, which behaves
-# the same on Windows PowerShell 5.1 and PowerShell 7. Get-WinEvent semantics are kept: newest
-# first unless -Oldest, StartTime/EndTime are whole-second bounds, a failed read yields an empty
-# result unless -ErrorStop. Each record carries a Message property (FormatDescription(), falling
-# back to the raw property values when the provider ships no message metadata).
-function Get-DexEvent {
-    param(
-        [Parameter(Mandatory = $true)][string]$LogName,
-        [int[]]$Id,
-        [string[]]$ProviderName,
-        [int[]]$Level,
-        [datetime]$StartTime,
-        [datetime]$EndTime,
-        [string]$XPath,
-        [int]$MaxEvents = 0,
-        [switch]$Oldest,
-        [switch]$ErrorStop
-    )
-    $sys = New-Object System.Collections.Generic.List[string]
-    if ($Id)           { $sys.Add('(' + (@($Id | ForEach-Object { "EventID=$_" }) -join ' or ') + ')') }
-    if ($ProviderName) { $sys.Add('(' + (@($ProviderName | ForEach-Object { "Provider[@Name='$_']" }) -join ' or ') + ')') }
-    if ($Level)        { $sys.Add('(' + (@($Level | ForEach-Object { "Level=$_" }) -join ' or ') + ')') }
-    $when = New-Object System.Collections.Generic.List[string]
-    if ($PSBoundParameters.ContainsKey('StartTime')) {
-        $t = $StartTime.ToUniversalTime(); $t = $t.AddTicks(-($t.Ticks % [TimeSpan]::TicksPerSecond))
-        $when.Add("@SystemTime>='" + $t.ToString('o') + "'")
-    }
-    if ($PSBoundParameters.ContainsKey('EndTime')) {
-        $t = $EndTime.ToUniversalTime()
-        if ($t.Ticks % [TimeSpan]::TicksPerSecond) { $t = $t.AddTicks([TimeSpan]::TicksPerSecond - ($t.Ticks % [TimeSpan]::TicksPerSecond)) }
-        $when.Add("@SystemTime<='" + $t.ToString('o') + "'")
-    }
-    if ($when.Count -gt 0) { $sys.Add('TimeCreated[' + ($when -join ' and ') + ']') }
-    $query = if ($XPath) { $XPath } elseif ($sys.Count -gt 0) { '*[System[' + ($sys -join ' and ') + ']]' } else { '*' }
-    $getMessage = {
-        $m = $null
-        try { $m = $this.FormatDescription() } catch { }
-        if (-not $m) { $m = (@($this.Properties | ForEach-Object { "$($_.Value)" }) -join "`n") }
-        $m
-    }
-    $out = New-Object System.Collections.Generic.List[object]
-    $reader = $null
-    try {
-        $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery($LogName, [System.Diagnostics.Eventing.Reader.PathType]::LogName, $query)
-        $q.ReverseDirection = -not $Oldest
-        $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($q)
-        while (($MaxEvents -le 0 -or $out.Count -lt $MaxEvents) -and ($null -ne ($record = $reader.ReadEvent()))) {
-            $po = [System.Management.Automation.PSObject]::AsPSObject($record)
-            $po.PSObject.Properties.Add((New-Object System.Management.Automation.PSScriptProperty('Message', $getMessage)))
-            $out.Add($po)
-        }
-    } catch {
-        if ($ErrorStop) { throw }
-    } finally {
-        if ($reader) { $reader.Dispose() }
-    }
-    return $out.ToArray()
-}
-function Get-DexEventLog {
-    param([Parameter(Mandatory = $true)][string]$LogName)
-    try { return New-Object System.Diagnostics.Eventing.Reader.EventLogConfiguration($LogName) } catch { return $null }
-}
-#endregion
-
 $script:SelfText = $MyInvocation.MyCommand.ScriptBlock.ToString()
 function Invoke-AutoRemediateSCOMClonedIdentity {
 [CmdletBinding(SupportsShouldProcess = $true)]
@@ -412,7 +333,14 @@ try {
                 # Own try/catch: a missing Operations Manager log throws terminating.
                 $rejections = 0
                 try {
-                    $events = @(Get-DexEvent -LogName 'Operations Manager' -StartTime (Get-Date).AddHours(-$RejectionLookbackHours) -MaxEvents 2000 -ErrorStop)
+                    # .NET reader (Get-WinEvent fails under Hub's ARM64 engine); the constructor throws
+                    # when the log is absent, which is the catch below.
+                    $since  = (Get-Date).AddHours(-$RejectionLookbackHours).ToUniversalTime().ToString('o')
+                    $query  = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery('Operations Manager', [System.Diagnostics.Eventing.Reader.PathType]::LogName, "*[System[TimeCreated[@SystemTime>='$since']]]")
+                    $query.ReverseDirection = $true
+                    $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($query)
+                    $events = New-Object System.Collections.Generic.List[object]
+                    try { while ($events.Count -lt 2000 -and ($null -ne ($record = $reader.ReadEvent()))) { $events.Add($record) } } finally { $reader.Dispose() }
 
                     # 21016 = no failover hosts / communication not allowed from this computer
                     #         (the management server is refusing the agent)

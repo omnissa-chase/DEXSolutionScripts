@@ -6,7 +6,7 @@
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (Operations Manager and ESENT events read through the .NET EventLogReader; Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine)
+    Last Modified: 2026-11-05 (Operations Manager and ESENT events via the .NET EventLogReader, compact helper to stay under the 32,767 limit; Get-WinEvent fails under Hub's ARM64 engine)
     Timeout      : One-time / run-once only. Self-enforced 25 s budget, 30 s UEM hard
                    ceiling. MUST NOT be scheduled as a recurring sensor. See
                    GENERAL-SCRIPTS-SENSORS_RUNBOOK.md section 10.
@@ -16,28 +16,13 @@
     Reads no cache and writes nothing: it does its own detection, so it works on a
     device where the sweep has never run.
 
-    WHY THIS IS SEPARATE FROM Sensors/
-    Recurring sensors are dumb cache readers: under 2 s, no network. This one mines the
-    event log and makes a real TCP probe -- only defensible for a genuine one-time run,
-    since scheduled recurring it would block the fleet's serialized sensor queue for up
-    to 25 s every interval. Hence its own folder.
-
-    RELATIONSHIP TO THE SWEEP
-    Use this for a single on-demand pull. Use Invoke-AutoRemediateSCOMAgentPart*.ps1
-    plus Sensors/ for continuous fleet reporting. Covers all 14 sweep steps in one pass,
-    no cache required.
-
-    HealthScore/HealthReason mirror the sweep's deduction table condition for condition
-    so the two agree. That duplication is intentional (this file must stay
-    self-contained) but the table lives in two places: change Part 3's deductions and
-    change these in the same edit. One deliberate divergence -- the sweep's TimeSkew is
-    driven by measured clock skew, this one by time-sync age (see NOT COLLECTED), so the
-    two can differ by those 15 points. Nothing else differs.
-
-    SCOPE -- AGENT SIDE ONLY
-    Where the finding is server-side (agent not approved, no parent management server,
-    certificate expired, management server unreachable) the JSON says so and offers no
-    remediation -- a device-side sensor cannot fix a management server.
+    Separate from Sensors/ because it mines the event log and makes a TCP probe (up to
+    25 s), which only a genuine one-time run can afford. Use the Part* sweep plus
+    Sensors/ for continuous reporting; this covers all 14 sweep steps in one pass.
+    HealthScore/HealthReason mirror Part 3's deduction table: change both in the same
+    edit. One divergence: the sweep's TimeSkew is measured skew, this one is time-sync
+    age, so the two can differ by 15 points. Server-side findings (not approved, no
+    parent, certificate expired, server unreachable) are reported, never remediated.
 
     SELF-ENFORCED DEADLINE
     A Stopwatch is checked before each remaining phase; once the budget is spent,
@@ -55,11 +40,9 @@
     Sensors/scom_agent_health_score.ps1 so the sources can be unioned. Read
     HealthReason alongside it.
 
-    NOT COLLECTED, AND WHY
-    Clock skew against a domain controller: measuring it means launching w32tm.exe, and
-    a sensor must not launch external processes. TimeSyncAgeHours is a registry read of
-    the last successful sync instead -- a proxy, not the same fact. Part 3 step 13
-    measures real skew; so does GenericTroubleshooting/TimeSyncHealth.
+    Not collected: clock skew (needs w32tm.exe, and a sensor launches no process);
+    TimeSyncAgeHours is the registry's last-sync time instead. Part 3 step 13 and
+    GenericTroubleshooting/TimeSyncHealth measure real skew.
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -68,72 +51,29 @@
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
 
-#region --- Event log reader --------------------------------------------------------------------
-# Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine ("Cannot marshal
-# 'parameter #8'"), so events are read through System.Diagnostics.Eventing.Reader, which behaves
-# the same on Windows PowerShell 5.1 and PowerShell 7. Get-WinEvent semantics are kept: newest
-# first unless -Oldest, StartTime/EndTime are whole-second bounds, a failed read yields an empty
-# result unless -ErrorStop. Each record carries a Message property (FormatDescription(), falling
-# back to the raw property values when the provider ships no message metadata).
+#region --- Event log reader (Get-DexEvent, compact form to fit the 32,767 limit; the commented copy is in Invoke-AutoRemediateWord.ps1) ---
 function Get-DexEvent {
-    param(
-        [Parameter(Mandatory = $true)][string]$LogName,
-        [int[]]$Id,
-        [string[]]$ProviderName,
-        [int[]]$Level,
-        [datetime]$StartTime,
-        [datetime]$EndTime,
-        [string]$XPath,
-        [int]$MaxEvents = 0,
-        [switch]$Oldest,
-        [switch]$ErrorStop
-    )
+    param([Parameter(Mandatory = $true)][string]$LogName, [int[]]$Id, [string[]]$ProviderName, [datetime]$StartTime, [int]$MaxEvents = 0, [switch]$ErrorStop)
     $sys = New-Object System.Collections.Generic.List[string]
     if ($Id)           { $sys.Add('(' + (@($Id | ForEach-Object { "EventID=$_" }) -join ' or ') + ')') }
     if ($ProviderName) { $sys.Add('(' + (@($ProviderName | ForEach-Object { "Provider[@Name='$_']" }) -join ' or ') + ')') }
-    if ($Level)        { $sys.Add('(' + (@($Level | ForEach-Object { "Level=$_" }) -join ' or ') + ')') }
-    $when = New-Object System.Collections.Generic.List[string]
-    if ($PSBoundParameters.ContainsKey('StartTime')) {
-        $t = $StartTime.ToUniversalTime(); $t = $t.AddTicks(-($t.Ticks % [TimeSpan]::TicksPerSecond))
-        $when.Add("@SystemTime>='" + $t.ToString('o') + "'")
-    }
-    if ($PSBoundParameters.ContainsKey('EndTime')) {
-        $t = $EndTime.ToUniversalTime()
-        if ($t.Ticks % [TimeSpan]::TicksPerSecond) { $t = $t.AddTicks([TimeSpan]::TicksPerSecond - ($t.Ticks % [TimeSpan]::TicksPerSecond)) }
-        $when.Add("@SystemTime<='" + $t.ToString('o') + "'")
-    }
-    if ($when.Count -gt 0) { $sys.Add('TimeCreated[' + ($when -join ' and ') + ']') }
-    $query = if ($XPath) { $XPath } elseif ($sys.Count -gt 0) { '*[System[' + ($sys -join ' and ') + ']]' } else { '*' }
-    $getMessage = {
-        $m = $null
-        try { $m = $this.FormatDescription() } catch { }
-        if (-not $m) { $m = (@($this.Properties | ForEach-Object { "$($_.Value)" }) -join "`n") }
-        $m
-    }
-    $out = New-Object System.Collections.Generic.List[object]
-    $reader = $null
+    if ($PSBoundParameters.ContainsKey('StartTime')) { $t = $StartTime.ToUniversalTime(); $t = $t.AddTicks(-($t.Ticks % 10000000)); $sys.Add("TimeCreated[@SystemTime>='" + $t.ToString('o') + "']") }
+    $query = if ($sys.Count -gt 0) { '*[System[' + ($sys -join ' and ') + ']]' } else { '*' }
+    $getMessage = { $m = $null; try { $m = $this.FormatDescription() } catch { }; if (-not $m) { $m = (@($this.Properties | ForEach-Object { "$($_.Value)" }) -join "`n") }; $m }
+    $out = New-Object System.Collections.Generic.List[object]; $reader = $null
     try {
         $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery($LogName, [System.Diagnostics.Eventing.Reader.PathType]::LogName, $query)
-        $q.ReverseDirection = -not $Oldest
+        $q.ReverseDirection = $true
         $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($q)
         while (($MaxEvents -le 0 -or $out.Count -lt $MaxEvents) -and ($null -ne ($record = $reader.ReadEvent()))) {
             $po = [System.Management.Automation.PSObject]::AsPSObject($record)
             $po.PSObject.Properties.Add((New-Object System.Management.Automation.PSScriptProperty('Message', $getMessage)))
             $out.Add($po)
         }
-    } catch {
-        if ($ErrorStop) { throw }
-    } finally {
-        if ($reader) { $reader.Dispose() }
-    }
+    } catch { if ($ErrorStop) { throw } } finally { if ($reader) { $reader.Dispose() } }
     return $out.ToArray()
 }
-function Get-DexEventLog {
-    param([Parameter(Mandatory = $true)][string]$LogName)
-    try { return New-Object System.Diagnostics.Eventing.Reader.EventLogConfiguration($LogName) } catch { return $null }
-}
 #endregion
-
 # -- Tunables --
 # 25 s leaves a 5 s margin under the 30 s UEM one-time ceiling for JSON
 # serialization and process teardown.
@@ -249,11 +189,8 @@ try {
         # Not a fault. This device was never in scope, and saying so in one place
         # keeps it out of every fleet average downstream.
         #
-        # HealthScore is -1 here, not -2, even though every other key on this path is
-        # -2. That is deliberate: -1 is what the sweep writes and what
-        # Sensors/scom_agent_health_score.ps1 returns for "no agent installed", and a
-        # score reported two different ways for one condition would break any report
-        # that unions the two sources. HealthReason removes the ambiguity.
+        # HealthScore is -1 (not -2) to match the sweep and scom_agent_health_score.ps1
+        # for "no agent installed", so the two sources can be unioned.
         $r.HealthScore  = $UNKNOWN
         $r.HealthReason = 'NoAgentInstalled'
         foreach ($k in @('ManagementGroupCount','ManagementServerPort','FailoverServerCount',
@@ -308,10 +245,8 @@ try {
                 if ($p -and $p.StartTime) {
                     $r.ServiceUptimeHours = [int][math]::Round(((Get-Date) - $p.StartTime).TotalHours, 0)
 
-                    # Sweep step 2. Same heuristic: process start against last boot, from
-                    # data already in hand -- no event log query, no added runtime. A
-                    # negative delta means the agent was restarted after boot, so the
-                    # boot-time question does not apply.
+                    # Sweep step 2: process start against last boot, no event query. A
+                    # negative delta means a restart after boot, so it does not apply.
                     $boot = (Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue).LastBootUpTime
                     if ($boot) {
                         $d = [int][math]::Round(($p.StartTime - $boot).TotalSeconds, 0)
@@ -683,13 +618,9 @@ try {
     if (Get-Service -Name 'AdtAgent' -ErrorAction SilentlyContinue) { $r.AdtAgentPresent = $true }
     if ($installDir -and (Test-Path -LiteralPath (Join-Path $installDir 'APMDOTNETAgent'))) { $r.ApmPresent = $true }
 
-    # -- Scoring ---------------------------------------------------------------
-    # Deduction table mirrored from Invoke-AutoRemediateSCOMAgent.ps1, condition for
-    # condition. Only a metric that was actually measured may deduct, which holds
-    # because every sentinel is negative and every threshold comparison is against a
-    # positive number -- an unmeasured or timed-out phase simply fails its test rather
-    # than deducting. The two -ge 0 guards below are the exceptions, kept because the
-    # sweep has them and this table must not drift from it.
+    # -- Scoring: mirrored from Invoke-AutoRemediateSCOMAgent.ps1 condition for condition.
+    # Sentinels are negative and thresholds positive, so an unmeasured phase never
+    # deducts; the two -ge 0 guards are kept because the sweep has them.
     $score      = 100
     $deductions = @()
 
@@ -699,10 +630,8 @@ try {
     if (-not $serviceHealthy) {
         $score -= 40; $deductions += @{ P = 40; R = 'HealthServiceStopped' }
     }
-    # MsProbeResult is checked, not just MsReachable. The sweep can use the simpler
-    # test because it always probes; here the probe can be skipped by the deadline,
-    # and a probe that never ran must not be scored as a failed one -- that would turn
-    # a slow device into a fabricated 25-point management server outage.
+    # MsProbeResult, not just MsReachable: a probe the deadline skipped must not score
+    # as a failed one (a fabricated 25-point outage on a slow device).
     if ($r.ManagementServer -and -not $r.MsReachable -and $r.MsProbeResult -ne 'TimedOut') {
         $score -= 25; $deductions += @{ P = 25; R = 'ManagementServerUnreachable' }
     }

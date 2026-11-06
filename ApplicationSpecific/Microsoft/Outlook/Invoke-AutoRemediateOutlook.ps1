@@ -15,29 +15,18 @@
     |  5   | Outlook Profile Health       | -- (informational only)          |
 
     STEP 2 TIERS (gated by $AllowDestructiveActions; largest OST over CacheSizeWarningMB)
-    Tier 1  Writes the user's ...\Office\<ver>\Outlook\Cached Mode\SyncWindowSetting
-            (DWORD months, 0 = all) to OstSyncWindowMonths and deletes SyncWindowSettingDays
-            when the window is 0, absent, above the target, or no tier 1 timestamp exists;
-            records OstTier1AppliedAt in DEXRecords. Effective at Outlook's next start; the
-            OST shrinks only after Outlook compacts it, which can take days.
-    Tier 2  Renames the OST to <name>_<yyyyMMdd-HHmmss>.bak when still over threshold,
-            tier 1 is at least OstTier2AfterDays old and AllowOstRename is true. Outlook
-            rebuilds it: a FULL mailbox resync. Outlook open: Warning unless
-            CloseOutlookForRepair, which dispatches a deferred close and reports
-            "Dispatched" (exit 0; the outcome arrives on a later run).
+    Tier 1  Sets the user's Cached Mode\SyncWindowSetting to OstSyncWindowMonths and
+            records OstTier1AppliedAt; the OST shrinks once Outlook compacts it (days).
+    Tier 2  After OstTier2AfterDays with AllowOstRename, renames the OST to
+            <name>_<stamp>.bak for a FULL resync. Outlook open: Warning, unless
+            CloseOutlookForRepair dispatches the deferred close ("Dispatched", exit 0).
 
-    DEFERRED CLOSE HELPER
-    SYSTEM cannot message the user's Outlook, so the script writes
-    C:\ProgramData\AirWatch\Extensions\Outlook\OstRepairHelper.ps1 (ACL: SYSTEM and
-    Administrators Full, Users ReadAndExecute, inheritance off; state\ adds Users Modify)
-    and starts it via one-shot task DEX-OutlookOstRepair as the logged-on user
-    (Interactive, Limited; grace and OST path as task arguments). Helper: toast "Outlook
-    will close in N minute(s) for mailbox maintenance. Save your work.", sleep
-    OutlookCloseGraceSeconds, CloseMainWindow to every OUTLOOK.EXE every 10 s for 60 s,
-    never force-kill. Still open: outcome UserActionRequired. Else rename, relaunch,
-    write state\result.json {Status, Outcome, Ost, RenamedTo, CloseAttempts, Started,
-    Finished}, drop the task. Each run ingests a new result into DEXRecords (OstRepairLastOutcome,
-    OstRepairLastFinished), deletes the file and removes the finished task.
+    DEFERRED CLOSE HELPER: SYSTEM cannot message the user's Outlook, so the script
+    writes C:\ProgramData\AirWatch\Extensions\Outlook\OstRepairHelper.ps1 (locked ACL)
+    and runs it as the logged-on user through one-shot task DEX-OutlookOstRepair: toast,
+    OutlookCloseGraceSeconds, CloseMainWindow for 60 s, never force-kill (still open:
+    UserActionRequired), else rename, relaunch, write state\result.json. The next run
+    ingests the result into DEXRecords (OstRepairLastOutcome/LastFinished) and cleans up.
 
     SYSTEM context: profile and hive come from Win32_ComputerSystem.UserName and
     HKU\<SID>, not $env:APPDATA. Steps 3-5 are soft signals.
@@ -68,11 +57,8 @@
                    PowerShell 7.2 engine on ARM64, which left the step inert in
                    production.)
                    2026-11-03 (1.1.1: step 3 event filter server-side; unfiltered ran 100+ s.)
-                   2026-11-02 (1.1.0: two-tier step 2 -- sync window, then rename after
-                   OstTier2AfterDays with AllowOstRename; deferred Outlook close via a
-                   per-user helper task; five new inputs; Ost* DEXRecords values persist;
-                   a ResolutionScript may return Status/Message. 1.0.2: step 4
-                   UpdatesEnabled=False is a Warning; @() on pipeline .Count.)
+                   2026-11-02 (1.1.0: two-tier step 2, deferred close helper, five new
+                   inputs. 1.0.2: step 4 UpdatesEnabled=False is a Warning.)
                    2026-10-28 (1.0.1)
     Timeout      : 60 seconds
 
@@ -376,10 +362,8 @@ $Steps = @(
         Enabled          = $true
         ResolveOnWarning = $false
         DetectionScript  = {
-            # No MAPI from SYSTEM; Outlook error events (7 days) are the proxy.
-            # Read through the .NET EventLogReader: Get-WinEvent fails in every form under
-            # the PowerShell 7.2 engine Hub embeds on ARM64 (TEST-VALIDATION.md 13.2.z), and
-            # the server-side filter keeps this under a second on a busy Application log.
+            # No MAPI from SYSTEM; Outlook error events (7 days) are the proxy. .NET reader:
+            # Get-WinEvent fails in every form under Hub's ARM64 engine (13.2.z).
             $cutoff = (Get-Date).AddDays(-7)
             try {
                 $since  = $cutoff.ToUniversalTime().ToString('o')
