@@ -1,26 +1,35 @@
 <#
 .SYNOPSIS
     Set-LocationServices -- Turns Windows location services on or off for the device and
-    for every signed-in user.
+    for every signed-in user, with separate control of desktop (Win32) and modern
+    (packaged) app access.
 
 .DESCRIPTION
-    Location has two layers, and both must agree for apps to get a location:
+    Location is layered, and every layer above an app must say Allow for it to get a fix:
 
       Device  HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\
               ConsentStore\location  Value = Allow | Deny
               The Settings > Privacy & security > Location "Location services" switch.
-              Deny here blocks location for every user, whatever their own setting.
+              Deny here blocks location for every user, whatever their own settings.
 
       User    HKU\<SID>\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\
               ConsentStore\location  Value = Allow | Deny
-              (and ...\location\NonPackaged for "Let desktop apps access your location")
               The per-user "Let apps access your location" switch. Under SYSTEM, HKCU is
               SYSTEM's own hive, so each user is reached through HKEY_USERS by SID.
 
-    The script writes the device value, then the user values in every loaded user hive
-    (local and domain S-1-5-21-* and Entra ID S-1-12-1-* SIDs). Users who are signed out
-    are not loaded and are skipped: on Disable the device Deny already covers them; on
-    Enable a user with no value of their own defaults to Allow.
+      Desktop ...\location\NonPackaged  Value = Allow | Deny
+              "Let desktop apps access your location": one switch for every Win32 app.
+              Its subkeys are per-exe usage records and are left alone.
+
+      Modern  ...\location\<PackageFamilyName>  Value = Allow | Deny | Prompt
+              One entry per packaged app that has asked for location, e.g.
+              Microsoft.WindowsMaps_8wekyb3d8bbwe. An app with no entry follows the
+              user switch until it first asks.
+
+    The script writes the device value, then for every loaded user hive (local and domain
+    S-1-5-21-* and Entra ID S-1-12-1-* SIDs) the user switch, the desktop switch and the
+    modern app entries as the script variables direct. Users who are signed out are not
+    loaded and are skipped: on Disable the device Deny already covers them.
 
     On Enable it also sets the Geolocation service (lfsvc) back to Manual if it was
     Disabled. Policy (GPO or MDM) wins over these values; the script reports
@@ -28,18 +37,39 @@
 
 .NOTES
     Script Name  : Set-LocationServices.ps1
-    Version      : 1.0.1
+    Version      : 1.1.0
     Architecture : Any (x86/x64/ARM64)
     Context      : System (elevation required for the HKLM value)
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05
+    Last Modified: 2026-11-06
     Timeout      : 30 seconds
 
     Script variables (UEM environment variables):
-      LocationServices  Enable | Disable   (required; anything else exits 1)
-      WhatIf            true | false       (default false; report only, change nothing)
+      LocationServices  Enable | Disable   Required. Device switch and each user's switch.
+      DesktopApps       Allow | Deny | Keep
+                        Win32 apps. Empty = follows LocationServices (Allow on Enable,
+                        Deny on Disable). Keep leaves the current value.
+      ModernApps        Allow | Deny | Keep | <list>
+                        Allow or Deny sets every existing app entry. <list> is package
+                        family names separated by commas or semicolons, wildcards allowed
+                        (Microsoft.WindowsMaps_8wekyb3d8bbwe;Microsoft.Outlook*): listed
+                        apps Allow, every other existing entry Deny; a listed exact name
+                        with no entry yet gets one so the Allow holds before first use.
+                        Empty = Keep: per-app entries hold the user's own choices and are
+                        only rewritten when asked.
+      WhatIf            true | false       Default false; report only, change nothing.
+
+    Examples:
+      Everything on                 LocationServices=Enable
+      Win32 only, no modern apps    LocationServices=Enable  ModernApps=Deny
+      Maps and Weather only         LocationServices=Enable  DesktopApps=Deny
+                                    ModernApps=Microsoft.WindowsMaps*;Microsoft.BingWeather*
+      Everything off                LocationServices=Disable
 
     Exit codes: 0 = values set (or already set); 1 = bad input, not elevated, or a write failed.
+
+    1.1.0: DesktopApps and ModernApps variables; per-app entries under each user's
+    location key. 1.0.1: helper writes status lines only. 1.0.0: device and user switches.
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -49,7 +79,7 @@
 #>
 
 $ErrorActionPreference = 'Stop'
-$SCRIPT_VERSION = '1.0.1'
+$SCRIPT_VERSION = '1.1.0'
 
 Write-Output "-- Set-LocationServices $SCRIPT_VERSION ---------------------------------"
 
@@ -63,13 +93,32 @@ $enable = $mode -match '^(?i)enable$'
 $target = if ($enable) { 'Allow' } else { 'Deny' }
 $whatIf = "$env:WhatIf" -match '^(?i)(true|1|yes)$'
 
+$desktop = "$env:DesktopApps".Trim()
+if ($desktop -eq '') { $desktop = $target }
+elseif ($desktop -notmatch '^(?i)(allow|deny|keep)$') {
+    Write-Output "  Script variable DesktopApps must be Allow, Deny or Keep (got '$desktop')."
+    exit 1
+}
+$desktop = (Get-Culture).TextInfo.ToTitleCase($desktop.ToLower())
+
+$modern = "$env:ModernApps".Trim()
+$modernList = @()
+if ($modern -eq '') { $modern = 'Keep' }
+elseif ($modern -match '^(?i)(allow|deny|keep)$') { $modern = (Get-Culture).TextInfo.ToTitleCase($modern.ToLower()) }
+else {
+    $modernList = @($modern -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+    $modern = 'List'
+}
+
 $principal = New-Object System.Security.Principal.WindowsPrincipal([System.Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Output "  Not elevated: the device value is under HKLM. Run as SYSTEM or an administrator."
     exit 1
 }
 
-Write-Output ("  Requested: {0} (Value={1}){2}" -f $mode, $target, $(if ($whatIf) { '  [WhatIf: no changes]' } else { '' }))
+Write-Output ("  Requested: {0} (Value={1}); desktop apps {2}; modern apps {3}{4}" -f $mode, $target, $desktop,
+    $(if ($modern -eq 'List') { 'Allow only: ' + ($modernList -join ', ') } else { $modern }),
+    $(if ($whatIf) { '  [WhatIf: no changes]' } else { '' }))
 
 $consentSubPath = 'SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location'
 $failed = 0
@@ -77,30 +126,30 @@ $failed = 0
 # Writes its status line to the output stream and counts a failed write in $script:failed.
 # It returns nothing: a bool return would join the status line in an array that is always truthy.
 function Set-ConsentValue {
-    param([string]$KeyPath, [string]$Label)
+    param([string]$KeyPath, [string]$Label, [string]$Value)
     $current = $null
     try { $current = (Get-ItemProperty -Path $KeyPath -Name Value -ErrorAction Stop).Value } catch { }
-    if ($current -eq $target) {
-        Write-Output ("  {0}: already {1}" -f $Label, $target)
+    if ($current -eq $Value) {
+        Write-Output ("  {0}: already {1}" -f $Label, $Value)
         return
     }
-    $shown = if ($null -eq $current) { '(not set)' } else { $current }
+    $shown = if ([string]::IsNullOrEmpty($current)) { '(not set)' } else { $current }
     if ($whatIf) {
-        Write-Output ("  {0}: {1} -> {2} (WhatIf)" -f $Label, $shown, $target)
+        Write-Output ("  {0}: {1} -> {2} (WhatIf)" -f $Label, $shown, $Value)
         return
     }
     try {
         if (-not (Test-Path $KeyPath)) { New-Item -Path $KeyPath -Force | Out-Null }
-        New-ItemProperty -Path $KeyPath -Name Value -PropertyType String -Value $target -Force | Out-Null
-        Write-Output ("  {0}: {1} -> {2}" -f $Label, $shown, $target)
+        New-ItemProperty -Path $KeyPath -Name Value -PropertyType String -Value $Value -Force | Out-Null
+        Write-Output ("  {0}: {1} -> {2}" -f $Label, $shown, $Value)
     } catch {
-        Write-Output ("  {0}: FAILED to set {1}: {2}" -f $Label, $target, $_.Exception.Message)
+        Write-Output ("  {0}: FAILED to set {1}: {2}" -f $Label, $Value, $_.Exception.Message)
         $script:failed++
     }
 }
 
 # -- Device ---------------------------------------------------------------------
-Set-ConsentValue -KeyPath "HKLM:\$consentSubPath" -Label 'Device'
+Set-ConsentValue -KeyPath "HKLM:\$consentSubPath" -Label 'Device' -Value $target
 
 # -- Users (loaded hives only) ----------------------------------------------------
 $sids = @(Get-ChildItem -Path 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue |
@@ -114,8 +163,34 @@ foreach ($sid in $sids) {
     $name = $sid
     try { $name = (New-Object System.Security.Principal.SecurityIdentifier($sid)).Translate([System.Security.Principal.NTAccount]).Value } catch { }
     $userKey = "Registry::HKEY_USERS\$sid\$consentSubPath"
-    Set-ConsentValue -KeyPath $userKey -Label "User $name"
-    Set-ConsentValue -KeyPath "$userKey\NonPackaged" -Label "User $name desktop apps"
+    Set-ConsentValue -KeyPath $userKey -Label "User $name" -Value $target
+
+    if ($desktop -ne 'Keep') {
+        Set-ConsentValue -KeyPath "$userKey\NonPackaged" -Label "User $name desktop apps" -Value $desktop
+    }
+
+    if ($modern -eq 'Keep') { continue }
+    # Every packaged app that has asked for location; NonPackaged is the desktop switch, not an app.
+    $apps = @(Get-ChildItem -Path $userKey -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.PSChildName } | Where-Object { $_ -ne 'NonPackaged' })
+    if ($modern -eq 'List') {
+        # A listed exact name with no entry gets one, so the Allow is in place before first use.
+        foreach ($entry in $modernList) {
+            if ($entry -notmatch '[\*\?]' -and $apps -notcontains $entry) { $apps += $entry }
+        }
+    }
+    if ($apps.Count -eq 0) {
+        Write-Output "  User $name modern apps: no app entries"
+        continue
+    }
+    foreach ($app in $apps) {
+        $value = $modern
+        if ($modern -eq 'List') {
+            $value = 'Deny'
+            foreach ($entry in $modernList) { if ($app -like $entry) { $value = 'Allow'; break } }
+        }
+        Set-ConsentValue -KeyPath "$userKey\$app" -Label "User $name app $app" -Value $value
+    }
 }
 
 # -- Geolocation service (Enable only) --------------------------------------------
