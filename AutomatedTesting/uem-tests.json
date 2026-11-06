@@ -124,6 +124,10 @@
   "Invoke-AutoRemediateZoom.ps1": {
     "note": "Zoom 7.2.5 is installed machine-wide on CBRADLEYSWIN11 since 2026-11-05 (Program Files, no App Paths entry), so that device takes the product path from 1.0.2 on (1.0.1 misdetected it as not installed, 13.2.dd); CHASEWIN11_2 has no Zoom and proves the [Skipped] path. Device-side proof: DEXRecords ZoomErrors with ZoomVersion and TotalSteps 5."
   },
+  "Set-LocationServices.ps1": {
+    "variables": { "LocationServices": "Enable", "WhatIf": "true" },
+    "note": "Action script (new 2026-11-05, 1.0.1). The default case runs Enable with WhatIf, so both lab VMs report their current device and user values and change nothing. A real Enable or Disable run proves the effect: read HKLM and HKU ConsentStore\\location Value on the device afterwards. Exit 1 means bad input, not elevated, or a failed write."
+  },
   "Invoke-AutoRemediateOfficeAddins.ps1": {
     "note": "Suite-wide Office add-in script (new 2026-11-05, 1.0.0): twelve steps, two per application, for Word, Excel, PowerPoint, Access, OneNote and Publisher. Office 365 C2R 16.0.18925 is on CBRADLEYSWIN11, so that device takes the product path; CHASEWIN11_2 has no Office and proves the [Skipped] path. Device-side proof: DEXRecords OfficeAddinsErrors with TotalSteps 12. Report-only by default; AllowDestructiveActions and ReenableDisabledItems are the gates."
   },
