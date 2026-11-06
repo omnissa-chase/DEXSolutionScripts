@@ -28,7 +28,7 @@
 
 .NOTES
     Script Name  : Set-LocationServices.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64/ARM64)
     Context      : System (elevation required for the HKLM value)
     Author       : Chase Bradley, Omnissa DEX team
@@ -49,7 +49,7 @@
 #>
 
 $ErrorActionPreference = 'Stop'
-$SCRIPT_VERSION = '1.0.0'
+$SCRIPT_VERSION = '1.0.1'
 
 Write-Output "-- Set-LocationServices $SCRIPT_VERSION ---------------------------------"
 
@@ -114,8 +114,8 @@ foreach ($sid in $sids) {
     $name = $sid
     try { $name = (New-Object System.Security.Principal.SecurityIdentifier($sid)).Translate([System.Security.Principal.NTAccount]).Value } catch { }
     $userKey = "Registry::HKEY_USERS\$sid\$consentSubPath"
-    if (-not (Set-ConsentValue -KeyPath $userKey -Label "User $name")) { $failed++ }
-    if (-not (Set-ConsentValue -KeyPath "$userKey\NonPackaged" -Label "User $name desktop apps")) { $failed++ }
+    Set-ConsentValue -KeyPath $userKey -Label "User $name"
+    Set-ConsentValue -KeyPath "$userKey\NonPackaged" -Label "User $name desktop apps"
 }
 
 # -- Geolocation service (Enable only) --------------------------------------------
