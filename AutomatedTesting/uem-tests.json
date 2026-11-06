@@ -256,5 +256,13 @@
   "scom_agent_version_standalone.ps1": {
     "allowEmpty": true,
     "note": "Empty by design without a SCOM agent (lab VMs)."
+  },
+  "Disable-NonEssentialStartupApps.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "2.0.0 (2026-11-06). The default case runs with WhatIf so the sweep lists every startup entry of the console user with its facts (launch ms, signer, target present, StartupApproved state) and changes nothing; the disable path is proven by the break test. Device-side proof: HKLM\\Software\\AirWatch\\Extension\\DEXRecords\\StartupApps with one Entry_<name> line per entry and DisabledCount 0 under WhatIf. Exit 0 after a fixing run; 1 only when a disable fails."
+  },
+  "startup_apps_health.ps1": {
+    "match": "^\\{\"Schema\":1,\"User\":\"[^\"]*\",.*\"Score\":-?\\d+,\"Reason\":\"[A-Za-z]+\",\"NextStep\":\"(AUTO|USER|ADMIN|NONE)\".*\\}$",
+    "note": "One-time JSON sensor, companion of Disable-NonEssentialStartupApps.ps1 2.0.0. Under Hub's 1 KB cap by construction (794 and 819 bytes on CBRADLEYSWIN11, 2026-11-06). Under SYSTEM it reports on the console user."
   }
 }
