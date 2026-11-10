@@ -62,6 +62,8 @@
 
 .PARAMETER IncludeSessionBreaks
     Allow StaleDisconnectedSession, which disconnects the session the harness runs in.
+    Never on an instant-clone pool that logs off or refreshes on disconnect: the refresh
+    kills the harness and the clone comes back without Hub (seen on VDIW11-12).
 
 .PARAMETER Restore
     Undo an interrupted run's breaks from state.json and exit.

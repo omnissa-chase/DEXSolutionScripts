@@ -3,11 +3,11 @@
 .NOTES
     Sensor Name  : hzn_agent_health
     Data Type    : String (JSON)
-    Version      : 1.1.0
+    Version      : 1.1.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-10 (1.1.0: SchemaVersion 2, compact keys and a trim ladder so the JSON fits Hub's 1 KB sensor cap; 1.0.1: events via .NET EventLogReader)
+    Last Modified: 2026-11-10 (1.1.1: comment trim under 32,767 chars; 1.1.0: SchemaVersion 2, compact keys, trim ladder for Hub's 1 KB cap; 1.0.1: .NET EventLogReader)
     Timeout      : One-time / run-once only. Self-enforced 25 s budget, 30 s UEM ceiling.
                    MUST NOT be scheduled as a recurring sensor.
     Built from   : VDI/Horizon/SPEC.md rev 2, section 7.1
@@ -18,22 +18,18 @@
     (Related), and the next step. Reads no cache for its own component, so it works on a
     device where the collector has never run. Writes nothing.
 
-    Phases, cheapest first, each checked against the budget: registry and services;
-    session inventory; Blast/PCoIP counters (one sample); broker DNS and TCP (max 3
-    hosts); Application-log errors; related caches; score. A phase skipped by the
-    deadline reports -4 and TimedOut is true, in which case HealthScore is a floor.
+    Phases, cheapest first, each checked against the budget: registry and services; sessions;
+    counters; broker DNS and TCP (max 3 hosts); errors; related caches; score. A phase skipped
+    by the deadline reports -4 and TO is true, so Score is then a floor.
 
-    Sentinels: -1 unknown, -2 not applicable, -4 timed out. No nulls. Output keys are the
-    compact names of SPEC 7.1 (Score, Reason, Next, Detail, Svc, Brk*, S rows, Rel, Ded):
-    Hub drops any sensor value over 1 KB, so Write-Result serializes, measures and trims
-    (session rows beyond two, then Rel, Errs, FeatStop, BrkList, CSet, Ded beyond the
-    first, the second session row, Detail, the last row) until it is under 1,000 bytes. The internal build may add keys (bump SchemaVersion), never
-    rename or remove.
+    Sentinels: -1 unknown, -2 not applicable, -4 timed out. No nulls. Keys are the compact
+    names of SPEC 7.1. Hub drops any sensor value over 1 KB, so Write-Result serializes and
+    trims (the ladder in SPEC 7.1) until it is under 1,000 bytes. The internal build may add
+    keys (bump SchemaVersion), never rename or remove.
 
-    The deduction table duplicates Invoke-HorizonAgentStateCollection.ps1 on purpose
-    (this file must stay self-contained). Change both in the same edit;
-    _AutomatedTesting/Test-HorizonScoreParity.ps1 asserts they agree. One divergence:
-    TimeSyncStale here uses the W32Time registry (a sensor may not launch w32tm.exe).
+    The deduction table duplicates the collector on purpose (self-contained file); change both
+    together, Test-HorizonScoreParity.ps1 asserts they agree. One divergence: TimeSyncStale
+    reads the W32Time registry here (a sensor may not launch w32tm.exe).
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -42,13 +38,10 @@
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
 
-#region --- Event log reader --------------------------------------------------------------------
-# Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine ("Cannot marshal
-# 'parameter #8'"), so events are read through System.Diagnostics.Eventing.Reader, which behaves
-# the same on Windows PowerShell 5.1 and PowerShell 7. Get-WinEvent semantics are kept: newest
-# first unless -Oldest, StartTime/EndTime are whole-second bounds, a failed read yields an empty
-# result unless -ErrorStop. Each record carries a Message property (FormatDescription(), falling
-# back to the raw property values when the provider ships no message metadata).
+#region Event log reader
+# Get-WinEvent fails under Hub's ARM64 PowerShell 7.2 engine, so events come from
+# System.Diagnostics.Eventing.Reader with Get-WinEvent semantics (newest first unless -Oldest,
+# whole-second bounds, empty result on failure unless -ErrorStop, Message via FormatDescription).
 function Get-DexEvent {
     param(
         [Parameter(Mandatory = $true)][string]$LogName,
@@ -240,7 +233,7 @@ function Set-NextStep {
 }
 
 try {
-    # -- Phase 1: registry, services, config --------------------------------------------------------
+    # -- Phase 1: registry, services, config
     $agentRoot = ''
     foreach ($p in $AgentRegistryRoots) { if (Test-Path -LiteralPath $p) { $agentRoot = $p; break } }
     $uninst = @(Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' | Where-Object { $_.DisplayName -match $AgentUninstallPattern })
@@ -282,7 +275,7 @@ try {
     $lkg = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Config' -Name 'LastKnownGoodTime').LastKnownGoodTime
     if ($lkg) { try { $r.SyncAgeHours = [int][math]::Round(((Get-Date) - [datetime]::FromFileTime([int64]$lkg)).TotalHours) } catch { } }
 
-    # -- Phase 2: sessions -------------------------------------------------------------------------------
+    # -- Phase 2: sessions
     $sessions = @{}; $brokersSeen = New-Object System.Collections.Generic.List[string]
     if (Test-Budget) {
         try {
@@ -320,7 +313,7 @@ try {
         catch { if ($_.Exception.Message -match 'No events were found') { $r.SessionCount = 0; $r.DisconnectedSessionCount = 0 } }
     } else { $r.SessionCount = $TIMEDOUT; $r.DisconnectedSessionCount = $TIMEDOUT }
 
-    # -- Phase 3: counters ---------------------------------------------------------------------------------
+    # -- Phase 3: counters
     if (Test-Budget) {
         $bl = Read-SessionCounters -Sets $BlastSessionCounterSets -Names @($BlastCounterNames.Rtt, $BlastCounterNames.Loss, $BlastCounterNames.Bandwidth)
         if ($bl) {
@@ -351,7 +344,7 @@ try {
     } else { foreach ($k in @('BlastSessionCount','BlastRttMsMax','BlastPacketLossPpmMax','BlastBandwidthKbpsMin','BlastFpsMin','PcoipSessionCount','PcoipRttMsMax','PcoipLossPpmMax')) { $r[$k] = $TIMEDOUT } }
     $r.Sessions = @($sessions.Values | Sort-Object { [int]$_.RttMs } -Descending | Select-Object -First $script:MaxSessionRows)
 
-    # -- Phase 4: broker ------------------------------------------------------------------------------------
+    # -- Phase 4: broker
     $brokers = New-Object System.Collections.Generic.List[string]; $fromReg = $false
     if ($agentRoot) {
         foreach ($k in @($agentRoot, (Join-Path $agentRoot 'Configuration'), (Join-Path (Split-Path $agentRoot -Parent) 'Node Manager'))) {
@@ -377,7 +370,7 @@ try {
         $r.BrokerProbeResult = if ($r.TimedOut) { 'TimedOut' } elseif (-not $anyResolved) { 'Unresolvable' } elseif ($reach) { 'Reachable' } else { 'Unreachable' }
     }
 
-    # -- Phase 5: errors --------------------------------------------------------------------------------------
+    # -- Phase 5: errors
     if (Test-Budget) {
         try {
             $errs = @(Get-DexEvent -LogName 'Application' -Level 1, 2 -StartTime (Get-Date).AddHours(-$script:EventLookbackHours) -MaxEvents $script:MaxEventsScanned -ErrorStop | Where-Object { $_.ProviderName -match $AgentEventProviderPattern })
@@ -387,7 +380,7 @@ try {
         catch { if ($_.Exception.Message -match 'No events were found') { $r.AgentErrorCount24h = 0 } }
     } else { $r.AgentErrorCount24h = $TIMEDOUT }
 
-    # -- Phase 6: related caches ------------------------------------------------------------------------------
+    # -- Phase 6: related caches
     foreach ($name in @('AppVolumes', 'FSLogix', 'DEM', 'VPN')) {
         $c = Get-ItemProperty -Path $RelatedCaches[$name]; $sc = $UNKNOWN; $rs = ''; $age = $UNKNOWN
         if ($c) {
@@ -398,7 +391,7 @@ try {
         $r.Related[$name] = [ordered]@{ Score = $sc; Reason = $rs; CacheAgeMin = $age }
     }
 
-    # -- Phase 7: score (mirrors the collector; -1/-2/-4 never deduct) ------------------------------------------
+    # -- Phase 7: score (mirrors the collector; -1/-2/-4 never deduct)
     $ded = New-Object System.Collections.Generic.List[object]
     function Ded { param([string]$R, [int]$P) $ded.Add([ordered]@{ Reason = $R; Points = $P }) }
     if (-not $r.AgentServiceRunning) { Ded 'AgentServiceStopped' 40 }

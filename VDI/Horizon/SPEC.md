@@ -608,6 +608,10 @@ instant clone), feature services (installation-dependent; the harness lists what
 First run 2026-11-10 12:19 on `VDIW11-12` (harness 1.0.0): `7e1a44595c17` Passed, all four
 ungated breaks drawn and validated, 90.7 s of script time. Harness 1.0.1 renames the block
 rule because the first name contained "Horizon" and the script counted it as a Horizon rule.
+`StaleDisconnectedSession` must not run on an instant-clone pool member whose pool logs
+off or refreshes on disconnect: on `VDIW11-12` the `tsdiscon` triggered a refresh, the
+harness died mid-run and the clone came back without Hub. Run it on a full clone, or on a
+pool with the disconnect timeout set to Never.
 
 ### 11.4 `Invoke-AutoRemediateHorizonClient_BreakTest.ps1` (needs a client; installable on this VM)
 
@@ -683,3 +687,11 @@ was built from in every script header (`Built from VDI/Horizon/SPEC.md rev 1`).
   is `4) Complete - Tested`. Then `Test-HorizonNoAgentPath.ps1` `20261110_132101` PASS on
   the lab VM (49 of 49), which moves the agent collector, `hzn_agent_health` and the three
   agent scalar sensors to `4) Complete - Tested` as well; client side waits on a client.
+  Later that afternoon: `hzn_agent_health.ps1` measured 33,231 characters, over the
+  32,767 limit that binds sensors too (the 2607+ tenant had stored it, which hid it);
+  1.1.1 trims comments only, to 32,031. And the host turned out to be an instant clone:
+  the gated session break disconnected the user's session, the pool refreshed the clone,
+  the harness died with it and the clone did not re-enroll by itself (the user enrolled it
+  again by hand). The collector had reported `CloneType Unknown` on it, so the KB-HZN-10
+  heuristic (cloneprep files under the agent log folders) misses an Omnissa 8.20 instant
+  clone; a lab probe sensor is collecting what the clone actually leaves behind.
