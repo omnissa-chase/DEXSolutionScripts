@@ -7,17 +7,16 @@
 ## Start here — pick a deployment
 
 This README is the full reference for everything in the folder. If you are deploying rather than
-reading, start with one of the two step-by-step guides instead. Each is self-contained and includes
-a local test procedure.
+reading, start with the step-by-step guide instead. It is self-contained and includes a local test
+procedure.
 
 | Guide | Deploy | Coverage | Choose it when |
 |---|---|---|---|
-| **[Solution A — Sweep + Sensors](DEPLOY-A-Sweep-Plus-Sensors.md)** | 3 scripts + 7 sensors | **14 of 14 checks**, 235-point score, 2 auto-remediations | Default. The only option that sees connectivity and event-log faults. |
-| **[Solution B — Sensors Only](DEPLOY-B-Sensors-Only.md)** | 9 sensors | 8 of 14 checks, 130-point score, no remediation | You cannot deploy scripts — no permission, change freeze, locked-down ring, or a quick evaluation. |
+| **[Sweep + one-time sensor](DEPLOY-Sweep.md)** | 3 scripts + 1 one-time sensor | **14 of 14 checks**, 235-point score, 2 auto-remediations | The supported deployment. |
 
-**Deploy one or the other, never both.** Six of Solution B's sensors report the same attributes as
-Solution A's cached set under different names; running both doubles the sensor queue for one number
-and gives you two columns that disagree at the edges.
+The recurring cache-reader sensors and the sensors-only option (`Sensors/`, `Sensors/Standalone/`,
+the old Solution B guide) were removed on 2026-11-10. Reporting is through the one-time sensor
+`OneTimeSensor/scom_agent_health.ps1`, run on demand from the DEX console.
 
 ---
 
@@ -27,7 +26,7 @@ and gives you two columns that disagree at the edges.
 2. [Script Summary and Deployment Order](#2-script-summary-and-deployment-order)
 3. [Deployment Settings — All Scripts](#3-deployment-settings--all-scripts)
 4. [Deploying the Main Health Sweep](#4-deploying-the-main-health-sweep)
-5. [DEX Sensors — Capturing Results](#5-dex-sensors--capturing-results)
+5. [DEX Sensor — Capturing Results](#5-dex-sensor--capturing-results)
 6. [Deploying the Opt-In Spin-Off Scripts](#6-deploying-the-opt-in-spin-off-scripts)
 7. [VDI, Horizon, AVD and Golden Images](#7-vdi-horizon-avd-and-golden-images)
 8. [Recommended DEX Dashboards and Alerts](#8-recommended-dex-dashboards-and-alerts)
@@ -39,7 +38,7 @@ and gives you two columns that disagree at the edges.
 
 ## 1. Overview
 
-This folder contains six deployable PowerShell scripts and eight sensors that detect and remediate common
+This folder contains six deployable PowerShell scripts and one one-time sensor that detect and report common
 Operations Manager agent (`HealthService` / Microsoft Monitoring Agent) health problems. They
 follow the same step-engine pattern used across all DEX solution scripts: each step returns
 `Passed`, `Warning`, or `Failed`, remediations run automatically where safe, and the script exits
@@ -73,26 +72,25 @@ Tier 2 — Deploy to targeted rings only (opt-in, higher impact)
   Invoke-AutoRemediateSCOMMonitoringHost.ps1        <- Agent recycle
   Invoke-AutoRemediateSCOMClonedIdentity.ps1        <- Identity reset (DESTRUCTIVE, highest blast radius)
 
-Sensors — read what Tier 1 caches, no independent detection logic
-  Sensors/*.ps1              <- recurring, <2s cache readers (deployable today)
-  OneTimeSensor/*.ps1        <- heavier one-shot JSON sensor (needs the DEX one-time sensor run capability)
+Sensor — on demand only, does its own detection
+  OneTimeSensor/scom_agent_health.ps1   <- one-time ("run-once") JSON sensor, never scheduled
 ```
 
-Use the DEX sensor values written by the main sweep to decide which devices need a Tier 2 script —
-target by signal, not by collection.
+Use a one-time sensor run to decide which devices need a Tier 2 script: target by signal, not by
+collection.
 
 ### The MMA / Log Analytics caveat
 
 `HealthService.exe` — the Microsoft Monitoring Agent — is the **same binary** used by the Azure
 Log Analytics agent (formerly OMS). A device can therefore have the agent installed, report a
-valid `scom_agent_version`, and be reporting to a Log Analytics workspace rather than to any SCOM
+valid `AgentVersion`, and be reporting to a Log Analytics workspace rather than to any SCOM
 management group at all.
 
 On such a device the sweep reports `NoManagementGroup`, which is correct but not actionable: there
 is no SCOM management group because the agent was never meant to have one. **Filter these out
 before treating `NoManagementGroup` as a fleet problem.** The cleanest discriminator is
-`scom_agent_health_reason` = `NoManagementGroup` combined with a non-empty `scom_agent_version` —
-that pairing means "agent present, not a SCOM agent". Confirm against your Azure Monitor
+`HealthReason` = `NoManagementGroup` combined with a non-empty `AgentVersion` in the one-time
+sensor's JSON: that pairing means "agent present, not a SCOM agent". Confirm against your Azure Monitor
 inventory before acting.
 
 None of the Tier 2 scripts should be pointed at a Log Analytics-only device. `ClonedIdentity` in
@@ -111,13 +109,10 @@ particular would reset an identity that no SCOM management group is tracking.
 | `Invoke-AutoRemediateSCOMMonitoringHost.ps1` | 2 | Agent service recycle | Sweep reports sustained high CPU/RAM footprint |
 | `Invoke-AutoRemediateSCOMClonedIdentity.ps1` | 2 | Agent identity reset | Sweep reports registration rejection on a confirmed clone |
 
-Deploy **all three Tier 1 parts first**, with Part 3 scheduled last. Let them run for at least 24 hours and use its sensor output to build
-targeted smart groups before deploying any Tier 2 script. Deploying a Tier 2 script fleet-wide
-defeats the entire design.
-
-If deploying scripts is not an option on your fleet, `Sensors/Standalone/` gives you a
-sensors-only deployment that measures the device directly — at the cost of every check that needs
-a network call or an event log query. See [§5](#standalone-sensors--no-sweep-script-required).
+Deploy **all three Tier 1 parts first**, with Part 3 scheduled last. Let them run for at least
+24 hours, then run the one-time sensor against the fleet and use its `HealthReason` and metric
+fields to build targeted smart groups before deploying any Tier 2 script. Deploying a Tier 2
+script fleet-wide defeats the entire design.
 
 ---
 
@@ -234,45 +229,50 @@ is PKI-owned; step 13 cross-references `GenericTroubleshooting/TimeSyncHealth`).
 | `1` | At least one step in that part failed |
 
 ---
-## 5. DEX Sensors — Capturing Results
+## 5. DEX Sensor — Capturing Results
 
-The sweep writes every metric to `HKLM:\Software\AirWatch\Extensions\SCOM`. The sensors in
-`Sensors/` are **pure cache readers** — they contain no detection logic of their own, make no
-network calls, and complete in well under 2 seconds. That split is deliberate: sensors are
-serialized fleet-wide, so a sensor that did its own event-log mining would block every other
-sensor behind it on every sample interval.
+The folder ships **one sensor**: `OneTimeSensor/scom_agent_health.ps1`, a one-time ("run-once")
+sensor triggered on demand from the DEX console. The recurring cache readers that used to live in
+`Sensors/` and `Sensors/Standalone/` were removed on 2026-11-10; on-demand runs replace them.
 
-**Every sensor in `Sensors/` depends on the three Tier 1 parts being scheduled.** Without them they
-all return their fallback values forever. Set the sensor sample schedule to match or lag the sweep
-schedule — sampling more often than the sweep runs just re-reads the same cached values.
+**Never schedule it as a recurring sensor.** It mines the `Operations Manager` and ESENT event logs
+and makes a real TCP probe to the management server, which a recurring sensor on every device on
+every interval cannot afford. It self-enforces a 25-second deadline under the 30-second UEM hard
+ceiling; phases skipped by that deadline report `-4` and `TimedOut` is set `true`.
 
-If you do not want to deploy the sweep scripts at all, `Sensors/Standalone/` measures the device
-directly instead. See [Standalone sensors](#standalone-sensors--no-sweep-script-required) below for
-what that costs you.
+It is fully self-contained: it does its own detection and reads no cache, so it works on a device
+where the sweep has never run. It returns the whole agent picture, all fourteen sweep checks, as
+one compact JSON object. The fields most reports start from:
 
-| Sensor | Type | Fallback | Reports |
-|---|---|---|---|
-| `scom_agent_health_score.ps1` | Integer | `-1` | Composite health, 0–100 |
-| `scom_agent_health_reason.ps1` | String | `""` | Largest single deduction from the score |
-| `scom_management_server_reachable.ps1` | Boolean | *(no sample)* | MS answered on its configured port at the last sweep |
-| `scom_agent_version.ps1` | String | `""` | Four-part agent file version |
-| `scom_config_age_hours.ps1` | Integer | `-1` | Hours since the connector config cache was written |
-| `scom_state_folder_mb.ps1` | Integer | `-1` | Health Service State folder size |
-| `scom_monitoringhost_memory_mb.ps1` | Integer | `-1` | HealthService + MonitoringHost combined working set |
+| JSON field | Type | Meaning |
+|---|---|---|
+| `HealthScore` | Integer | Composite health, 0–100; `-1` when no agent is installed |
+| `HealthReason` | String | Largest single deduction from the score (table below) |
+| `Findings` | Array | Every deduction that applied, as text |
+| `AgentInstalled`, `AgentVersion` | Boolean, String | Presence and four-part file version |
+| `MsReachable`, `MsProbeResult` | Boolean, String | Management server probe and why it ended |
+| `ConfigAgeHours`, `StateFolderMB`, `StoreDbMB` | Integer | Cache freshness and state size |
+| `RuntimeMemoryMB`, `RuntimeCpuPercent` | Integer | HealthService + MonitoringHost footprint |
+| `OpsLogAvailable`, `ConnectFailures24h`, `AuthFailures24h`, `NotRegistered24h` | Boolean, Integer | Operations Manager event counts |
+| `StoreDbErrors24h`, `CertExpiryDays`, `TimeSyncAgeHours` | Integer | ESENT store errors, channel certificate, last time sync |
+| `TimedOut` | Boolean | `true` when the deadline skipped a phase |
+
+The sweep scripts (Tier 1) still cache their own results under
+`HKLM:\Software\AirWatch\Extensions\SCOM`, but nothing in the repo reads that cache back into DEX
+any more. To see a fleet's state, run the one-time sensor against the smart group.
 
 ### Reading the sentinels
 
-**`-1` is not a low score.** For every Integer sensor here, `-1` means *not measured* — no agent
-installed, or that metric could not be read. It is a different fact from a genuine bad reading.
+**`-1` is not a low score.** For every numeric field, `-1` means *not measured*, `-2` means *not
+applicable* (no agent, or that feature is not present), and `-4` means the deadline skipped that
+phase. Each is a different fact from a genuine bad reading.
 
-Filter `-1` out **before** averaging or ranking anything. A fleet of healthy devices that simply
-never had the agent installed will otherwise drag every average down and make the dashboard
-meaningless.
+Filter the sentinels out **before** averaging or ranking anything. A fleet of healthy devices that
+simply never had the agent installed will otherwise drag every average down.
 
-`scom_management_server_reachable` deliberately emits **no value at all** when it cannot tell,
-rather than `$false`. Any boolean fallback would be a lie — `$false` reads as a real "the
-management server is down" finding, and a missing cache means the sweep has not run, not that the
-management group is broken.
+**When `TimedOut` is `true`, treat `HealthScore` as a floor, not a verdict:** whatever the skipped
+phases would have deducted is missing from it. Filter on `TimedOut` before trending, the same way
+you filter on `-1`.
 
 ### Health reason values
 
@@ -297,122 +297,19 @@ the single largest one.
 | `IntermittentConnectivity` | 5 | Mixed |
 | `Healthy` | — | — |
 | `NoAgentInstalled` | — | Not a fault — exclude from all reporting |
-| `IncompleteSweep` | — | Part 1 or 2 has not run in 26h. **Not a health finding** — a scheduling fault. Score is `-1`. |
 
 Rows marked **Server** or **PKI** will not improve no matter what you deploy from this folder.
 
-### Standalone sensors — no sweep script required
-
-`Sensors/Standalone/` holds a second, independent set that measures the device directly at sample
-time. No registry cache, no scheduled script, nothing to deploy but the sensor itself. Use this set
-when you want SCOM agent visibility in DEX without putting the Tier 1 sweep on the fleet.
-
-**Deploy one set or the other, never both.** Where a standalone sensor has a cached twin, the two
-report the same attribute under different names — running both doubles the sensor queue for one
-number and gives you two columns that will disagree at the edges.
-
-| Standalone sensor | Type | Fallback | Cached twin |
-|---|---|---|---|
-| `scom_agent_health_score_standalone.ps1` | Integer | `-1` | `scom_agent_health_score.ps1` |
-| `scom_agent_health_reason_standalone.ps1` | String | `""` | `scom_agent_health_reason.ps1` |
-| `scom_agent_version_standalone.ps1` | String | `""` | `scom_agent_version.ps1` |
-| `scom_config_age_hours_standalone.ps1` | Integer | `-1` | `scom_config_age_hours.ps1` |
-| `scom_state_folder_mb_standalone.ps1` | Integer | `-1` | `scom_state_folder_mb.ps1` |
-| `scom_monitoringhost_memory_mb_standalone.ps1` | Integer | `-1` | `scom_monitoringhost_memory_mb.ps1` |
-| `scom_healthservice_running_standalone.ps1` | Boolean | *(no sample)* | **none — new** |
-| `scom_management_group_count_standalone.ps1` | Integer | `-1` | **none — new** |
-| `scom_cert_expiry_days_standalone.ps1` | Integer | `-1` | **none — new** |
-
-The last three have no cached equivalent. The sweep records all three metrics but exposes them only
-through the health score, so these are additions rather than replacements — and they are the three
-most useful standalone signals, because each one is a fault the score alone will not name.
-
-There is deliberately **no standalone `scom_management_server_reachable`**. Answering it means
-opening a TCP connection to the management server, and a recurring sensor must not make network
-calls — it runs on every device on every sample interval, and the sensor queue is serialized. That
-sensor stays cache-backed, or you use the one-time sensor below.
-
-#### What the standalone score cannot see
-
-This is the part worth reading before choosing. `scom_agent_health_score_standalone` uses the same
-point values, the same thresholds and the same reason names as the sweep, over a strictly smaller
-set of rules:
-
-| Deduction | Points | Standalone | Why |
-|---|---:|---|---|
-| `HealthServiceStopped` | 40 | ✅ | Service query |
-| `ManagementServerUnreachable` | 25 | ❌ | Needs a socket probe |
-| `AgentNotRegistered` | 25 | ❌ | Needs the Operations Manager event log |
-| `NoManagementGroup` | 20 | ✅ | Registry |
-| `ConnectorAuthenticationFailure` | 20 | ❌ | Needs the Operations Manager event log |
-| `HealthServiceStoreCorruption` | 20 | ❌ | Needs the ESENT event log |
-| `ConfigurationCacheStale` | 15 | ✅ | File timestamp |
-| `AgentRuntimeFootprintHigh` | 15 | ✅ | Process query |
-| `ChannelCertificateProblem` | 15 | ✅ | Certificate store |
-| `TimeSkew` / `TimeSyncStale` | 15 | ⚠️ | Sync **age**, not measured skew — see below |
-| `WorkflowsUnloaded` | 10 | ❌ | Needs the Operations Manager event log |
-| `HealthServiceStateOversized` | 10 | ✅ | Folder size |
-| `MultiHomedAgent` | 5 | ✅ | Registry |
-| `IntermittentConnectivity` | 5 | ❌ | Needs the Operations Manager event log |
-
-The sweep can deduct **235** points. The standalone set can deduct **130**.
-
-**So a standalone `100` means "no locally visible fault", not "healthy".** A device that cannot
-reach its management server at all — the single most common real finding on a laptop fleet — still
-scores 100 here. Every event-log-derived signal is missing for the same reason: a `Get-WinEvent`
-pass costs seconds, and sensors have a 5-second budget they share with every other sensor on the
-device.
-
-Two reason values differ from the cached set on purpose, so the two datasets can never be silently
-pooled:
-
-- **`HealthyLocal`** instead of `Healthy` — it means nothing local is wrong, which is a weaker
-  claim.
-- **`TimeSyncStale`** instead of `TimeSkew` — the sweep measures real clock offset with `w32tm.exe`;
-  a sensor may not launch a process, so the standalone version reads the age of the last successful
-  sync from the registry instead. Related signal, different measurement, different name.
-
-#### Recommended use
-
-Run `OneTimeSensor/scom_agent_health.ps1` **once** against the same fleet. It does the full
-fourteen-step assessment in a single collection, and the gap between its `HealthScore` and the
-standalone score is a direct measurement of what you are giving up. If that gap is small on your
-fleet, the standalone set is enough. If it is large, deploy the sweep.
-
-One runtime note: `scom_state_folder_mb_standalone` is the only sensor here with an unbounded worst
-case, because it walks the state folder subtree. In practice it returns in well under a second —
-state-folder bloat is almost always a handful of very large files, not a large file count — but on
-a fleet known to have deep per-workflow cache sprawl, use the cached twin instead. A script has the
-budget for that walk; a sensor does not.
-### One-time sensor — `OneTimeSensor/scom_agent_health.ps1`
-
-> **This is not deployable as a recurring sensor and is not usable until the DEX/Workspace ONE
-> Intelligence one-time ("run-once") sensor capability ships.** It is kept in a separate folder
-> specifically so nobody schedules it by mistake.
-
-It returns the entire agent picture — every metric above plus failover server count, store DB
-size, per-category event counts, certificate expiry, and a `Findings` array — as one compact JSON
-object. It is fully self-contained: it does its own detection and reads no cache, so it works on a
-device where the sweep has never run.
-
-It mines the `Operations Manager` event log and makes a real TCP probe to the management server,
-which is why it must stay one-time only. It self-enforces a 25-second deadline under the 30-second
-UEM hard ceiling; phases skipped by that deadline report `-4` and `TimedOut` is set `true`.
-
-**When `TimedOut` is `true`, treat `HealthScore` as a floor, not a verdict** — whatever the skipped
-phases would have deducted is missing from it. Filter on `TimedOut` before trending, the same way
-you filter on `-1`.
-
-Use it for a single on-demand pull against one device or a small set. Use the sweep plus `Sensors/`
-for continuous fleet reporting.
-
+One deliberate divergence from the sweep: the sweep's `TimeSkew` is measured clock offset
+(`w32tm.exe`), while this sensor reads the age of the last successful sync from the registry,
+because a sensor may not launch a process. The two scores can differ by those 15 points.
 ---
 
 ## 6. Deploying the Opt-In Spin-Off Scripts
 
 Each spin-off should be deployed as a **separate script** against a **targeted smart group** built
-from the sensor data in section 5. Deploy to a pilot ring first, observe sensor values the
-following day, then expand.
+from a one-time sensor run (section 5). Deploy to a pilot ring first, run the one-time sensor
+against it the following day, then expand.
 
 All three share the launcher/payload pattern described in section 3 — **the AV/EDR exclusion is a
 prerequisite, not an optimisation.**
@@ -442,9 +339,9 @@ This is a deliberate second key. Targeting the right smart group is the first.
 | Trigger | On-demand / Freestyle (not scheduled) |
 | Environment | `ConfirmHighImpact` = `true` (**required**), `WhatIf` = `true` for a dry run |
 
-**Target smart group — build from `scom_state_folder_mb` and `scom_agent_health_reason`:**
-- `scom_state_folder_mb` greater than `1536`, **or**
-- `scom_agent_health_reason` equals `HealthServiceStoreCorruption` or `ConfigurationCacheStale`
+**Target smart group — from a one-time sensor run, devices where:**
+- `StateFolderMB` is greater than `1536`, **or**
+- `HealthReason` equals `HealthServiceStoreCorruption` or `ConfigurationCacheStale`
 
 **What it does:** stops HealthService, renames the `Health Service State` folder, starts the
 service, and waits for the agent to re-download its configuration from the management server.
@@ -506,8 +403,8 @@ belong to `Invoke-AutoRemediateSCOMClonedIdentity.ps1`.
 | Trigger | Scheduled — daily, or on-demand |
 | Environment | `WhatIf` = `true` for a dry run |
 
-**Target smart group — build from `scom_monitoringhost_memory_mb`:**
-- Value greater than `500`, or `scom_agent_health_reason` equals `AgentRuntimeFootprintHigh`
+**Target smart group — from a one-time sensor run, devices where:**
+- `RuntimeMemoryMB` is greater than `500`, or `HealthReason` equals `AgentRuntimeFootprintHigh`
 
 **No `ConfirmHighImpact` gate, and that is intentional.** Recycling restarts only the agent's own
 service. Nothing else on the device depends on it, no data is at risk, and the agent rebuilds
@@ -541,8 +438,8 @@ Look at what is targeted at that device before recycling it again.
 | Trigger | On-demand only |
 | Environment | `ConfirmHighImpact` = `true` (**required**), `WhatIf` = `true` for a dry run |
 
-**Target smart group — build from `scom_agent_health_reason`:**
-- Equals `AgentNotRegistered`, **and** the device is a known clone from a golden image
+**Target smart group — from a one-time sensor run, devices where:**
+- `HealthReason` equals `AgentNotRegistered`, **and** the device is a known clone from a golden image
 
 **Read section 7 before deploying this to anything.**
 
@@ -613,7 +510,7 @@ reset actually survives.
 
 ### Agent footprint is multiplied by session density
 
-On a Horizon or AVD session host, `scom_monitoringhost_memory_mb` is per-session, and the host pays
+On a Horizon or AVD session host, the agent footprint (`RuntimeMemoryMB`) is per-session, and the host pays
 for all of them at once. An agent footprint that is unremarkable on a laptop is real host memory
 pressure at 40 sessions. This usually surfaces as a host capacity problem rather than as a SCOM
 problem, which is why it is easy to miss.
@@ -639,19 +536,19 @@ confirm that was intended.
 
 ## 8. Recommended DEX Dashboards and Alerts
 
-### Suggested Custom Attributes to Promote
+### Fields to report on from a one-time sensor run
 
-| Attribute | Source Sensor | Threshold for Alert |
-|---|---|---|
-| SCOM Agent Health Score | `scom_agent_health_score` | `< 70` → warning, `< 40` → critical (**exclude `-1`**) |
-| SCOM Health Reason | `scom_agent_health_reason` | Group by value; exclude `NoAgentInstalled` |
-| Management Server Reachable | `scom_management_server_reachable` | `False` → alert (see fleet-wide note below) |
-| Agent Version | `scom_agent_version` | Group by exact value to find outliers |
-| Config Age (hours) | `scom_config_age_hours` | `> 24` → warning (**exclude `-1`**) |
-| State Folder MB | `scom_state_folder_mb` | `> 1536` → warning (**exclude `-1`**) |
-| Agent Memory MB | `scom_monitoringhost_memory_mb` | `> 500` → warning (**exclude `-1`**) |
+| Field | Threshold |
+|---|---|
+| `HealthScore` | `< 70` → warning, `< 40` → critical (**exclude `-1`**, and `TimedOut` = `true`) |
+| `HealthReason` | Group by value; exclude `NoAgentInstalled` |
+| `MsReachable` | `false` with `MsProbeResult` other than `TimedOut` → alert (see fleet-wide note below) |
+| `AgentVersion` | Group by exact value to find outliers |
+| `ConfigAgeHours` | `> 24` → warning (**exclude negatives**) |
+| `StateFolderMB` | `> 1536` → warning (**exclude negatives**) |
+| `RuntimeMemoryMB` | `> 500` → warning (**exclude negatives**) |
 
-> **Version sorting:** `scom_agent_version` is a String, and string comparison does not order
+> **Version sorting:** `AgentVersion` is a String, and string comparison does not order
 > versions correctly — `10.19.10552.0` sorts *below* `10.19.1082.0`. Group by exact value rather
 > than filtering on greater-than.
 
@@ -689,12 +586,12 @@ into* the device; a broken SCCM client degrades the device itself.
 
 | Ring | Scope | What to Validate |
 |---|---|---|
-| Pilot (1–5%) | IT devices, volunteered users | Script output readable, sensors returning expected values, guard clause exits cleanly on devices with no agent |
+| Pilot (1–5%) | IT devices, volunteered users | Script output readable, one-time sensor returning expected JSON, guard clause exits cleanly on devices with no agent |
 | Ring 1 (10%) | Representative sample across models, OS builds, and at least one VDI pool | Exit code distribution, `-1` rate (how many devices have no agent), health score distribution |
 | Ring 2 (50%) | Broad fleet minus session hosts | At-scale management server load; confirm no reason value dominates unexpectedly |
 | Production (100%) | All Windows managed devices | Ongoing via DEX dashboard |
 
-Wait at least **24 hours** between rings and collect sensor data after each before expanding.
+Wait at least **24 hours** between rings and run the one-time sensor against each before expanding.
 
 **For Tier 2 scripts, ring sizes should be far smaller** — start with a handful of named devices,
 verify the cached `Status` value and the script log at
@@ -791,11 +688,18 @@ Check `Part1RunTime`, `Part2RunTime` and `Part3RunTime` under
 
 `ScoreComplete = 0` records the same condition as a DWORD if you would rather alert on that.
 
-### Sensors disagree with each other
+### The one-time sensor and the sweep disagree
+
+Expected at the edges: the sensor measures the device at the moment it runs, while the sweep's
+cache advances in sweep-sized steps, and the two `TimeSkew` measurements differ by design (§5).
+Persistent disagreement on anything else means a sweep part is failing partway; check
+`ScoreComplete` and the three `PartNRunTime` values under `HKLM:\Software\AirWatch\Extensions\SCOM`.
+
+### Cached `HealthScore` and the per-metric values disagree
 
 Check `ScoreComplete` first. When it is `0`, `HealthScore` and `HealthReason` are sentinels while
-the per-metric sensors (`scom_state_folder_mb`, `scom_config_age_hours`, and so on) still report
-whatever their owning part last cached. That is intended — a stale per-metric value is still a real
+the per-metric cache values (`StateFolderMB`, `ConfigAgeHours`, and so on) still hold whatever
+their owning part last cached. That is intended — a stale per-metric value is still a real
 measurement, while a partial *score* is not.
 ### Every device reports `HealthScore = -1`
 
@@ -806,14 +710,17 @@ service and no agent registry root), which is a correct result on an unmonitored
 If `AgentInstalled` is absent entirely, the sweep never executed. Confirm the script is assigned,
 running in **System** context, and that `LastRunTime` exists.
 
-### Sensors return fallback values but the sweep clearly ran
+### The one-time sensor returns nothing or times out
 
-The sensors read `HKLM:\Software\AirWatch\Extensions\SCOM` (the plural `Extensions`, matching the
-VPN and logon sensor convention — **not** the `Extension` singular used by the SCCM scripts). If
-you adapted a sensor from the SCCM folder, check that path first.
+Confirm it was run as a one-time sensor in **System** context with a String response type, and
+that the device was online for the run. `TimedOut` = `true` means the 25-second budget ran out,
+usually on the management server probe; the phases it skipped report `-4`.
 
-Then confirm the sensor is running in System context. A sensor in User context cannot read HKLM
-reliably and will silently return its fallback.
+### Reading the sweep cache by hand
+
+The sweep writes `HKLM:\Software\AirWatch\Extensions\SCOM` (the plural `Extensions`, matching the
+VPN and logon convention — **not** the `Extension` singular used by the SCCM scripts). Read it
+from an elevated or SYSTEM shell.
 
 ### A whole ring reports `ManagementServerUnreachable` simultaneously
 
@@ -829,7 +736,7 @@ Confirm TCP 5723 from a representative device, then escalate to whoever owns the
 Two possibilities, and they are easy to confuse:
 
 1. The agent is a **Log Analytics agent**, not a SCOM agent — same binary, no SCOM management
-   group. See section 1. Check whether `scom_agent_version` is populated; if it is, the agent is
+   group. See section 1. Check whether `AgentVersion` is populated; if it is, the agent is
    installed and healthy, just not yours.
 2. The agent was genuinely never assigned or its assignment was removed server-side. This is a
    management server action — approve or assign the agent in the console.

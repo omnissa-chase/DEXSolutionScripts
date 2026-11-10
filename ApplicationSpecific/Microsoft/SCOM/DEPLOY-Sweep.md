@@ -1,12 +1,12 @@
-# Solution A — Sweep Scripts + Cached Sensors
+# SCOM Agent Sweep — Scripts + One-Time Sensor
 
-**The full-coverage option.** Three scheduled scripts run a 14-step assessment of the Operations
-Manager agent and cache every metric; seven lightweight sensors read that cache and report to DEX.
+**The supported deployment.** Three scheduled scripts run a 14-step assessment of the Operations
+Manager agent, remediate what is safe and cache every metric on the device; the one-time sensor
+`OneTimeSensor/scom_agent_health.ps1` reports the full picture to DEX on demand.
 
-Choosing between the two solutions:
-
-| | **Solution A** (this document) | **Solution B** ([sensors only](DEPLOY-B-Sensors-Only.md)) |
-|---|---|---|
+The recurring cache-reader sensors and the sensors-only option (old Solution B) were removed on
+2026-11-10.
+---|---|---|
 | Objects to deploy | 3 scripts + 7 sensors | 9 sensors |
 | Checks covered | 14 of 14 | 8 of 14 |
 | Health score range | 235 deductible points | 130 deductible points |
@@ -46,26 +46,15 @@ limit, so it ships split into three objects that share one registry cache at
 | `Invoke-AutoRemediateSCOMAgentPart2.ps1` | 6–10 — state folder, store DB, runtime footprint, connector failures, workflow health | 26,090 | Nothing |
 | `Invoke-AutoRemediateSCOMAgentPart3.ps1` | 11–14 — channel certificate, agent version, time skew, sub-services — **plus the health score** | 27,705 | Nothing |
 
-**Seven sensors**, all pure cache readers from `Sensors/`. They contain no detection logic, make no
-network calls, and finish in well under two seconds.
-
-| Sensor | Type | Fallback |
-|---|---|---|
-| `scom_agent_health_score.ps1` | Integer | `-1` |
-| `scom_agent_health_reason.ps1` | String | `""` |
-| `scom_management_server_reachable.ps1` | Boolean | *(no sample)* |
-| `scom_agent_version.ps1` | String | `""` |
-| `scom_config_age_hours.ps1` | Integer | `-1` |
-| `scom_state_folder_mb.ps1` | Integer | `-1` |
-| `scom_monitoringhost_memory_mb.ps1` | Integer | `-1` |
+**One one-time sensor**, `OneTimeSensor/scom_agent_health.ps1`, String (JSON). It does its own
+detection, reads no cache and returns all fourteen checks plus the health score in one pull, so it
+also works on a device where the sweep has not run yet. Field reference:
+[README §5](README.md#5-dex-sensor--capturing-results). Run it on demand; never schedule it.
 
 > **Do not deploy `Invoke-AutoRemediateSCOMAgent.ps1`.** It is the combined reference
 > implementation, 48,336 characters, and UEM will reject it. It is kept in the folder for reading,
 > not for assignment.
->
-> **Do not deploy `Sensors/Standalone/` alongside these.** That is Solution B. Running both gives
-> you two columns reporting the same attribute under different names, and they will disagree at the
-> edges.
+
 
 ---
 
@@ -80,7 +69,7 @@ network calls, and finish in well under two seconds.
 - **A test device with the SCOM agent installed** for the local test in section 3. An agentless
   device is still worth testing (it exercises the guard clause) but proves nothing about the
   fourteen checks.
-- **No AV/EDR exclusion needed for Solution A.** The three sweep parts run inline. Exclusions are
+- **No AV/EDR exclusion needed for the sweep.** The three sweep parts run inline. Exclusions are
   only required if you later add the Tier 2 scripts — see [section 7](#7-adding-the-tier-2-remediation-scripts).
 
 ---
@@ -216,26 +205,21 @@ Get-ItemProperty 'HKLM:\Software\AirWatch\Extensions\SCOM' |
 This is why you assign the scripts to **all** Windows devices rather than only agent devices —
 unmonitored devices become identifiable in DEX rather than simply absent.
 
-### 3.8 Run the sensors
+### 3.8 Run the one-time sensor
 
-Each sensor must emit **exactly one value**. Anything else is a defect that UEM will record as a
-type mismatch:
+It must emit **exactly one line** of JSON and finish inside its 25-second budget:
 
 ```powershell
-Get-ChildItem .\Sensors\*.ps1 | ForEach-Object {
-    $sw  = [System.Diagnostics.Stopwatch]::StartNew()
-    $out = @(& $_.FullName)
-    $sw.Stop()
-    '{0,-40} values={1} ms={2,-5} => {3}' -f `
-        $_.Name, $out.Count, $sw.ElapsedMilliseconds, ($out -join '|')
-}
+$sw  = [System.Diagnostics.Stopwatch]::StartNew()
+$out = @(& '.\OneTimeSensor\scom_agent_health.ps1')
+$sw.Stop()
+'lines={0} ms={1}' -f $out.Count, $sw.ElapsedMilliseconds
+$json = $out[0] | ConvertFrom-Json
+$json | Select-Object HealthScore, HealthReason, TimedOut, AgentVersion, MsReachable
 ```
 
-**Expected:** `values=1` for every sensor except `scom_management_server_reachable` on a device
-where the sweep could not determine reachability, where `values=0` is correct — it deliberately
-emits nothing rather than a `$false` that would read as a real outage. Every sensor should be well
-under 2,000 ms.
-
+**Expected:** `lines=1`, `TimedOut` false, and a `HealthScore` within 15 points of the cached
+`HealthScore` from 3.5 (the two `TimeSkew` measurements differ by design).
 ### 3.9 Time it against the UEM timeouts
 
 Part 2 does the event-log work and is always the slowest. Confirm it fits inside the timeout you
@@ -323,27 +307,23 @@ Per-script:
 > mistake shows up as a fleet of `-1`s rather than as bad data — see
 > [section 8](#8-troubleshooting).
 
-### 4.2 Sensors
+### 4.2 One-time sensor
 
 | Setting | Value |
 |---|---|
 | Execution Context | System |
 | Architecture | x64 |
-| Trigger | Windows Sample Schedule |
+| Response data type | String |
+| Trigger | None: run on demand from the DEX console (one-time / run-once) |
 | Assignment | Same smart group as the scripts |
 
-Set the sample schedule to **match or lag the sweep schedule**. Sampling more often than the sweep
-runs just re-reads the same cached values and burns sensor-queue time fleet-wide for nothing.
-
-Declare each sensor with the response data type from the table in
-[section 1](#1-what-you-are-deploying). A mismatch there is the most common cause of a sensor that
-"reports nothing" in Intelligence.
+**Never give it a sample schedule.** It reads two event logs and probes the management server,
+which is affordable once on demand and not on every device every interval.
 
 ---
-
 ## 5. Validating the first fleet run
 
-Give it 24 hours plus one sensor sample interval, then check these in order. Each one isolates a
+Give it 24 hours, run the one-time sensor against the smart group, then check these in order. Each one isolates a
 different failure.
 
 **1. Are the scripts running at all?**
@@ -355,22 +335,21 @@ This is the single most useful number in the whole deployment. If it is not near
 scheduling is wrong and every score you are looking at is a sentinel rather than a measurement. Fix
 this before reading anything else.
 
-**3. Split the fleet three ways on `scom_agent_health_reason`:**
+**3. Split the fleet on the sensor's `HealthReason`:**
 
 | Population | Meaning | Action |
 |---|---|---|
 | `NoAgentInstalled` | No agent on the device | Exclude from every rate and average. Confirm the count matches what you expect — a surprise here is usually a scope problem. |
-| `IncompleteSweep` | Part 1 or 2 has not run in 26h | Scheduling fault, not a health finding |
 | everything else | Real findings | Rank by count, not by device |
 
-**4. Only now look at `scom_agent_health_score`.**
-Filter out `-1` **before** averaging or ranking. A fleet of healthy devices that never had the
-agent installed will otherwise drag every average down and make the dashboard meaningless.
+**4. Only now look at `HealthScore`.**
+Filter out `-1`, and rows with `TimedOut` = `true`, **before** averaging or ranking. A fleet of
+healthy devices that never had the agent installed will otherwise drag every average down.
 
 **5. Sanity-check one device end to end.**
-Pick a device reporting a specific reason, open it, and confirm the individual sensors agree —
-e.g. a device reporting `HealthServiceStateOversized` should have a large `scom_state_folder_mb`.
-If they disagree, see [section 8](#8-troubleshooting).
+Pick a device reporting a specific reason and confirm its fields agree, e.g. a device reporting
+`HealthServiceStateOversized` should have a large `StateFolderMB`, and compare with the sweep's
+cache on that device. If they disagree, see [section 8](#8-troubleshooting).
 
 ---
 
@@ -425,10 +404,10 @@ and cooldowns.
 |---|---|
 | Every device reports `HealthScore = -1` | Scripts not assigned, not running as SYSTEM, or Part 3 running before Parts 1 and 2. Check `ScoreComplete` and the three `PartNRunTime` values. |
 | `HealthReason = IncompleteSweep` on many devices | Scheduling. Part 3 must run at least 15 minutes after Parts 1 and 2, and within 26 hours of them. |
-| Sensors return fallbacks but the sweep clearly ran | Sensor running in User context, or declared with the wrong response data type. |
-| Sensors disagree with each other | Normal briefly — sensors read a cache that advances in sweep-sized steps. Persistent disagreement means a part is failing partway; check for a missing `PartNRunTime`. |
+| One-time sensor returns nothing | Not run in System context, wrong response data type, or the device was offline for the run. |
+| One-time sensor and the sweep cache disagree | Normal at the edges: the sensor measures now, the cache advances in sweep-sized steps, and `TimeSkew` is measured differently. Persistent disagreement means a part is failing partway; check for a missing `PartNRunTime`. |
 | A whole ring reports `ManagementServerUnreachable` at once | Server-side or network. Nothing in this folder will clear it. |
-| `NoManagementGroup` on devices that should be monitored | Often a Log Analytics / Azure Monitor install of the same MMA binary rather than a broken SCOM agent. Cross-reference `scom_agent_version`. |
+| `NoManagementGroup` on devices that should be monitored | Often a Log Analytics / Azure Monitor install of the same MMA binary rather than a broken SCOM agent. Cross-reference `AgentVersion`. |
 | Script times out in UEM | Almost always Part 2 on slow storage. Raise its timeout; do not lower `$EventLookbackHours` first. |
 
 Full troubleshooting reference: [README §11](README.md#11-troubleshooting).

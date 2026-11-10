@@ -21,15 +21,14 @@ Tier 2 — opt-in, targeted rings only
   Invoke-AutoRemediateSCOMMonitoringHost.ps1       <- agent recycle
   Invoke-AutoRemediateSCOMClonedIdentity.ps1       <- identity reset (DESTRUCTIVE, highest blast radius)
 
-Sensors — read what Tier 1 caches, no independent detection logic
-  Sensors/*.ps1              <- 7 recurring, <2s cache readers (works today)
-  OneTimeSensor/*.ps1        <- heavier one-shot JSON sensor (needs upcoming DEX one-time sensor run capability)
+Sensor — on demand only, does its own detection
+  OneTimeSensor/scom_agent_health.ps1   <- one-time JSON sensor (recurring Sensors/ sets removed 2026-11-10)
 ```
 
 Registry contract (plural `Extensions`, matching VPN/logon-sensor convention, not the SCCM
 `Extension` outlier): `HKLM:\Software\AirWatch\Extensions\SCOM\...`
 - `SCOM` itself — Tier 1 writes its values **flat onto this key** every run (Status, HealthScore,
-  HealthReason, per-metric values). Sensors only ever read here. (The original sketch had an
+  HealthReason, per-metric values). No sensor reads it any more (the cache readers were removed on 2026-11-10); it stays as the device-side record and for the Tier 2 gates. (The original sketch had an
   `AgentHealth` sub-key; it was dropped during implementation because a sub-key bought nothing —
   the Tier 2 sub-keys already namespace themselves, and a flatter path keeps each sensor to a
   single `Get-ItemProperty`.)
@@ -92,17 +91,17 @@ device.
   management server may still need an admin to approve/clean up the old registration.
 
 ## Sensors
-- `Sensors/` — recurring, pure cache readers of the flat `SCOM` key, one value via
-  `Write-Output`/`return`, type-valid fallbacks. Deployable today. All seven built:
-  `scom_agent_health_score`, `scom_agent_health_reason`, `scom_management_server_reachable`,
-  `scom_agent_version`, `scom_config_age_hours`, `scom_state_folder_mb`,
-  `scom_monitoringhost_memory_mb`.
-- `OneTimeSensor/scom_agent_health.ps1` — a heavier, self-contained JSON sensor for the upcoming
-  DEX/UEM Intelligence-triggered one-time sensor run. Kept in a separate folder so nobody
-  schedules it as a recurring sensor by mistake. README calls out explicitly that this piece isn't
-  usable until that DEX capability ships.
 
-  Now covers all 14 sweep steps: the startup-delay phase (sweep step 2) was the one gap and
+**Decision 2026-11-10 (user): the recurring sensors are removed and only the one-time sensor goes
+forward.** `Sensors/` (seven cache readers) and `Sensors/Standalone/` (nine direct-measurement
+sensors) were deleted with their inventory rows, manifest entries and the sensors-only deployment
+guide; reporting is through on-demand runs of `OneTimeSensor/scom_agent_health.ps1`. Their history,
+including the decimal-parse defect found in two cache readers, is in git before that date.
+
+- `OneTimeSensor/scom_agent_health.ps1` — a heavier, self-contained JSON sensor for the DEX one-time
+  ("run-once") sensor run. Kept in its own folder so nobody schedules it as a recurring sensor.
+
+  Covers all 14 sweep steps: the startup-delay phase (sweep step 2) was the one gap and
   has been added, using the same process-start-vs-boot heuristic from data already in hand.
   Its health score agrees with the split sweep on the same device (both 45 on the test
   fixture).
@@ -112,60 +111,6 @@ device.
   change the sweep's deductions and change them here in the same edit. One deliberate divergence —
   `TimeSkew` here is driven by time-sync age from the registry rather than measured clock skew,
   because a sensor must not launch `w32tm.exe`.
-
-- `Sensors/Standalone/` — a second recurring set that measures the device directly instead of
-  reading the cache, for fleets that will not deploy the sweep scripts. Nine sensors. Six are
-  twins of the cached set (`score`, `reason`, `agent_version`, `config_age_hours`,
-  `state_folder_mb`, `monitoringhost_memory_mb`); three have no cached equivalent
-  (`healthservice_running`, `management_group_count`, `cert_expiry_days`) because the sweep
-  records those metrics but exposes them only through the score. Deploy one set or the other.
-
-### Why the standalone set is not just "the cached set without the cache"
-
-The cache exists because two whole classes of check cannot run inside a 5-second recurring
-sensor: **network probes** and **event log queries**. Removing the script does not remove that
-constraint, it just moves who absorbs it. So the standalone score is a strict subset — same point
-values, same thresholds, same reason names, 130 deductible points against the sweep's 235:
-
-| Lost | Points | Needs |
-|---|---:|---|
-| `ManagementServerUnreachable` | 25 | a socket probe |
-| `AgentNotRegistered` | 25 | the Operations Manager log |
-| `ConnectorAuthenticationFailure` | 20 | the Operations Manager log |
-| `HealthServiceStoreCorruption` | 20 | the ESENT log |
-| `WorkflowsUnloaded` | 10 | the Operations Manager log |
-| `IntermittentConnectivity` | 5 | the Operations Manager log |
-
-**A standalone 100 therefore means "no locally visible fault", not "healthy"** — a device that
-cannot reach its management server at all still scores 100. That is stated in the file header, in
-the README, and in the inventory notes, because it is the one way this set can mislead.
-
-Two reason values are renamed so the datasets can never be pooled by accident: `HealthyLocal`
-rather than `Healthy`, and `TimeSyncStale` rather than `TimeSkew` (sync age from the registry, not
-measured offset — same reason as the one-time sensor).
-
-Two smaller decisions worth recording:
-
-- **No standalone `management_server_reachable`.** It is the one metric with no honest local
-  substitute, and faking one would be worse than omitting it.
-- **`state_folder_mb_standalone` accepts an unbounded worst case.** FSO walks the subtree in
-  native code and a blocking COM call cannot be time-boxed without a thread, which sensors may not
-  create. Accepted because the bloat case is a few very large files, not a large file count. The
-  composite score is protected differently: the folder walk runs last and is skipped entirely if
-  the sensor has already spent 2500 ms, trading a 10-point deduction for a guaranteed exit.
-
-### A real defect found while building this
-
-`scom_config_age_hours` and `scom_state_folder_mb` were returning `-1` on almost every device.
-Both metrics are written by the sweep with one decimal place (`"412.7"`), and
-`[int]::TryParse` rejects a decimal point outright — so the parse failed and the sensor emitted
-its not-measured sentinel. Silent, and indistinguishable from "the sweep never ran".
-
-Both now parse as `[double]` (invariant culture, then current culture) and round. Verified against
-`12.4`, `12`, `0.0`, `banana` and empty. The other cached sensors are unaffected —
-`RuntimeMemoryMB` and `CertExpiryDays` are rounded to whole numbers before they are written, and
-`AgentVersion` is a string.
-
 ## Status
 All built, parse-clean, and verified. `README.md` and the twelve `SCRIPT-INVENTORY-CSV.csv` rows
 are in place.

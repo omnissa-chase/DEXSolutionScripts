@@ -11,14 +11,14 @@
                    ceiling. MUST NOT be scheduled as a recurring sensor. See
                    GENERAL-SCRIPTS-SENSORS_RUNBOOK.md section 10.
 
-    A complete Operations Manager agent picture in one on-demand pull -- every metric
-    the Sensors/ folder exposes plus several it cannot, as one compact JSON object.
+    A complete Operations Manager agent picture in one on-demand pull, as one compact
+    JSON object. It is the only SCOM sensor in the repo (the recurring Sensors/ sets
+    were removed on 2026-11-10).
     Reads no cache and writes nothing: it does its own detection, so it works on a
     device where the sweep has never run.
 
-    Separate from Sensors/ because it mines the event log and makes a TCP probe (up to
-    25 s), which only a genuine one-time run can afford. Use the Part* sweep plus
-    Sensors/ for continuous reporting; this covers all 14 sweep steps in one pass.
+    It mines the event log and makes a TCP probe (up to 25 s), which only a genuine
+    one-time run can afford; it covers all 14 sweep steps in one pass.
     HealthScore/HealthReason mirror Part 3's deduction table: change both in the same
     edit. One divergence: the sweep's TimeSkew is measured skew, this one is time-sync
     age, so the two can differ by 15 points. Server-side findings (not approved, no
@@ -36,9 +36,8 @@
       -2  Not applicable -- feature or agent not present on this device
       -4  Timed out      -- self-enforced deadline reached before this phase ran
 
-    HealthScore is the exception: -1 for "no agent installed", matching the sweep and
-    Sensors/scom_agent_health_score.ps1 so the sources can be unioned. Read
-    HealthReason alongside it.
+    HealthScore is the exception: -1 for "no agent installed", matching the sweep's
+    cached HealthScore. Read HealthReason alongside it.
 
     Not collected: clock skew (needs w32tm.exe, and a sensor launches no process);
     TimeSyncAgeHours is the registry's last-sync time instead. Part 3 step 13 and
@@ -189,7 +188,7 @@ try {
         # Not a fault. This device was never in scope, and saying so in one place
         # keeps it out of every fleet average downstream.
         #
-        # HealthScore is -1 (not -2) to match the sweep and scom_agent_health_score.ps1
+        # HealthScore is -1 (not -2) to match the sweep's cached HealthScore
         # for "no agent installed", so the two sources can be unioned.
         $r.HealthScore  = $UNKNOWN
         $r.HealthReason = 'NoAgentInstalled'

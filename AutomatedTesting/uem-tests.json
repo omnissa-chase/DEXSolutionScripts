@@ -228,14 +228,6 @@
     "expectNoValue": true,
     "note": "Documented: no value is emitted without an active tunnel, because false would read as a real finding."
   },
-  "scom_management_server_reachable.ps1": {
-    "expectNoValue": true,
-    "note": "No SCOM agent on the lab VMs; the sensor returns without output when AgentInstalled is absent."
-  },
-  "scom_healthservice_running_standalone.ps1": {
-    "expectNoValue": true,
-    "note": "No SCOM agent root on the lab VMs; the sensor returns without output by design."
-  },
 
   "vpn_adapter_name.ps1": {
     "allowEmpty": true,
@@ -244,18 +236,6 @@
   "vpn_health_reason.ps1": {
     "allowEmpty": true,
     "note": "Empty by design when the VPN cache has no HealthReason (lab VMs)."
-  },
-  "scom_agent_health_reason.ps1": {
-    "match": "^(NoAgentInstalled|CacheNotPopulated|CacheReadError|[A-Za-z]+)$",
-    "note": "Since 2026-11-05 the reader names the no-cache case (NoAgentInstalled on the lab VMs) instead of emitting an empty string, which Hub drops."
-  },
-  "scom_agent_version.ps1": {
-    "allowEmpty": true,
-    "note": "Empty by design without a SCOM agent (lab VMs)."
-  },
-  "scom_agent_version_standalone.ps1": {
-    "allowEmpty": true,
-    "note": "Empty by design without a SCOM agent (lab VMs)."
   },
   "Disable-NonEssentialStartupApps.ps1": {
     "variables": { "WhatIf": "true" },
