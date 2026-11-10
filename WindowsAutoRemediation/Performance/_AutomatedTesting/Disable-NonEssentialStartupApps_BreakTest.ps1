@@ -36,9 +36,11 @@
     Explorer at logon. The break is RequiresReboot and runs only with -IncludeRebootBreaks
     or -BreakName SlowUnsignedEntry. The harness reboots, resumes at startup as SYSTEM,
     waits for the user to log on and for Explorer to time the planted program (an unsigned
-    GUI exe compiled on the spot that sleeps 15 s, so WaitForInputIdle holds for 15 s),
-    reboots once more for the second sample, then remediates. The remediation child on
-    that path runs as SYSTEM, so the run also proves the console-user resolution.
+    WinForms exe compiled on the spot that sleeps 15 s before it creates its window, so the
+    first idle message loop Explorer waits for comes 15 s late), reboots once more for the
+    second sample, then remediates. The remediation child on that path runs as SYSTEM, so
+    the run also proves the console-user resolution. Log on promptly after each reboot: the
+    resume waits up to 25 minutes for the logon and 10 more for the logon's 9708.
 
     EXPECTED OUTCOMES (derived from the script's own messages, 2.0.0)
       ExpectFixed        -- the entry is disabled (StartupApproved byte 0 = 3), not deleted
@@ -94,13 +96,20 @@
 
 .NOTES
     Script Name  : Disable-NonEssentialStartupApps_BreakTest.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64/ARM64)
     Context      : Administrator (elevated), run as the interactive user
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-06
+    Last Modified: 2026-11-10
     Reporting    : C:\Temp\FixReport\Disable-NonEssentialStartupApps\
 
+    1.0.1  SlowUnsignedEntry after run 05839c5ccecd (2026-11-06, Dirty): the sleeping exe never
+           created a window, so Explorer logged its 9708 within a second (0.4 to 0.9 s over
+           three logons) and the entry was never slow; it now sleeps before creating a window.
+           The resume could run Verify and Restore before the user had logged on and threw
+           "No interactive user"; Get-LoggedOnUser now waits for the logon, and the evidence
+           wait keys on this boot's 9708 instead of a sample count. Ungated four passed in
+           3cdb7d9e9cde the same day.
     1.0.0  Initial: four ungated breaks and the two-logon SlowUnsignedEntry. Tracks script 2.0.0
            and sensor 1.0.0.
 
@@ -179,7 +188,18 @@ function Remove-Fixture {
 # -- Helpers: user and registry ----------------------------------------------------
 
 function Get-LoggedOnUser {
+    # On a SYSTEM resume after a reboot nobody is logged on yet; everything per-user (verify,
+    # restore, the script under test) needs the hive, so wait for the logon, up to 25 minutes.
+    # Run 05839c5ccecd (2026-11-06) ended Dirty because Verify ran before the logon.
     $u = (Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue).UserName
+    if (-not $u -and [Security.Principal.WindowsIdentity]::GetCurrent().IsSystem) {
+        $deadline = (Get-Date).AddMinutes(25)
+        while (-not $u -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 10
+            $u = (Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction SilentlyContinue).UserName
+        }
+        if ($u) { Start-Sleep -Seconds 20 }   # let the profile and Explorer settle before touching the hive
+    }
     if (-not $u) { throw "No interactive user is logged on; $ScriptUnderTest.ps1 resolves its user from Win32_ComputerSystem.UserName." }
     return $u
 }
@@ -235,13 +255,41 @@ function Remove-MissingDirectories {
 function New-SlowExe {
     if (-not (Test-Path -LiteralPath $FixtureDir)) { New-Item -ItemType Directory -Path $FixtureDir -Force | Out-Null }
     if (Test-Path -LiteralPath $SlowExe) { return }
-    # Windows-subsystem exe with no window: WaitForInputIdle holds until it exits, 15 s later.
-    Add-Type -TypeDefinition 'public class DexTestSlow { public static void Main() { System.Threading.Thread.Sleep(15000); } }' -OutputAssembly $SlowExe -OutputType WindowsApplication -ErrorAction Stop
+    # Sleeps 15 s BEFORE it creates a message queue, then shows a (minimized) window, pumps for
+    # 2 s and exits. Run 05839c5ccecd (2026-11-06) showed Explorer logs 9708 within a second for
+    # a GUI-subsystem exe that never creates a window, so the wait has to be for the first idle
+    # message loop, which this exe delays by 15 s.
+    $src = @'
+using System; using System.Windows.Forms;
+public class DexTestSlow {
+    [STAThread] public static void Main() {
+        System.Threading.Thread.Sleep(15000);
+        var f = new Form(); f.Text = "DEXTestSlow"; f.WindowState = FormWindowState.Minimized; f.ShowInTaskbar = false;
+        var t = new Timer(); t.Interval = 2000; t.Tick += (s, e) => { f.Close(); }; t.Start();
+        Application.Run(f);
+    }
+}
+'@
+    Add-Type -TypeDefinition $src -ReferencedAssemblies 'System.Windows.Forms', 'System.Drawing' -OutputAssembly $SlowExe -OutputType WindowsApplication -ErrorAction Stop
 }
 function Remove-SlowExe {
     if (-not (Test-Path -LiteralPath $SlowExe)) { return }
     Get-Process -Name 'DEXTestSlow' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     for ($i = 0; $i -lt 10; $i++) { try { Remove-Item -LiteralPath $SlowExe -Force -ErrorAction Stop; break } catch { Start-Sleep -Seconds 1 } }
+}
+
+function Get-SlowSampleTimes {
+    # TimeCreated of every 9708 for $SlowCommand in the last 14 days.
+    $out = @(); $reader = $null
+    try {
+        $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery('Microsoft-Windows-Shell-Core/Operational', [System.Diagnostics.Eventing.Reader.PathType]::LogName, '*[System[EventID=9708 and TimeCreated[timediff(@SystemTime) <= 1209600000]]]')
+        $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($q)
+        while ($null -ne ($e = $reader.ReadEvent())) {
+            $cmd = $null; foreach ($p in $e.Properties) { if ("$($p.Value)" -notmatch '^\d+$') { $cmd = "$($p.Value)".Trim() } }
+            if ($cmd -eq $SlowCommand) { $out += $e.TimeCreated }
+        }
+    } catch { } finally { if ($reader) { $reader.Dispose() } }
+    return @($out)
 }
 
 function Get-SlowSamples {
@@ -425,16 +473,16 @@ $BreakCatalog = @(
         Methods = @(@{ Name = 'PlantSleepingUnsignedExe'; Apply = { New-SlowExe; Set-RunValue -Name 'DEXTestSlow' -Data $SlowExe } })
         Capture = { @{ Sensor = Get-SensorCounts; MissingDirs = @(Get-MissingDirectories -Paths @('C:\Temp', 'C:\Temp\DEXTest', $FixtureDir)); SamplesBefore = (Get-SlowSamples).Count } }
         WaitForEvidence = {
-            # Runs on each resume: wait for the user to log on, then for Explorer to time the planted exe.
+            # Runs on each resume: wait for the logon (Get-LoggedOnUser blocks for it), then for the
+            # 9708 of THIS boot's logon, then decide whether a second logon is still needed.
             param($Original)
-            $deadline = (Get-Date).AddMinutes(20)
-            while ((Get-Date) -lt $deadline -and -not (Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue).UserName) { Start-Sleep -Seconds 10 }
+            Get-LoggedOnUser | Out-Null
             $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
-            $have = (Get-SlowSamples).Count
-            while ((Get-Date) -lt $deadline -and (Get-SlowSamples).Count -le [int]$Original.SamplesBefore) { Start-Sleep -Seconds 10 }
-            $have = (Get-SlowSamples).Count
-            Write-DexStep -Status 'Info' -Name 'Evidence' -Message "$SlowCommand samples: $have (before the run: $($Original.SamplesBefore)); boot $boot"
-            if ($have -lt 2) { return 'RebootAgain' }
+            $deadline = (Get-Date).AddMinutes(10)
+            while ((Get-Date) -lt $deadline -and (Get-SlowSampleTimes | Where-Object { $_ -gt $boot }).Count -eq 0) { Start-Sleep -Seconds 10 }
+            $s = Get-SlowSamples
+            Write-DexStep -Status 'Info' -Name 'Evidence' -Message "$SlowCommand samples: $($s.Count) ($($s -join ', ') ms; before the run: $($Original.SamplesBefore)); boot $boot"
+            if ($s.Count -lt 2) { return 'RebootAgain' }
             return 'Enough'
         }
         Verify  = {
