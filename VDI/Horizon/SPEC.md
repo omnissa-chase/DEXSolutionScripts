@@ -587,7 +587,8 @@ fallback; both one-time sensors emit one line of valid JSON with `Installed fals
 
 Runs the collector, then `hzn_agent_health.ps1` within 60 s, asserts identical
 `HealthScore` and `HealthReason`, and prints both deduction lists side by side. Same for
-the client pair on an endpoint. Non-destructive.
+the client pair on an endpoint. Non-destructive. Ran 2026-11-10 12:17 on `VDIW11-12`:
+`20261110_121717` PASS (agent 95 = 95, `FeatureServiceStopped:5` on both sides).
 
 ### 11.3 `Invoke-AutoRemediateHorizonAgent_BreakTest.ps1` (needs a Horizon host)
 
@@ -596,12 +597,15 @@ the client pair on an endpoint. Non-destructive.
 | `AgentServiceDisabled` | stop agent service, set Disabled | `Win32_Service` StartMode Disabled, State Stopped | Fixed | StartMode Auto, Running within 60 s, line `[Failed ] Horizon Agent Service: ... -> Remediation ran`, exit 0, cache `RemediationsRun >= 1` | captured mode and state |
 | `BlastServiceStopped` | stop Blast service | Stopped | Fixed | Running within 60 s, line `[Failed ] Horizon Blast Service: ... -> Remediation ran`, exit 0 | captured state |
 | `FirewallRuleDisabled` | `Disable-NetFirewallRule` on one matching rule | `Enabled False` | Fixed | `Enabled True`, line `[Failed ] Horizon Firewall Rules: 1 Horizon firewall rule(s) disabled: ... -> Remediation ran`, exit 0 | re-enable if it was enabled |
-| `BrokerPortBlocked` | outbound firewall block rule (`DEXTest-HorizonBrokerBlock`) for TCP 4001 and 4002 to the first resolved broker | `Test-NetConnection` to the broker on 4001 fails while DNS still resolves | ReportedOnly | line `[Warning] Broker Connectivity: Broker unreachable on TCP ...`, exit 0, and the block rule still present afterwards (the remediation must not touch rules it did not match) | remove the block rule |
+| `BrokerPortBlocked` | outbound firewall block rule (`DEXTest-BrokerBlock`; the name must not match the script's rule pattern) for TCP 4001 and 4002 to every resolved broker | `Test-NetConnection` to the broker on 4001 fails while DNS still resolves | ReportedOnly | line `[Warning] Broker Connectivity: Broker unreachable on TCP ...`, exit 0, and the block rule still present afterwards (the remediation must not touch rules it did not match) | remove the block rule |
 | `StaleDisconnectedSession` | second interactive logon (`-TestUser`), `tsdiscon`, cache `OldestDisconnectedMinutes` cannot be aged, so the harness passes `-DisconnectedStaleMinutes 0` through a tunable override env var `HZN_TEST_DisconnectedStaleMinutes` honoured only when `C:\Temp\FixReport\.dex-test-machine` exists | session Disconnected | ReportedOnly by default; Fixed with `-EnableSessionLogoff` (sets `ResolveOnWarning`) | line `[Warning] Disconnected Sessions: 1 disconnected session(s) ...`; with logoff enabled the session is gone | log off the test session |
 
 `AgentServiceDisabled` and `BlastServiceStopped` may pair; `StaleDisconnectedSession`
 runs alone. Not covered: `NotPaired` (needs unpairing), clone-state step 10 (needs an
 instant clone), feature services (installation-dependent; the harness lists what it finds).
+First run 2026-11-10 12:19 on `VDIW11-12` (harness 1.0.0): `7e1a44595c17` Passed, all four
+ungated breaks drawn and validated, 90.7 s of script time. Harness 1.0.1 renames the block
+rule because the first name contained "Horizon" and the script counted it as a Horizon rule.
 
 ### 11.4 `Invoke-AutoRemediateHorizonClient_BreakTest.ps1` (needs a client; installable on this VM)
 
@@ -671,4 +675,7 @@ was built from in every script header (`Built from VDI/Horizon/SPEC.md rev 1`).
   `_AutomatedTesting/Invoke-AutoRemediateHorizonAgent_BreakTest.ps1` 1.0.0 written to
   11.3 (the session break is gated behind `-IncludeSessionBreaks` and uses `tsdiscon`
   on the harness's own session instead of a `-TestUser` logon) and delivered to the host
-  as UEM internal app 4791 with the whole Horizon set under `C:\DEXLab`.
+  as UEM internal app 4791 with the whole Horizon set under `C:\DEXLab`. Results from the
+  host: parity `20261110_121717` PASS, break test `7e1a44595c17` Passed (all four ungated
+  breaks); harness 1.0.1 renames the block rule; `Invoke-AutoRemediateHorizonAgent.ps1`
+  is `4) Complete - Tested`.

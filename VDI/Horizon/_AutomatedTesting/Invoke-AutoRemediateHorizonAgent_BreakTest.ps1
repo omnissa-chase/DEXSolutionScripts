@@ -26,7 +26,7 @@
                                 ... -> Remediation ran"; exit 0
       BlastServiceStopped       Blast service stopped -> step 2 starts it
       FirewallRuleDisabled      one Horizon firewall rule disabled -> step 4 enables it
-      BrokerPortBlocked         outbound block rule DEXTest-HorizonBrokerBlock for TCP
+      BrokerPortBlocked         outbound block rule DEXTest-BrokerBlock for TCP
                                 4001/4002 to every resolved broker -> step 6 reports
                                 "Broker unreachable", exit 0, and the rule is still
                                 there afterwards (the script must not touch rules it
@@ -71,11 +71,12 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateHorizonAgent_BreakTest.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : Administrator (elevated)
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-11-10
+    1.0.1        : block rule renamed; the 1.0.0 name matched the script's rule pattern.
     Reporting    : C:\Temp\FixReport\Invoke-AutoRemediateHorizonAgent\
     Built from   : VDI/Horizon/SPEC.md rev 2, section 11.3
 
@@ -110,7 +111,7 @@ $RemediationScript = Join-Path $PSScriptRoot '..\Invoke-AutoRemediateHorizonAgen
 $CachePath         = 'HKLM:\Software\AirWatch\Extensions\VDI\Horizon\Agent'
 $RemediationKey    = "$CachePath\Remediation"
 $VariableNames     = @('HZN_TEST_DisconnectedStaleMinutes', 'WhatIf')
-$BlockRuleName     = 'DEXTest-HorizonBrokerBlock'
+$BlockRuleName     = 'DEXTest-BrokerBlock'   # must not match the script's firewall-rule pattern
 $ServiceWaitSec    = 60
 
 # KB resolution points, identical to the script under test (SPEC section 3).
