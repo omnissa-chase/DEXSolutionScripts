@@ -96,13 +96,17 @@
 
 .NOTES
     Script Name  : Disable-NonEssentialStartupApps_BreakTest.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64/ARM64)
     Context      : Administrator (elevated), run as the interactive user
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-11-10
     Reporting    : C:\Temp\FixReport\Disable-NonEssentialStartupApps\
 
+    1.0.2  Run acf46320121b (2026-11-10, BreakFailed, restored cleanly): sleeping before the
+           window existed still read 2.2 s to Explorer while Teams read 14.6 s at the same
+           logon. The fixture now creates its window first and then blocks the thread, so
+           the queue exists and is not idle for 15 s. The logon wait from 1.0.1 worked.
     1.0.1  SlowUnsignedEntry after run 05839c5ccecd (2026-11-06, Dirty): the sleeping exe never
            created a window, so Explorer logged its 9708 within a second (0.4 to 0.9 s over
            three logons) and the entry was never slow; it now sleeps before creating a window.
@@ -255,16 +259,19 @@ function Remove-MissingDirectories {
 function New-SlowExe {
     if (-not (Test-Path -LiteralPath $FixtureDir)) { New-Item -ItemType Directory -Path $FixtureDir -Force | Out-Null }
     if (Test-Path -LiteralPath $SlowExe) { return }
-    # Sleeps 15 s BEFORE it creates a message queue, then shows a (minimized) window, pumps for
-    # 2 s and exits. Run 05839c5ccecd (2026-11-06) showed Explorer logs 9708 within a second for
-    # a GUI-subsystem exe that never creates a window, so the wait has to be for the first idle
-    # message loop, which this exe delays by 15 s.
+    # Creates its (hidden) window first, so the thread owns a message queue, then blocks that
+    # thread for 15 s WITHOUT pumping, then pumps for 2 s and exits. Explorer's 9708 tracks
+    # WaitForInputIdle: a thread with a queue that is not sitting in GetMessage is "not idle"
+    # until it is, or until the 30 s cap (the same reason real tray apps read 30 s on a busy
+    # boot and 0.5 s on a quiet one). Two earlier shapes were not slow to Explorer: no window
+    # at all (0.4 to 0.9 s, run 05839c5ccecd) and sleeping before the window existed (2.2 s,
+    # run acf46320121b).
     $src = @'
 using System; using System.Windows.Forms;
 public class DexTestSlow {
     [STAThread] public static void Main() {
+        var f = new Form(); f.Text = "DEXTestSlow"; f.ShowInTaskbar = false; f.Opacity = 0; f.Show();
         System.Threading.Thread.Sleep(15000);
-        var f = new Form(); f.Text = "DEXTestSlow"; f.WindowState = FormWindowState.Minimized; f.ShowInTaskbar = false;
         var t = new Timer(); t.Interval = 2000; t.Tick += (s, e) => { f.Close(); }; t.Start();
         Application.Run(f);
     }
