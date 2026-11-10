@@ -581,7 +581,9 @@ asserts: collector writes `Installed 0`, `HealthScore -1`, `HealthReason NotInst
 fallback; both one-time sensors emit one line of valid JSON with `Installed false`,
 `HealthReason NotInstalled`, every key present. Then seeds a synthetic agent cache
 (every 4.1 value) and asserts every scalar sensor returns the seeded value, including the
-`;ImageFault` suffix rule and the decimal parse. Cleans up its seeded keys.
+`;ImageFault` suffix rule and the decimal parse. Cleans up its seeded keys. Ran
+2026-11-10 13:21 on `CBRADLEYSWIN11`: `20261110_132101` PASS, 49 of 49 assertions
+(one-time sensors 627 and 470 bytes, 406 and 283 ms).
 
 ### 11.2 `Test-HorizonScoreParity.ps1` (needs a Horizon host)
 
@@ -678,4 +680,6 @@ was built from in every script header (`Built from VDI/Horizon/SPEC.md rev 1`).
   as UEM internal app 4791 with the whole Horizon set under `C:\DEXLab`. Results from the
   host: parity `20261110_121717` PASS, break test `7e1a44595c17` Passed (all four ungated
   breaks); harness 1.0.1 renames the block rule; `Invoke-AutoRemediateHorizonAgent.ps1`
-  is `4) Complete - Tested`.
+  is `4) Complete - Tested`. Then `Test-HorizonNoAgentPath.ps1` `20261110_132101` PASS on
+  the lab VM (49 of 49), which moves the agent collector, `hzn_agent_health` and the three
+  agent scalar sensors to `4) Complete - Tested` as well; client side waits on a client.
