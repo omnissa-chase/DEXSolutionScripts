@@ -667,4 +667,8 @@ was built from in every script header (`Built from VDI/Horizon/SPEC.md rev 1`).
   `Invoke-HorizonAgentStateCollection.ps1` 1.0.2 trimmed from 34,393 to 32,306
   characters (comments only) to fit the 32,767 limit; inventory rows and the UEM test
   manifest entries for all 15 files added; first UEM run against the enrolled Horizon
-  session host `VDIW11-12` (smart group `Test_HorizonHost`).
+  session host `VDIW11-12` (smart group `Test_HorizonHost`). Afternoon:
+  `_AutomatedTesting/Invoke-AutoRemediateHorizonAgent_BreakTest.ps1` 1.0.0 written to
+  11.3 (the session break is gated behind `-IncludeSessionBreaks` and uses `tsdiscon`
+  on the harness's own session instead of a `-TestUser` logon) and delivered to the host
+  as UEM internal app 4791 with the whole Horizon set under `C:\DEXLab`.
