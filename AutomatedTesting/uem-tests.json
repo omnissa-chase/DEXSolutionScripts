@@ -1,6 +1,46 @@
 {
   "_comment": "Per-item overrides for Invoke-WsoContentTest.ps1 (see UEM-API-TESTING-SPEC.md). Keyed by the inventory Name column. Anything not listed here is tested with the defaults: a Script is expected to report Completed (exit 0) on every test device, a Sensor is expected to report a value that parses as its declared Data Type. Keys: skip (reason string: never tested), expect (Completed | Failed | NoResult, the last for a script that powers the device off before Hub can report, so no result within timeoutMinutes is the pass), variables (name -> value for $env:-backed parameters), match (regex the sensor value must satisfy), min / max (numeric bounds for Integer sensors), allowEmpty (true when an empty String value is acceptable), expectNoValue (true for a Boolean/DateTime sensor that emits nothing when its data source is absent; Hub rejects an empty typed value, so 'no value stored' is the pass condition on a device without the product), timeoutMinutes (per-item override of the wait for a result), onlyInGroup (smart group name; the item is skipped unless the run targets exactly that group, used for session-ending or network-severing scripts so the machine running the tool is never in scope), note (free text carried into the result file). Expectations marked 'lab VM' assume the disposable VMware lab build (no Wi-Fi, no Trellix, no SCOM, no Office). Revisit them on a product VM.",
 
+  "vdi_platform.ps1": {
+    "match": "^(Horizon|Citrix|AVD|RDS|Multiple|None)$",
+    "note": "Fleet-wide platform detection. Horizon on the Horizon session host (VDIW11-12, smart group Test_HorizonHost); None on the lab VMs, which carry no VDI agent or client."
+  },
+  "vdi_role.ps1": {
+    "match": "^(SessionHost|Client|Both|None)$",
+    "note": "SessionHost on the Horizon session host; None on the lab VMs."
+  },
+  "Invoke-HorizonAgentStateCollection.ps1": {
+    "note": "Session host collector. Completed proves exit 0; the device-side proof is the cache under HKLM:\\Software\\AirWatch\\Extensions\\VDI\\Horizon\\Agent (Installed, HealthScore, HealthReason, BrokerProbeResult, LastRun), read back through the hzn_agent_* sensors in the next sensor run. Writes Installed 0 / HealthScore -1 / NotInstalled on a device without the agent."
+  },
+  "Invoke-HorizonClientStateCollection.ps1": {
+    "note": "Endpoint collector. No lab device has the Horizon Client installed yet, so every run so far proves only the NotInstalled path (Installed 0, HealthScore -1); the product path needs the client installed on a lab VM."
+  },
+  "Invoke-AutoRemediateHorizonAgent.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "WhatIf: every AUTO step detects and logs what it would change without touching services, firewall rules or DNS. Completed proves the step engine ran to the summary; the Remediation key under ...\\VDI\\Horizon\\Agent carries the per-step results. Guard exits 0 without the agent."
+  },
+  "Invoke-AutoRemediateHorizonClient.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "WhatIf. Only the NotInstalled guard path is reachable until a lab device has the Horizon Client."
+  },
+  "Invoke-AutoRemediateHorizonAgentRestart.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Inventory rates it High (restarting the agent drops every session), so it needs -IncludeHighImpact; with WhatIf the launcher still persists itself and dispatches the one-shot task, and the payload writes Result=WhatIf without stopping anything. With active sessions and no ConfirmHighImpact the launcher stops at SkippedActiveSessions. Either way exit 0."
+  },
+  "hzn_agent_health.ps1": {
+    "match": "^\\{\"Schema\":2,\"Comp\":\"HorizonAgent\",.*\"Score\":-?\\d+,\"Reason\":\"[A-Za-z;]+\",\"Next\":\"(AUTO|USER|ADMIN|NONE)\".*\\}$",
+    "note": "One-time JSON sensor, Schema 2 compact keys (SPEC 7.1 rev 2) with a trim ladder so it serializes under Hub's 1 KB cap (the rev 1 keys were 1,174 bytes empty and could never be stored). Run 998f9c returned 983 bytes from the Horizon host."
+  },
+  "hzn_client_health.ps1": {
+    "match": "^\\{\"Schema\":2,\"Comp\":\"HorizonClient\",.*\"Score\":-?\\d+,\"Reason\":\"[A-Za-z]+\",\"Next\":\"(AUTO|USER|ADMIN|NONE)\".*\\}$",
+    "note": "One-time JSON sensor, Schema 2 compact keys (SPEC 7.2 rev 2) with a trim ladder so it serializes under Hub's 1 KB cap. NotInstalled on every lab device so far (470 bytes)."
+  },
+  "hzn_agent_health_score.ps1": { "min": -1, "max": 100, "note": "-1 until Invoke-HorizonAgentStateCollection.ps1 has run on the device; run the collector first." },
+  "hzn_agent_health_reason.ps1": { "match": "^[A-Za-z]+(;ImageFault)?$", "allowEmpty": true, "note": "Empty until the collector has run." },
+  "hzn_agent_clone_type.ps1": { "match": "^(InstantClone|FullClone|Physical|Unknown)$", "allowEmpty": true, "note": "Empty until the collector has run; Unknown on anything but an instant clone in the public build (KB-HZN-10)." },
+  "hzn_client_health_score.ps1": { "min": -1, "max": 100, "note": "-1 until Invoke-HorizonClientStateCollection.ps1 has run on the device." },
+  "hzn_client_health_reason.ps1": { "match": "^[A-Za-z]+$", "allowEmpty": true, "note": "Empty until the client collector has run; NotInstalled on every lab device so far." },
+  "hzn_client_connect_failure_count_24h.ps1": { "min": -1, "note": "-1 until the client collector has run or when the log cannot be read." },
   "Invoke-SimpleReboot.ps1": {
     "onlyInGroup": "Test_JSpencerOnly",
     "timeoutMinutes": 5,

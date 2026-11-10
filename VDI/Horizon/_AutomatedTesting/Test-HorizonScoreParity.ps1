@@ -64,9 +64,10 @@ foreach ($p in $plan) {
     $cScore = if ($cache) { [int][double]$cache.HealthScore } else { $null }
     $cReason = if ($cache) { [string]$cache.HealthReason } else { '' }
     $cDed = if ($cache -and $cache.Deductions) { @([string]$cache.Deductions -split ';') } else { @() }
-    $sScore = if ($j) { [int]$j.HealthScore } else { $null }
-    $sReason = if ($j) { [string]$j.HealthReason } else { '' }
-    $sDed = if ($j) { @($j.Deductions | ForEach-Object { "$($_.Reason):$($_.Points)" }) } else { @() }
+    # Schema 2 compact keys (SPEC section 7 rev 2): Score, Reason, Ded rows [Reason, Points], TO.
+    $sScore = if ($j) { [int]$j.Score } else { $null }
+    $sReason = if ($j) { [string]$j.Reason } else { '' }
+    $sDed = if ($j) { @($j.Ded | ForEach-Object { "$($_[0]):$($_[1])" }) } else { @() }
 
     "  {0,-28} {1,-30} {2,-30}" -f '', 'Collector', 'One-time sensor' | Write-Host
     "  {0,-28} {1,-30} {2,-30}" -f 'Exit / lines', "$($c.Exit)", "$($s.Exit) / $($s.Output.Count)" | Write-Host
@@ -74,7 +75,7 @@ foreach ($p in $plan) {
     "  {0,-28} {1,-30} {2,-30}" -f 'HealthReason', $cReason, $sReason | Write-Host
     $n = [math]::Max($cDed.Count, $sDed.Count)
     for ($i = 0; $i -lt $n; $i++) { "  {0,-28} {1,-30} {2,-30}" -f $(if ($i -eq 0) { 'Deductions' } else { '' }), $(if ($i -lt $cDed.Count) { $cDed[$i] } else { '' }), $(if ($i -lt $sDed.Count) { $sDed[$i] } else { '' }) | Write-Host }
-    if ($j -and $j.TimedOut) { Write-Host '  note: sensor TimedOut = true; its score is a floor' -ForegroundColor Yellow }
+    if ($j -and $j.TO) { Write-Host '  note: sensor TO (timed out) = true; its score is a floor' -ForegroundColor Yellow }
 
     $verdict = 'FAIL'
     if ($null -ne $cScore -and $null -ne $sScore) {
@@ -86,7 +87,7 @@ foreach ($p in $plan) {
     }
     if ($verdict -eq 'FAIL') { $anyFail = $true }
     Write-Host "  Verdict: $verdict`n" -ForegroundColor $(switch ($verdict) { 'PASS' { 'Green' } 'TOLERATED' { 'Yellow' } default { 'Red' } })
-    $report.Add([ordered]@{ Component = $p.Name; Verdict = $verdict; CollectorScore = $cScore; CollectorReason = $cReason; CollectorDeductions = $cDed; SensorScore = $sScore; SensorReason = $sReason; SensorDeductions = $sDed; SensorTimedOut = $(if ($j) { [bool]$j.TimedOut } else { $null }) })
+    $report.Add([ordered]@{ Component = $p.Name; Verdict = $verdict; CollectorScore = $cScore; CollectorReason = $cReason; CollectorDeductions = $cDed; SensorScore = $sScore; SensorReason = $sReason; SensorDeductions = $sDed; SensorTimedOut = $(if ($j) { [bool]$j.TO } else { $null }) })
 }
 
 if (-not (Test-Path $ReportRoot)) { New-Item -ItemType Directory -Path $ReportRoot -Force | Out-Null }

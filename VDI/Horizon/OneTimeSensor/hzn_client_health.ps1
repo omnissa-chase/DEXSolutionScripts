@@ -3,14 +3,14 @@
 .NOTES
     Sensor Name  : hzn_client_health
     Data Type    : String (JSON)
-    Version      : 1.0.0
+    Version      : 1.1.0
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-03
+    Last Modified: 2026-11-10 (1.1.0: SchemaVersion 2, compact keys and a trim ladder so the JSON fits Hub's 1 KB sensor cap)
     Timeout      : One-time / run-once only. Self-enforced 25 s budget, 30 s UEM ceiling.
                    MUST NOT be scheduled as a recurring sensor.
-    Built from   : VDI/Horizon/SPEC.md rev 1, section 7.2
+    Built from   : VDI/Horizon/SPEC.md rev 2, section 7.2
 
     The complete Horizon Client picture on an endpoint in one on-demand pull: install,
     USB service, the console user's configured servers, the tail of that user's client
@@ -19,7 +19,11 @@
     for its own component; writes nothing. Phases are budget-checked; a skipped phase
     reports -4 and TimedOut is true.
 
-    Sentinels: -1 unknown, -2 not applicable, -4 timed out. No nulls. Keys are fixed.
+    Sentinels: -1 unknown, -2 not applicable, -4 timed out. No nulls. Output keys are the
+    compact names of SPEC 7.2 (Score, Reason, Next, Detail, Srv*, Log*, Rel, Ded): Hub
+    drops any sensor value over 1 KB, so Write-Result serializes, measures and trims
+    (Log to its file name, then Rel, SrvList, Ded, Dir, Log, Detail) until the string is
+    under 1,000 bytes.
     The deduction table duplicates Invoke-HorizonClientStateCollection.ps1 on purpose;
     change both in the same edit (Test-HorizonScoreParity.ps1 asserts they agree).
 
@@ -57,7 +61,7 @@ $ErrorActionPreference = 'SilentlyContinue'; $ProgressPreference = 'SilentlyCont
 $UNKNOWN = -1; $NOTAPPL = -2; $TIMEDOUT = -4
 
 $r = [ordered]@{
-    SchemaVersion = 1; Component = 'HorizonClient'; Platform = 'Horizon'; Role = 'Client'
+    SchemaVersion = 2; Component = 'HorizonClient'
     Collected = (Get-Date -Format 's'); ElapsedMs = $UNKNOWN; TimedOut = $false
     Installed = $false; Version = ''; BrandRoot = ''; InstallLocation = ''; ClientUser = ''
     UsbServiceName = ''; UsbServiceRunning = $UNKNOWN
@@ -70,9 +74,39 @@ $r = [ordered]@{
 }
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 function Test-Budget { if ($sw.Elapsed.TotalSeconds -lt $script:TimeoutSeconds) { return $true }; $r.TimedOut = $true; return $false }
+# Output key map (SPEC 7.2 rev 2): internal long name -> compact key, in output order. Headline first.
+$script:KeyMap = [ordered]@{
+    SchemaVersion = 'Schema'; Component = 'Comp'; Collected = 'At'; ElapsedMs = 'Ms'; TimedOut = 'TO'
+    Installed = 'Inst'; Version = 'Ver'; BrandRoot = 'Root'; HealthScore = 'Score'; HealthReason = 'Reason'; NextStep = 'Next'; NextStepDetail = 'Detail'
+    InstallLocation = 'Dir'; ClientUser = 'User'; UsbServiceName = 'Usb'; UsbServiceRunning = 'UsbRun'
+    ServerCount = 'Srv'; ServerList = 'SrvList'; ServerSource = 'SrvSrc'; ServerResolvable = 'SrvDns'; Server443Reachable = 'Srv443'
+    BlastPortReachable = 'BlastPort'; BlastPortProbed = 'BlastProbed'; ProbeResult = 'Res'; ProbeMs = 'PMs'; CertCheckMode = 'Cert'
+    LogFileUsed = 'Log'; LogParseResult = 'LogRes'; ConnectFailureCount24h = 'Fail24'; ConnectSuccessCount24h = 'Ok24'
+    LastConnectTime = 'LastAt'; LastServer = 'LastSrv'; LastProtocol = 'LastProto'
+}
+$script:RelMap = @{ VPN = 'VPN'; NetworkStack = 'Net' }
 function Write-Result {
     $sw.Stop(); $r.ElapsedMs = [int]$sw.Elapsed.TotalMilliseconds
-    try { Write-Output (ConvertTo-Json -InputObject $r -Depth 5 -Compress) } catch { Write-Output '{"SchemaVersion":1,"Component":"HorizonClient","HealthReason":"SerializationFailed"}' }
+    try {
+        $o = [ordered]@{}
+        foreach ($k in $script:KeyMap.Keys) { $o[$script:KeyMap[$k]] = $r[$k] }
+        $o.Rel = [ordered]@{}; foreach ($n in @($r.Related.Keys)) { $o.Rel[$script:RelMap[$n]] = @($r.Related[$n].Score, $r.Related[$n].Reason, $r.Related[$n].CacheAgeMin) }
+        $o.Ded = @(foreach ($d in @($r.Deductions)) { ,@([string]$d.Reason, [int]$d.Points) })
+        # Trim ladder: least diagnostic first, until the compressed JSON is under Hub's 1 KB cap.
+        for ($i = 0; $i -lt 20; $i++) {
+            $json = ConvertTo-Json -InputObject $o -Depth 4 -Compress
+            if ($json.Length -le 1000) { break }
+            if ($o.Log -and $o.Log.Contains('\')) { $o.Log = [IO.Path]::GetFileName($o.Log) }
+            elseif ($o.Rel.Count -gt 0) { $o.Rel = [ordered]@{} }
+            elseif ($o.SrvList.Count -gt 1) { $o.SrvList = @(, $o.SrvList[0]) }
+            elseif ($o.Ded.Count -gt 1) { $o.Ded = @(, $o.Ded[0]) }
+            elseif ($o.Dir) { $o.Dir = '' }
+            elseif ($o.Log) { $o.Log = '' }
+            elseif ($o.Detail) { $o.Detail = '' }
+            else { break }
+        }
+        Write-Output $json
+    } catch { Write-Output '{"Schema":2,"Comp":"HorizonClient","Score":-1,"Reason":"SerializationFailed","Next":"NONE"}' }
 }
 function Test-TcpPort {
     param([string]$TargetHost, [int]$Port, [int]$TimeoutMs)

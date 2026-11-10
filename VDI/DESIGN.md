@@ -258,32 +258,29 @@ the precedent of `ApplicationSpecific/Microsoft/SCOM/OneTimeSensor/scom_agent_he
 | Size | Under 1,024 bytes compressed, by construction: Hub drops any sensor value over 1 KB (UEM-API-TESTING-SPEC.md, found 2026-11-05), so the sensor serializes, measures, and drops rows from its arrays until the string fits (pattern: `WindowsAutoRemediation\Performance\OneTimeSensor\startup_apps_health.ps1`). `Sessions` and `Errors24h` therefore carry only the few worst rows, and the flat scalar keys must fit on their own. The earlier 4 KB target predates the cap being measured. |
 
 **JSON shape** (flat top level so a console can map keys to columns without walking a
-tree; arrays only where the data is genuinely per-row):
+tree; arrays only where the data is genuinely per-row). Keys are compact since
+`Schema` 2 (2026-11-10): the rev 1 long names serialized to 1,174 bytes before a single
+measurement and could never be stored under the 1 KB cap. Each platform's SPEC section 7
+carries the key map with the long name beside each key. Horizon Agent example:
 
 ```
-{
-  "SchemaVersion": 1,
-  "Component": "HorizonAgent",  "Platform": "Horizon",  "Role": "SessionHost",
-  "Collected": "2026-11-03T14:02:11",  "ElapsedMs": 6120,  "TimedOut": false,
-  "Installed": true,  "Version": "2406",  "BrandRoot": "Omnissa",
-  "Persistence": "NonPersistent",  "CloneType": "InstantClone",  "UptimeMinutes": 412,
-  "HealthScore": 55,  "HealthReason": "BrokerUnreachable",
-  "NextStep": "ADMIN",  "NextStepDetail": "Invoke-AutoRemediateHorizonAgent.ps1 step 6",
-  "AgentServiceRunning": true,  "BlastServiceRunning": true,
-  "BrokerCount": 2,  "BrokerResolvable": true,  "BrokerReachable": false,  "BrokerProbeMs": 2004,
-  "SessionCount": 3,  "DisconnectedSessionCount": 1,  "OldestDisconnectedMinutes": 95,
-  "BlastRttMsMax": 48,  "BlastPacketLossPpmMax": 1200,  "BlastTcpFallbackSessions": 0,
-  "AgentErrorCount24h": 2,
-  "Sessions": [ { "Id": 2, "User": "jdoe", "ClientName": "L-JDOE-01", "ClientIp": "10.1.4.22",
-                  "Protocol": "Blast", "Transport": "UDP", "State": "Active",
-                  "RttMs": 48, "LossPpm": 1200, "DurationMin": 131 } ],
-  "Errors24h": [ { "Id": 1004, "Count": 2 } ],
-  "Related": { "AppVolumes": { "Score": 100, "Reason": "Healthy", "CacheAgeMin": 12 },
-               "FSLogix":    { "Score": -1,  "Reason": "",        "CacheAgeMin": -1 },
-               "DEM":        { "Score": 80,  "Reason": "ConfigShareSlow", "CacheAgeMin": 12 } }
-}
+{ "Schema": 2, "Comp": "HorizonAgent", "At": "2026-11-10T14:02:11", "Ms": 6120, "TO": false,
+  "Inst": true, "Ver": "2412.0.0", "Root": "Omnissa",
+  "Score": 55, "Reason": "BrokerUnreachable",
+  "Next": "ADMIN", "Detail": "Connection Server / UAG / firewall path; see Runbook-Horizon-Agent.md phase 2",
+  "Svc": "wsnm", "SvcRun": true, "SvcMode": "Auto", "Blast": true, "BlastRun": true,
+  "Feat": 7, "FeatStop": [], "Fw": 16, "FwOff": 0, "Udp": 1,
+  "Up": 412, "Clone": "InstantClone", "Pers": "NonPersistent", "SyncH": 3,
+  "Sess": 3, "Disc": 1, "DiscMin": 95,
+  "BSess": 3, "Rtt": 48, "Loss": 1200, "Bw": 5000, "Fps": 30, "Tcp": -1, "CSet": "VMware Blast Session Counters",
+  "PSess": 0, "PRtt": -1, "PLoss": -1,
+  "Brk": 2, "BrkList": ["cs1.corp.local"], "BrkSrc": "Both", "BrkDns": true, "BrkTcp": false, "BrkRes": "Unreachable", "BrkMs": 2004,
+  "Err": 2, "Errs": [[1004, 2]],
+  "S": [ { "Id": 2, "U": "jdoe", "CN": "L-JDOE-01", "IP": "10.1.4.22", "P": "Blast", "B": "cs1.corp.local",
+           "St": "Active", "Rtt": 48, "Loss": 1200, "Min": 131, "DMin": -1 } ],
+  "Rel": { "AV": [100, "Healthy", 12], "FSL": [-1, "", -1], "DEM": [80, "ConfigShareSlow", 12], "VPN": [-1, "", -1] },
+  "Ded": [["BrokerUnreachable", 30], ["HighPacketLoss", 20]] }
 ```
-
 Rules behind the shape:
 
 - **No nulls.** Every numeric key is present with a sentinel; every string key is present
@@ -301,8 +298,12 @@ Rules behind the shape:
 - **`UptimeMinutes`** plus `Persistence` lets the console apply the 1.1 image-fault
   reasoning (a fault on a 4-minute-old clone came from the image) without the sensor
   needing the collector's `FaultPresentAtBoot`.
-- **Session rows carry the correlation key** (`ClientName`, `ClientIp`) so the analyst can
+- **Session rows carry the correlation key** (`CN`, `IP`) so the analyst can
   pivot to the endpoint's record from the same screen.
+- **Trim ladder.** The flat scalars always survive; arrays and long strings are shed in a
+  fixed, documented order (SPEC section 7) until the compressed JSON is under 1,000
+  bytes. Session rows and the deduction list go last, because they are what an analyst
+  opened the sensor for.
 
 **Phase order inside the sensor**, so a timeout drops the most expensive data first:
 registry and services (ms); session inventory and `ViewClient_*` / ICA session keys

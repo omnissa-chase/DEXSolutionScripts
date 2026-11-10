@@ -1,6 +1,6 @@
 # Horizon Agent and Client Troubleshooter -- Build Contract
 
-**Spec revision:** 1 (2026-11-03). **Design:** `VDI/DESIGN.md` sections 1, 2, 3.
+**Spec revision:** 2 (2026-11-10). **Design:** `VDI/DESIGN.md` sections 1, 2, 3.
 **Scope:** Horizon Agent (session host) and Horizon Client (endpoint). Phase 0 platform
 sensors are included because the Horizon runbooks depend on them. App Volumes, DEM and the
 other surrounding components are phase 2 and are not in this contract.
@@ -75,8 +75,10 @@ entries are required for every script and sensor above.
   type-valid fallback; numeric cache values parsed as `double` (invariant then current
   culture) and rounded, because collectors write some values with decimals.
 - One-time sensors: live measurement, `Stopwatch` budget, sentinels `-1` / `-2` / `-4`,
-  single compressed JSON line, nothing else on the output stream, no process launch
-  (so no `Add-Type`, no `w32tm.exe`, no `ipconfig`).
+  single compressed JSON line **under 1,000 bytes** (Hub drops any sensor value over
+  1 KB; the sensor trims its arrays and long strings in a fixed order until it fits,
+  section 7), nothing else on the output stream, no process launch (so no `Add-Type`,
+  no `w32tm.exe`, no `ipconfig`).
 - The param block sits **inside** the function (the Workspace ONE engine does not bind a
   script-scope param block, and `$PSCmdlet` is null there); entry point at the bottom.
 
@@ -96,19 +98,19 @@ candidate list).
 
 | ID | Fact | Public default (candidates in order) | Variable | Lands in | Verify with | Status |
 |---|---|---|---|---|---|---|
-| KB-HZN-01 | Agent registry roots after the Omnissa rebrand | `HKLM:\SOFTWARE\Omnissa\Horizon\Agent`, `HKLM:\SOFTWARE\VMware, Inc.\VMware VDM\Agent`; `BrandRoot` = first match | `$AgentRegistryRoots` | agent collector, agent remediation, agent one-time sensor, `vdi_platform` | `Get-ChildItem HKLM:\SOFTWARE\Omnissa -Recurse -Depth 2` on a 2406+ agent | Unverified |
-| KB-HZN-02 | Agent and Blast service short names | `wsnm` (agent), `VMBlast` (Blast); fallback DisplayName match `Horizon.*Agent`, `Blast` | `$AgentServiceNames`, `$BlastServiceNames` | all agent scripts | `Get-Service \| ? DisplayName -match 'Horizon\|Blast'` | Unverified |
-| KB-HZN-03 | Feature service display-name pattern and exclusions | include `Horizon\|Blast\|ThinPrint\|TP AutoConnect\|USB Arbitration\|View Agent\|Omnissa`; exclude `VMware Tools\|Assist\|App Volumes\|Workspace ONE\|Intelligent Hub\|VGAuth\|vm3d\|VMwareCAF` | `$FeatureServiceInclude`, `$FeatureServiceExclude` | agent collector, remediation, one-time sensor | same as 02 on a full-feature agent install | Unverified |
-| KB-HZN-04 | Where the agent records its paired Connection Server(s), and the value that proves pairing | registry value names tried under each root and its `Configuration` / `Node Manager` sub-keys: `Broker`, `BrokerList`, `Brokers`, `ConnectionServer`; plus every `ViewClient_Broker_DNS_Name` seen in sessions (`BrokerSource = Session`) | `$BrokerValueCandidates` | agent collector, one-time sensor | inspect the agent key on a paired VM; find the value that empties when the agent is unpaired | Unverified |
+| KB-HZN-01 | Agent registry roots after the Omnissa rebrand | `HKLM:\SOFTWARE\Omnissa\Horizon\Agent`, `HKLM:\SOFTWARE\VMware, Inc.\VMware VDM\Agent`; `BrandRoot` = first match | `$AgentRegistryRoots` | agent collector, agent remediation, agent one-time sensor, `vdi_platform` | `Get-ChildItem HKLM:\SOFTWARE\Omnissa -Recurse -Depth 2` on a 2406+ agent | Public (2026-11-10, VDIW11-12, agent 8.20.0 build 2609: `BrandRoot Omnissa`, so the Omnissa root exists) |
+| KB-HZN-02 | Agent and Blast service short names | `wsnm` (agent), `VMBlast` (Blast); fallback DisplayName match `Horizon.*Agent`, `Blast` | `$AgentServiceNames`, `$BlastServiceNames` | all agent scripts | `Get-Service \| ? DisplayName -match 'Horizon\|Blast'` | Public (2026-11-10: agent service is `WSNM`, matched by the `wsnm` candidate; a Blast service was found and Running) |
+| KB-HZN-03 | Feature service display-name pattern and exclusions | include `Horizon\|Blast\|ThinPrint\|TP AutoConnect\|USB Arbitration\|View Agent\|Omnissa`; exclude `VMware Tools\|Assist\|App Volumes\|Workspace ONE\|Intelligent Hub\|VGAuth\|vm3d\|VMwareCAF` | `$FeatureServiceInclude`, `$FeatureServiceExclude` | agent collector, remediation, one-time sensor | same as 02 on a full-feature agent install | Public with one open point (2026-11-10: 7 feature services matched; `omn-instantclone-ga` was Automatic but Stopped on a host whose clone type is Unknown, costing 5 points as `FeatureServiceStopped;ImageFault`. Decide whether that service belongs in the exclude list when the host is not an instant clone) |
+| KB-HZN-04 | Where the agent records its paired Connection Server(s), and the value that proves pairing | registry value names tried under each root and its `Configuration` / `Node Manager` sub-keys: `Broker`, `BrokerList`, `Brokers`, `ConnectionServer`; plus every `ViewClient_Broker_DNS_Name` seen in sessions (`BrokerSource = Session`) | `$BrokerValueCandidates` | agent collector, one-time sensor | inspect the agent key on a paired VM; find the value that empties when the agent is unpaired | Public (2026-11-10: two brokers `wdc-vcm01` and `wdc-vcm02` found, `BrokerSource Both`, so one registry candidate matched and the session variable agreed; which value name matched is in the collector cache, not yet read) |
 | KB-HZN-05 | Agent-to-broker ports and whether enhanced message security changes them | TCP 4001 and 4002, reachable if either answers | `$BrokerPorts` | agent collector, remediation step 6, one-time sensor | Horizon network ports doc for the deployed version | Public (4001/4002 JMS) |
-| KB-HZN-06 | Blast performance counter set names and instance format | `VMware Blast Session Counters`, `Omnissa Blast Session Counters`; imaging set `VMware Blast Imaging Counters`, `Omnissa Blast Imaging Counters`; instance `session id: N; (main)`; counters `RTT`, `Packet Loss (Uplink)`, `Estimated Bandwidth (Uplink)`, imaging `Frame Rate` | `$BlastSessionCounterSets`, `$BlastImagingCounterSets`, `$BlastCounterNames` | agent collector, one-time sensor | `Get-Counter -ListSet '*Blast*' \| Select CounterSetName, PathsWithInstances` | Public for VMware names; Omnissa names Unverified |
-| KB-HZN-07 | Firewall rule naming for the agent | DisplayName or DisplayGroup matching `Horizon\|Blast\|PCoIP\|VMware View\|Omnissa` | `$AgentFirewallRulePattern` | agent collector, remediation step 4 | `Get-NetFirewallRule \| ? DisplayName -match 'Horizon\|Blast\|PCoIP'` | Unverified |
-| KB-HZN-08 | Blast configuration key and the UDP-enabled value | `HKLM:\SOFTWARE\Omnissa\Horizon\Blast\Config`, `HKLM:\SOFTWARE\VMware, Inc.\VMware Blast\Config`; value `UdpEnabled` | `$BlastConfigRoots`, `$BlastUdpValueName` | agent collector, one-time sensor | inspect on an agent; Blast GPO reference | Unverified |
+| KB-HZN-06 | Blast performance counter set names and instance format | `VMware Blast Session Counters`, `Omnissa Blast Session Counters`; imaging set `VMware Blast Imaging Counters`, `Omnissa Blast Imaging Counters`; instance `session id: N; (main)`; counters `RTT`, `Packet Loss (Uplink)`, `Estimated Bandwidth (Uplink)`, imaging `Frame Rate` | `$BlastSessionCounterSets`, `$BlastImagingCounterSets`, `$BlastCounterNames` | agent collector, one-time sensor | `Get-Counter -ListSet '*Blast*' \| Select CounterSetName, PathsWithInstances` | Unverified for 8.20 (2026-11-10: a live Blast session was present and `BlastSessionCount` stayed 0, so neither candidate set name exists on build 2609; verify with `Get-Counter -ListSet` on VDIW11-12) |
+| KB-HZN-07 | Firewall rule naming for the agent | DisplayName or DisplayGroup matching `Horizon\|Blast\|PCoIP\|VMware View\|Omnissa` | `$AgentFirewallRulePattern` | agent collector, remediation step 4 | `Get-NetFirewallRule \| ? DisplayName -match 'Horizon\|Blast\|PCoIP'` | Public (2026-11-10: 12 rules matched, none disabled) |
+| KB-HZN-08 | Blast configuration key and the UDP-enabled value | `HKLM:\SOFTWARE\Omnissa\Horizon\Blast\Config`, `HKLM:\SOFTWARE\VMware, Inc.\VMware Blast\Config`; value `UdpEnabled` | `$BlastConfigRoots`, `$BlastUdpValueName` | agent collector, one-time sensor | inspect on an agent; Blast GPO reference | Unverified (2026-11-10: neither config root exists on build 2609, `BlastUdpEnabled -1`) |
 | KB-HZN-09 | Per-session Blast transport (UDP vs TCP) | **not measured** in the public build: `BlastTcpFallbackSessions = -1`; `BlastTcpFallback` reason never emitted | `$BlastTransportSource` (`None`) | agent collector, one-time sensor | Blast agent log line or counter that states the transport per session | Unverified |
-| KB-HZN-10 | Clone type and persistence markers | heuristic only: `InstantClone` if any `*cloneprep*` file exists under an agent log directory candidate (KB-HZN-12); else `Unknown`. `Persistence`: `NonPersistent` for `InstantClone`, else `Unknown` | `$CloneTypeDetection` | agent collector, remediation step 10, one-time sensor | compare an instant clone and a full clone: registry values under the agent key, ClonePrep artifacts | Unverified |
-| KB-HZN-11 | Agent event providers and the event IDs that mean something | Application log, providers matching `Horizon\|VMware View\|VMware Blast\|Omnissa`, Level 1-2 counted as errors; no per-ID semantics | `$AgentEventProviderPattern`, `$AgentEventIdMeanings` (empty) | agent collector, one-time sensor, runbook | `Get-WinEvent -ListProvider '*Horizon*','*VMware*','*Omnissa*'` | Unverified |
+| KB-HZN-10 | Clone type and persistence markers | heuristic only: `InstantClone` if any `*cloneprep*` file exists under an agent log directory candidate (KB-HZN-12); else `Unknown`. `Persistence`: `NonPersistent` for `InstantClone`, else `Unknown` | `$CloneTypeDetection` | agent collector, remediation step 10, one-time sensor | compare an instant clone and a full clone: registry values under the agent key, ClonePrep artifacts | Unverified (2026-11-10: `Unknown` on VDIW11-12, which carries the `omn-instantclone-ga` service; no `*cloneprep*` file under either log directory) |
+| KB-HZN-11 | Agent event providers and the event IDs that mean something | Application log, providers matching `Horizon\|VMware View\|VMware Blast\|Omnissa`, Level 1-2 counted as errors; no per-ID semantics | `$AgentEventProviderPattern`, `$AgentEventIdMeanings` (empty) | agent collector, one-time sensor, runbook | `Get-WinEvent -ListProvider '*Horizon*','*VMware*','*Omnissa*'` | Unverified (2026-11-10: 0 errors in 24 h on VDIW11-12, so the provider pattern is untested) |
 | KB-HZN-12 | Agent log directories | `%ProgramData%\Omnissa\logs`, `%ProgramData%\VMware\VDM\logs` | `$AgentLogDirs` | agent collector (clone heuristic), runbook evidence | `Get-ChildItem $env:ProgramData\Omnissa, $env:ProgramData\VMware\VDM` | Unverified |
-| KB-HZN-13 | `ViewClient_*` session variable names and location | `HKU\<SID>\Volatile Environment\<SessionId>`: `ViewClient_Machine_Name`, `ViewClient_IP_Address`, `ViewClient_Protocol`, `ViewClient_Broker_DNS_Name`, `ViewClient_LoggedOn_Username`, `ViewClient_Type` | `$ViewClientVarNames` | agent collector, one-time sensor | `Get-ItemProperty "Registry::HKEY_USERS\<sid>\Volatile Environment\<id>"` inside a Horizon session | Public (legacy); post-rebrand Unverified |
+| KB-HZN-13 | `ViewClient_*` session variable names and location | `HKU\<SID>\Volatile Environment\<SessionId>`: `ViewClient_Machine_Name`, `ViewClient_IP_Address`, `ViewClient_Protocol`, `ViewClient_Broker_DNS_Name`, `ViewClient_LoggedOn_Username`, `ViewClient_Type` | `$ViewClientVarNames` | agent collector, one-time sensor | `Get-ItemProperty "Registry::HKEY_USERS\<sid>\Volatile Environment\<id>"` inside a Horizon session | Public (2026-11-10: `ViewClient_Machine_Name`, `ViewClient_IP_Address`, `ViewClient_Protocol` and `ViewClient_Broker_DNS_Name` all read on build 2609; `ClientName 172-16-44-85-Chr`, protocol Blast) |
 | KB-HZN-14 | Client install detection, version and directory | Uninstall `DisplayName` matching `(Omnissa\|VMware) Horizon Client`; `DisplayVersion`; `InstallLocation` | `$ClientUninstallPattern` | client collector, remediation, one-time sensor, `vdi_platform` | Uninstall keys on a client device | Public |
 | KB-HZN-15 | Client configuration: server list, policy key, certificate-check value | `HKCU\SOFTWARE\Omnissa\Horizon\Client`, `HKCU\SOFTWARE\VMware, Inc.\VMware VDM\Client`; servers from sub-key `Server`/`RecentServers` names or values `ServerURL`, `Server`; policy `HKLM\SOFTWARE\Policies\Omnissa\Horizon\Client`, `HKLM\SOFTWARE\Policies\VMware, Inc.\VMware VDM\Client` value `Server`; cert mode value `CertCheckMode` (0 = never check, 1 = warn, 2 = reject) | `$ClientRegistryRoots`, `$ClientPolicyRoots`, `$ClientServerValueCandidates`, `$CertCheckValueName` | client collector, remediation steps 3-5 and 8, one-time sensor | inspect HKCU on a configured client; client GPO reference | Unverified |
 | KB-HZN-16 | Client log directory, file pattern, and the connect success / failure line patterns | `%LOCALAPPDATA%\Omnissa\Horizon\Logs`, `%LOCALAPPDATA%\VMware\VDM\Logs`; files `*horizon*client*.txt`, `vmware-horizon-client-*.txt`; success regex `(?i)connected to|session.*established|login succeeded`; failure regex `(?i)(connect(ion)? (failed|error|refused)|unable to (connect|resolve)|certificate.*(invalid|rejected)|authentication failed)` | `$ClientLogDirs`, `$ClientLogFilePatterns`, `$ClientLogSuccessRegex`, `$ClientLogFailureRegex` | client collector, one-time sensor | tail a client log after one good and one failed connection | Unverified |
@@ -354,69 +356,81 @@ files as the template.
 
 `OneTimeSensor/hzn_agent_health.ps1` and `OneTimeSensor/hzn_client_health.ps1`. One-time
 only. Keys are **fixed**: the internal build MAY add keys, MUST NOT rename or remove any,
-and MUST bump `SchemaVersion` when it adds one. Sentinels: `-1` unknown, `-2` not
-applicable, `-4` timed out. No nulls; absent strings are `''`; arrays may be empty.
+and MUST bump `Schema` when it adds one. Sentinels: `-1` unknown, `-2` not applicable,
+`-4` timed out. No nulls; absent strings are `''`; arrays may be empty.
+
+**Rev 2 (2026-11-10): compact keys and a trim ladder.** Hub stores no sensor value over
+1 KB (measured, `AutomatedTesting/UEM-API-TESTING-SPEC.md`; largest value ever returned
+914 bytes). The rev 1 key set serialized to 1,174 bytes with nothing installed, so it
+could never be stored. Rev 2 keeps every rev 1 value under a short key (tables below,
+rev 1 name beside each), emits the headline (`Score`, `Reason`, `Next`, `Detail`) first,
+measures the compressed JSON and trims in a fixed order until it is under 1,000 bytes.
+Everything measured is still written to the collector cache; the all-in-one sensor is
+the on-demand view of it, not the system of record. The parity test compares `Score`
+and `Reason`; the no-agent test asserts every rev 2 key is present.
 
 ### 7.1 `hzn_agent_health`
 
 Phase order (cheapest first; a deadline drops later phases): 1 registry and services;
 2 session inventory (LSM events + volatile environment); 3 Blast/PCoIP counters, one
 sample; 4 broker DNS + TCP (max `MaxProbeHosts` = 3); 5 Application log errors; 6 related
-caches; 7 score.
+caches; 7 score. Measured sizes: 628 bytes with no agent; a busy host with four sessions,
+two brokers, three error ids and five deductions trims to 988 bytes.
 
-| Key | Type | Phase | Notes |
-|---|---|---|---|
-| `SchemaVersion` | int | | `1` |
-| `Component` | string | | `HorizonAgent` |
-| `Platform` | string | | `Horizon` |
-| `Role` | string | | `SessionHost` |
-| `Collected` | string | | `Get-Date -Format s` |
-| `ElapsedMs` | int | | |
-| `TimedOut` | bool | | |
-| `Installed` | bool | 1 | |
-| `Version`, `BrandRoot`, `AgentServiceName` | string | 1 | |
-| `AgentServiceRunning`, `BlastServicePresent`, `BlastServiceRunning` | bool | 1 | |
-| `AgentServiceStartMode` | string | 1 | |
-| `FeatureServiceCount`, `FirewallRuleCount`, `FirewallRulesDisabled` | int | 1 | |
-| `FeatureServicesStopped` | string[] | 1 | |
-| `UptimeMinutes` | int | 1 | |
-| `CloneType`, `Persistence` | string | 1 | |
-| `BlastUdpEnabled` | int | 1 | `1`/`0`/`-1` |
-| `SessionCount`, `DisconnectedSessionCount`, `OldestDisconnectedMinutes` | int | 2 | |
-| `BlastSessionCount`, `BlastRttMsMax`, `BlastPacketLossPpmMax`, `BlastBandwidthKbpsMin`, `BlastFpsMin`, `BlastTcpFallbackSessions` | int | 3 | |
-| `BlastCounterSet` | string | 3 | |
-| `PcoipSessionCount`, `PcoipRttMsMax`, `PcoipLossPpmMax` | int | 3 | |
-| `BrokerCount` | int | 4 | |
-| `BrokerList` | string[] | 4 | |
-| `BrokerSource` | string | 4 | |
-| `BrokerResolvable`, `BrokerReachable` | bool | 4 | |
-| `BrokerProbeResult` | string | 4 | includes `TimedOut` |
-| `BrokerProbeMs` | int | 4 | |
-| `AgentErrorCount24h` | int | 5 | |
-| `Errors24h` | object[] | 5 | `{ "Id": int, "Count": int }`, max 5 |
-| `SyncAgeHours` | int | 1 | from the W32Time registry, not `w32tm.exe` (sensor may not launch processes): `HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Config\LastKnownGoodTime` as FILETIME; `-1` if unreadable |
-| `Sessions` | object[] | 2-3 | `{ Id, User, ClientName, ClientIp, Protocol, Broker, State, RttMs, LossPpm, DurationMin, DisconnectedMin }`, worst `RttMs` first, max 10 |
-| `Related` | object | 6 | `{ "AppVolumes": {Score, Reason, CacheAgeMin}, "FSLogix": {...}, "DEM": {...}, "VPN": {...} }` read from `...\Extensions\VDI\Horizon\AppVolumes`, `...\VDI\Shared\FSLogix`, `...\VDI\Horizon\DEM`, `...\Extensions\VPN`; `-1` / `''` when absent |
-| `HealthScore` | int | 7 | |
-| `HealthReason` | string | 7 | same enum as 5.1; `TimeSyncStale` here uses `SyncAgeHours` only |
-| `Deductions` | object[] | 7 | `{ "Reason": string, "Points": int }` |
-| `NextStep` | string | 7 | `AUTO`, `USER`, `ADMIN`, `NONE` from table 7.3 |
-| `NextStepDetail` | string | 7 | |
+| Key | Rev 1 name | Type | Phase | Notes |
+|---|---|---|---|---|
+| `Schema` | `SchemaVersion` | int | | `2` |
+| `Comp` | `Component` | string | | `HorizonAgent` (`Platform` and `Role` dropped: implied by `Comp`) |
+| `At`, `Ms`, `TO` | `Collected`, `ElapsedMs`, `TimedOut` | string, int, bool | | |
+| `Inst`, `Ver`, `Root` | `Installed`, `Version`, `BrandRoot` | bool, string, string | 1 | |
+| `Score`, `Reason` | `HealthScore`, `HealthReason` | int, string | 7 | same enum as 5.1; `TimeSyncStale` here uses `SyncH` only |
+| `Next`, `Detail` | `NextStep`, `NextStepDetail` | string | 7 | table 7.3 |
+| `Svc`, `SvcRun`, `SvcMode` | `AgentServiceName`, `AgentServiceRunning`, `AgentServiceStartMode` | string, bool, string | 1 | |
+| `Blast`, `BlastRun` | `BlastServicePresent`, `BlastServiceRunning` | bool | 1 | |
+| `Feat`, `FeatStop` | `FeatureServiceCount`, `FeatureServicesStopped` | int, string[] | 1 | |
+| `Fw`, `FwOff` | `FirewallRuleCount`, `FirewallRulesDisabled` | int | 1 | |
+| `Udp` | `BlastUdpEnabled` | int | 1 | `1`/`0`/`-1` |
+| `Up`, `Clone`, `Pers` | `UptimeMinutes`, `CloneType`, `Persistence` | int, string, string | 1 | |
+| `SyncH` | `SyncAgeHours` | int | 1 | W32Time `LastKnownGoodTime` as FILETIME, `-1` if unreadable |
+| `Sess`, `Disc`, `DiscMin` | `SessionCount`, `DisconnectedSessionCount`, `OldestDisconnectedMinutes` | int | 2 | |
+| `BSess`, `Rtt`, `Loss`, `Bw`, `Fps`, `Tcp`, `CSet` | `BlastSessionCount`, `BlastRttMsMax`, `BlastPacketLossPpmMax`, `BlastBandwidthKbpsMin`, `BlastFpsMin`, `BlastTcpFallbackSessions`, `BlastCounterSet` | int x6, string | 3 | |
+| `PSess`, `PRtt`, `PLoss` | `PcoipSessionCount`, `PcoipRttMsMax`, `PcoipLossPpmMax` | int | 3 | |
+| `Brk`, `BrkList`, `BrkSrc` | `BrokerCount`, `BrokerList`, `BrokerSource` | int, string[], string | 4 | |
+| `BrkDns`, `BrkTcp`, `BrkRes`, `BrkMs` | `BrokerResolvable`, `BrokerReachable`, `BrokerProbeResult`, `BrokerProbeMs` | bool, bool, string, int | 4 | `BrkRes` includes `TimedOut` |
+| `Err`, `Errs` | `AgentErrorCount24h`, `Errors24h` | int, int[][] | 5 | `Errs` rows are `[Id, Count]`, max 5 |
+| `S` | `Sessions` | object[] | 2-3 | rows `{ Id, U, CN, IP, P, B, St, Rtt, Loss, Min, DMin }` for `Id, User, ClientName, ClientIp, Protocol, Broker, State, RttMs, LossPpm, DurationMin, DisconnectedMin`; worst `Rtt` first, max 10 before trimming |
+| `Rel` | `Related` | object | 6 | `{ "AV": [Score, Reason, CacheAgeMin], "FSL": [...], "DEM": [...], "VPN": [...] }` from the AppVolumes, FSLogix, DEM and VPN caches; `-1` / `''` when absent |
+| `Ded` | `Deductions` | array[] | 7 | rows `[Reason, Points]`, largest first |
 
+Trim ladder, applied one step at a time until the compressed JSON is under 1,000 bytes:
+`S` rows beyond two (last first); `Rel` to `{}`; `Errs` to `[]`; `FeatStop` to `[]`;
+`BrkList` to its first entry; `CSet` to `''`; `Ded` to its first row; `S` to one row;
+`Detail` to `''`; the last `S` row. The flat scalars always survive.
 ### 7.2 `hzn_client_health`
 
 Phases: 1 registry, services, console user; 2 log tail; 3 server DNS + 443 + Blast port
-(max 3 hosts); 4 related caches (VPN, NetworkStack); 5 score. Keys: `SchemaVersion`,
-`Component` = `HorizonClient`, `Platform`, `Role` = `Client`, `Collected`, `ElapsedMs`,
-`TimedOut`, `Installed`, `Version`, `BrandRoot`, `InstallLocation`, `ClientUser`,
-`UsbServiceName`, `UsbServiceRunning` (int `1/0/-1`), `ServerCount`, `ServerList`
-(string[]), `ServerSource`, `ServerResolvable`, `Server443Reachable` (bool),
-`BlastPortReachable` (int), `BlastPortProbed` (string), `ProbeResult`, `ProbeMs`,
-`CertCheckMode` (string), `LogFileUsed`, `LogParseResult`, `ConnectFailureCount24h`,
-`ConnectSuccessCount24h`, `LastConnectTime`, `LastServer`, `LastProtocol`, `Related`
-(`VPN`, `NetworkStack`), `HealthScore`, `HealthReason`, `Deductions`, `NextStep`,
-`NextStepDetail`.
+(max 3 hosts); 4 related caches (VPN, NetworkStack); 5 score. Measured sizes: 471 bytes
+with no client; a configured client with three servers and five deductions trims to
+under 1,000 bytes.
 
+| Key | Rev 1 name | Type | Phase |
+|---|---|---|---|
+| `Schema`, `Comp` | `SchemaVersion` (`2`), `Component` (`HorizonClient`; `Platform` and `Role` dropped) | int, string | |
+| `At`, `Ms`, `TO` | `Collected`, `ElapsedMs`, `TimedOut` | string, int, bool | |
+| `Inst`, `Ver`, `Root` | `Installed`, `Version`, `BrandRoot` | bool, string, string | 1 |
+| `Score`, `Reason`, `Next`, `Detail` | `HealthScore`, `HealthReason`, `NextStep`, `NextStepDetail` | int, string, string, string | 5 |
+| `Dir`, `User` | `InstallLocation`, `ClientUser` | string | 1 |
+| `Usb`, `UsbRun` | `UsbServiceName`, `UsbServiceRunning` | string, int (`1/0/-1`) | 1 |
+| `Srv`, `SrvList`, `SrvSrc` | `ServerCount`, `ServerList`, `ServerSource` | int, string[], string | 1-2 |
+| `SrvDns`, `Srv443`, `BlastPort`, `BlastProbed`, `Res`, `PMs` | `ServerResolvable`, `Server443Reachable`, `BlastPortReachable`, `BlastPortProbed`, `ProbeResult`, `ProbeMs` | bool, bool, int, string, string, int | 3 |
+| `Cert` | `CertCheckMode` | string | 1 |
+| `Log`, `LogRes` | `LogFileUsed`, `LogParseResult` | string | 2 |
+| `Fail24`, `Ok24`, `LastAt`, `LastSrv`, `LastProto` | `ConnectFailureCount24h`, `ConnectSuccessCount24h`, `LastConnectTime`, `LastServer`, `LastProtocol` | int, int, string, string, string | 2 |
+| `Rel` | `Related` | object: `{ "VPN": [Score, Reason, CacheAgeMin], "Net": [...] }` | 4 |
+| `Ded` | `Deductions` | array[] of `[Reason, Points]` | 5 |
+
+Trim ladder: `Log` to its file name; `Rel` to `{}`; `SrvList` to its first entry; `Ded`
+to its first row; `Dir` to `''`; `Log` to `''`; `Detail` to `''`.
 ### 7.3 `NextStep` mapping (both sensors)
 
 | Reason | NextStep | NextStepDetail |
@@ -645,3 +659,12 @@ was built from in every script header (`Built from VDI/Horizon/SPEC.md rev 1`).
   ship set was cut from 15 to 6 because no sensor may duplicate a value DEX already
   captures (session metrics, session state, client name, versions); the nine overlapping
   sensor files were removed from the repository, their cache values stay contracted.
+- **Rev 2, 2026-11-10.** Section 7 one-time sensors move to `Schema` 2 with compact keys
+  and a trim ladder, because Hub stores no sensor value over 1 KB and the rev 1 key set
+  was 1,174 bytes with nothing installed (`hzn_agent_health.ps1` 1.1.0,
+  `hzn_client_health.ps1` 1.1.0, both contract tests updated). Every rev 1 value is kept
+  under its new key; `Platform` and `Role` are dropped as implied by `Comp`. Same day:
+  `Invoke-HorizonAgentStateCollection.ps1` 1.0.2 trimmed from 34,393 to 32,306
+  characters (comments only) to fit the 32,767 limit; inventory rows and the UEM test
+  manifest entries for all 15 files added; first UEM run against the enrolled Horizon
+  session host `VDIW11-12` (smart group `Test_HorizonHost`).

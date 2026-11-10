@@ -112,8 +112,9 @@ foreach ($s in $sensorExpect.Keys) {
 }
 
 # -- One-time sensors --
-$agentKeys = 'SchemaVersion,Component,Platform,Role,Collected,ElapsedMs,TimedOut,Installed,Version,BrandRoot,AgentServiceName,AgentServiceRunning,BlastServicePresent,BlastServiceRunning,AgentServiceStartMode,FeatureServiceCount,FirewallRuleCount,FirewallRulesDisabled,FeatureServicesStopped,UptimeMinutes,CloneType,Persistence,BlastUdpEnabled,SyncAgeHours,SessionCount,DisconnectedSessionCount,OldestDisconnectedMinutes,BlastSessionCount,BlastRttMsMax,BlastPacketLossPpmMax,BlastBandwidthKbpsMin,BlastFpsMin,BlastTcpFallbackSessions,BlastCounterSet,PcoipSessionCount,PcoipRttMsMax,PcoipLossPpmMax,BrokerCount,BrokerList,BrokerSource,BrokerResolvable,BrokerReachable,BrokerProbeResult,BrokerProbeMs,AgentErrorCount24h,Errors24h,Sessions,Related,HealthScore,HealthReason,Deductions,NextStep,NextStepDetail'.Split(',')
-$clientKeys = 'SchemaVersion,Component,Platform,Role,Collected,ElapsedMs,TimedOut,Installed,Version,BrandRoot,InstallLocation,ClientUser,UsbServiceName,UsbServiceRunning,ServerCount,ServerList,ServerSource,ServerResolvable,Server443Reachable,BlastPortReachable,BlastPortProbed,ProbeResult,ProbeMs,CertCheckMode,LogFileUsed,LogParseResult,ConnectFailureCount24h,ConnectSuccessCount24h,LastConnectTime,LastServer,LastProtocol,Related,HealthScore,HealthReason,Deductions,NextStep,NextStepDetail'.Split(',')
+# Schema 2 compact keys (SPEC 7.1 / 7.2 rev 2).
+$agentKeys = 'Schema,Comp,At,Ms,TO,Inst,Ver,Root,Score,Reason,Next,Detail,Svc,SvcRun,SvcMode,Blast,BlastRun,Feat,FeatStop,Fw,FwOff,Udp,Up,Clone,Pers,SyncH,Sess,Disc,DiscMin,BSess,Rtt,Loss,Bw,Fps,Tcp,CSet,PSess,PRtt,PLoss,Brk,BrkList,BrkSrc,BrkDns,BrkTcp,BrkRes,BrkMs,Err,Errs,S,Rel,Ded'.Split(',')
+$clientKeys = 'Schema,Comp,At,Ms,TO,Inst,Ver,Root,Score,Reason,Next,Detail,Dir,User,Usb,UsbRun,Srv,SrvList,SrvSrc,SrvDns,Srv443,BlastPort,BlastProbed,Res,PMs,Cert,Log,LogRes,Fail24,Ok24,LastAt,LastSrv,LastProto,Rel,Ded'.Split(',')
 foreach ($o in @(@{ Name = 'hzn_agent_health'; Keys = $agentKeys }, @{ Name = 'hzn_client_health'; Keys = $clientKeys })) {
     $r = Invoke-Child (Join-Path $Root "OneTimeSensor\$($o.Name).ps1")
     Assert "$($o.Name): one line" ($r.Output.Count -eq 1) "lines $($r.Output.Count)"
@@ -125,8 +126,9 @@ foreach ($o in @(@{ Name = 'hzn_agent_health'; Keys = $agentKeys }, @{ Name = 'h
         Assert "$($o.Name): every contracted key present" ($missing.Count -eq 0) "missing [$($missing -join ',')]"
         $nulls = @($j.PSObject.Properties | Where-Object { $null -eq $_.Value } | ForEach-Object Name)
         Assert "$($o.Name): no null values" ($nulls.Count -eq 0) "nulls [$($nulls -join ',')]"
-        Assert "$($o.Name): Installed false, NotInstalled, score -1" ($j.Installed -eq $false -and $j.HealthReason -eq 'NotInstalled' -and $j.HealthScore -eq -1)
-        Assert "$($o.Name): under 25 s" ($j.ElapsedMs -lt 25000) "$($j.ElapsedMs) ms"
+        Assert "$($o.Name): Inst false, NotInstalled, Score -1" ($j.Inst -eq $false -and $j.Reason -eq 'NotInstalled' -and $j.Score -eq -1)
+        Assert "$($o.Name): under 1,000 bytes" ($r.Output[0].Length -le 1000) "$($r.Output[0].Length) bytes"
+        Assert "$($o.Name): under 25 s" ($j.Ms -lt 25000) "$($j.Ms) ms"
     }
 }
 

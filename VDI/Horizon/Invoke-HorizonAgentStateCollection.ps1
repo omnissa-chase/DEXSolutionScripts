@@ -4,23 +4,18 @@
 
 .DESCRIPTION
     Measures the Horizon Agent on a session host once, scores it, and caches every value
-    to HKLM:\Software\AirWatch\Extensions\VDI\Horizon\Agent (plus Sessions\<Id>) so the
-    hzn_agent_* and hzn_blast_* sensors read in milliseconds. Phases, cheapest first:
-    services and config; session inventory (LSM events + ViewClient_* volatile env);
-    Blast/PCoIP counters; broker DNS/TCP probe; Application-log errors; clone type,
-    time sync, boot; score and FaultPresentAtBoot (decided once per boot, SPEC 5.3).
-
-    Contract (value table, deductions, sensors, KB resolution points): VDI/Horizon/SPEC.md
-    rev 1. KB-HZN-nn variables below hold candidate lists the internal build replaces with
-    the settled answer, keeping the fallback. Never rename them.
+    to HKLM:\Software\AirWatch\Extensions\VDI\Horizon\Agent (plus Sessions\<Id>) for the
+    hzn_agent_* sensors. Phases and sources: VDI/Horizon/SPEC.md 9.1; value table 4.1;
+    deductions 5.1. KB-HZN-nn variables hold candidate lists the internal build replaces
+    with the settled answer, keeping the fallback. Never rename them.
 
 .NOTES
     Script Name  : Invoke-HorizonAgentStateCollection.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (1.0.1: session and Application events read through the .NET EventLogReader; Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine)
+    Last Modified: 2026-11-10 (1.0.2: comment trim under the 32,767 limit; 1.0.1: events via .NET EventLogReader, Get-WinEvent fails under Hub's ARM64 PowerShell 7.2)
     Timeout      : 30 seconds budget (deploy with a 60 second UEM timeout)
     Schedule     : Every 15-30 minutes on session hosts
     Built from   : VDI/Horizon/SPEC.md rev 1
@@ -31,13 +26,7 @@
     The author(s) accept no liability for damage, data loss, or unintended consequences.
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
-#region --- Event log reader --------------------------------------------------------------------
-# Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine ("Cannot marshal
-# 'parameter #8'"), so events are read through System.Diagnostics.Eventing.Reader, which behaves
-# the same on Windows PowerShell 5.1 and PowerShell 7. Get-WinEvent semantics are kept: newest
-# first unless -Oldest, StartTime/EndTime are whole-second bounds, a failed read yields an empty
-# result unless -ErrorStop. Each record carries a Message property (FormatDescription(), falling
-# back to the raw property values when the provider ships no message metadata).
+#region Event log reader (.NET EventLogReader; Get-WinEvent fails under Hub's ARM64 PS 7.2)
 function Get-DexEvent {
     param(
         [Parameter(Mandatory = $true)][string]$LogName,
@@ -101,14 +90,14 @@ function Invoke-HorizonAgentStateCollection {
 [CmdletBinding()]
 param()
 
-$SCRIPT_VERSION = '1.0.1'
-$SCRIPT_VARIANT = ''      # internal build: 'internal' (ScriptVersion is written as <version>+internal)
+$SCRIPT_VERSION = '1.0.2'
+$SCRIPT_VARIANT = ''  # internal build: 'internal' (ScriptVersion is written as <version>+internal)
 $RegPath = 'HKLM:\Software\AirWatch\Extensions\VDI\Horizon\Agent'
 $LogPath = "$env:SystemRoot\Temp\UEM_HorizonAgentStateCollection.log"
 
-# -- Tunables (hard-coded on purpose: UEM variables are per script object, not per assignment) --
+# Tunables (hard-coded: UEM variables are per script object, not per assignment)
 $BlastRttWarnMs           = 250
-$BlastLossWarnPpm         = 20000     # 2 percent
+$BlastLossWarnPpm         = 20000  # 2 percent
 $DisconnectedStaleMinutes = 480
 $AgentErrorWarnCount      = 10
 $SyncStaleHours           = 48
@@ -120,28 +109,28 @@ $SessionLookbackHours     = 72
 $MaxEventsScanned         = 2000
 $MaxSessionsCached        = 50
 
-# -- KB resolution points (VDI/Horizon/SPEC.md section 3). Candidate order matters. --
+# KB resolution points (SPEC section 3); candidate order matters
 $AgentRegistryRoots = @('HKLM:\SOFTWARE\Omnissa\Horizon\Agent', 'HKLM:\SOFTWARE\VMware, Inc.\VMware VDM\Agent')  # KB-HZN-01
-$AgentServiceNames = @('wsnm'); $BlastServiceNames = @('VMBlast')                                                # KB-HZN-02
+$AgentServiceNames = @('wsnm'); $BlastServiceNames = @('VMBlast')  # KB-HZN-02
 $AgentServiceDisplayPattern = '(?i)Horizon.*Agent|VMware View Agent'; $BlastServiceDisplayPattern = '(?i)Blast'
-$FeatureServiceInclude = '(?i)Horizon|Blast|ThinPrint|TP AutoConnect|USB Arbitration|View Agent|Omnissa'        # KB-HZN-03
+$FeatureServiceInclude = '(?i)Horizon|Blast|ThinPrint|TP AutoConnect|USB Arbitration|View Agent|Omnissa'  # KB-HZN-03
 $FeatureServiceExclude = '(?i)VMware Tools|Assist|App Volumes|Workspace ONE|Intelligent Hub|VGAuth|vm3d|VMwareCAF'
-$BrokerValueCandidates = @('Broker', 'BrokerList', 'Brokers', 'ConnectionServer')                                # KB-HZN-04
-$BrokerPorts = @(4001, 4002)                                                                                     # KB-HZN-05
-$BlastSessionCounterSets = @('VMware Blast Session Counters', 'Omnissa Blast Session Counters')                  # KB-HZN-06
+$BrokerValueCandidates = @('Broker', 'BrokerList', 'Brokers', 'ConnectionServer')  # KB-HZN-04
+$BrokerPorts = @(4001, 4002)  # KB-HZN-05
+$BlastSessionCounterSets = @('VMware Blast Session Counters', 'Omnissa Blast Session Counters')  # KB-HZN-06
 $BlastImagingCounterSets = @('VMware Blast Imaging Counters', 'Omnissa Blast Imaging Counters')
 $BlastCounterNames = @{ Rtt = 'RTT'; Loss = 'Packet Loss (Uplink)'; Bandwidth = 'Estimated Bandwidth (Uplink)'; Fps = 'Frame Rate' }
-$AgentFirewallRulePattern = '(?i)Horizon|Blast|PCoIP|VMware View|Omnissa'                                        # KB-HZN-07
+$AgentFirewallRulePattern = '(?i)Horizon|Blast|PCoIP|VMware View|Omnissa'  # KB-HZN-07
 $BlastConfigRoots = @('HKLM:\SOFTWARE\Omnissa\Horizon\Blast\Config', 'HKLM:\SOFTWARE\VMware, Inc.\VMware Blast\Config')  # KB-HZN-08
 $BlastUdpValueName = 'UdpEnabled'
-$BlastTransportSource = 'None'                                                                                   # KB-HZN-09: not measured in this build
-$CloneTypeDetection = 'Heuristic'                                                                                # KB-HZN-10
-$AgentEventProviderPattern = '(?i)Horizon|VMware View|VMware Blast|Omnissa'                                      # KB-HZN-11
-$AgentLogDirs = @("$env:ProgramData\Omnissa\logs", "$env:ProgramData\VMware\VDM\logs")                           # KB-HZN-12
+$BlastTransportSource = 'None'  # KB-HZN-09: not measured in this build
+$CloneTypeDetection = 'Heuristic'  # KB-HZN-10
+$AgentEventProviderPattern = '(?i)Horizon|VMware View|VMware Blast|Omnissa'  # KB-HZN-11
+$AgentLogDirs = @("$env:ProgramData\Omnissa\logs", "$env:ProgramData\VMware\VDM\logs")  # KB-HZN-12
 $ViewClientVarNames = @{ Machine = 'ViewClient_Machine_Name'; Ip = 'ViewClient_IP_Address'; Protocol = 'ViewClient_Protocol'
                          Broker = 'ViewClient_Broker_DNS_Name'; User = 'ViewClient_LoggedOn_Username'; Type = 'ViewClient_Type' }  # KB-HZN-13
-$AgentUninstallPattern = '(?i)^(Omnissa|VMware) Horizon.*Agent'                                                  # KB-HZN-14 (agent form)
-$PcoipCounterSets = @('PCoIP Session Network Statistics')                                                        # KB-HZN-21
+$AgentUninstallPattern = '(?i)^(Omnissa|VMware) Horizon.*Agent'  # KB-HZN-14 (agent form)
+$PcoipCounterSets = @('PCoIP Session Network Statistics')  # KB-HZN-21
 $PcoipCounterNames = @{ Rtt = 'Round Trip Latency ms'; RxLoss = 'RX Packet Loss Percent'; TxLoss = 'TX Packet Loss Percent' }
 
 # -- Run header --
@@ -176,7 +165,7 @@ function Get-HostName {
     return ''
 }
 
-# Pre-seeded to sentinels so an exception part-way still writes a coherent row.
+# Pre-seeded to sentinels so a part-way exception still writes a coherent row
 $m = [ordered]@{
     Installed = 0; Version = ''; BrandRoot = ''; AgentRegistryRoot = ''
     AgentServiceName = ''; AgentServiceRunning = 0; AgentServiceStartMode = ''
@@ -195,7 +184,7 @@ $m = [ordered]@{
     BootTime = ''; UptimeMinutes = -1; FaultPresentAtBoot = 0
     HealthScore = -1; HealthReason = 'CollectionError'; Deductions = ''; Status = 'CollectionError'
 }
-$sessions = @{}   # SessionId -> hashtable
+$sessions = @{}  # SessionId -> hashtable
 
 function Write-Cache {
     param([bool]$Commit)
@@ -228,7 +217,7 @@ try {
     $prior = Get-ItemProperty -Path $RegPath -ErrorAction SilentlyContinue
     Set-ItemProperty -Path $RegPath -Name 'LastAttempt' -Value (Get-Date -Format 'o') -Type String -ErrorAction Stop
 
-    # ---- Phase 1: install, services, firewall, Blast config -------------------------------------
+    # ---- Phase 1: install, services, firewall, Blast config
     foreach ($r in $AgentRegistryRoots) { if (Test-Path -LiteralPath $r) { $m.AgentRegistryRoot = $r; break } }
     if ($m.AgentRegistryRoot) { $m.BrandRoot = if ($m.AgentRegistryRoot -match '(?i)Omnissa') { 'Omnissa' } else { 'VMware' } }
 
@@ -287,12 +276,12 @@ try {
         }
     }
 
-    # ---- Phase 2: session inventory --------------------------------------------------------------
+    # ---- Phase 2: session inventory
     $brokersSeen = New-Object System.Collections.Generic.List[string]
     try {
         $ev = @(Get-DexEvent -LogName 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational' -Id 21, 23, 24, 25 -StartTime (Get-Date).AddHours(-$SessionLookbackHours) -MaxEvents $MaxEventsScanned -ErrorStop)
         $decided = @{}
-        foreach ($e in $ev) {   # newest first: the first event per session decides its state
+        foreach ($e in $ev) {  # newest first: the first event per session decides its state
             $x = [xml]$e.ToXml(); $u = $x.Event.UserData.EventXML
             $sid = [int]$u.SessionID; if ($sid -le 0) { continue }
             $user = [string]$u.User; if ($user -match '^(DWM-|UMFD-)' -or $user -match '\\(DWM-|UMFD-)') { continue }
@@ -348,7 +337,7 @@ try {
         else { Write-Log "Session inventory failed: $($_.Exception.Message)" -Level 'WARN' }
     }
 
-    # ---- Phase 3: Blast / PCoIP counters ----------------------------------------------------------
+    # ---- Phase 3: Blast / PCoIP counters
     function Read-SessionCounters {
         param([string[]]$Sets, [string[]]$Names)
         foreach ($set in $Sets) {
@@ -387,7 +376,7 @@ try {
         }
     }
     else { $m.BlastSessionCount = 0 }
-    # KB-HZN-09 hook: the internal build sets $BlastTransportSource and fills BlastTcpFallbackSessions here; this build leaves -1.
+    # KB-HZN-09: the internal build fills BlastTcpFallbackSessions here; this build leaves -1
     if ($BlastTransportSource -ne 'None') { Write-Log "Blast transport source '$BlastTransportSource' is configured but not implemented in this build; BlastTcpFallbackSessions stays -1" -Level 'WARN' }
     $pc = Read-SessionCounters -Sets $PcoipCounterSets -Names @($PcoipCounterNames.Rtt, $PcoipCounterNames.RxLoss, $PcoipCounterNames.TxLoss)
     if ($pc) {
@@ -405,7 +394,7 @@ try {
     }
     else { $m.PcoipSessionCount = 0 }
 
-    # ---- Phase 4: broker list and probe ------------------------------------------------------------
+    # ---- Phase 4: broker list and probe
     $brokers = New-Object System.Collections.Generic.List[string]
     $fromReg = $false
     if ($m.AgentRegistryRoot) {
@@ -444,7 +433,7 @@ try {
         $m.BrokerProbeResult = if (-not $anyResolved) { 'Unresolvable' } elseif ($reach) { 'Reachable' } else { 'Unreachable' }
     }
 
-    # ---- Phase 5: agent errors -----------------------------------------------------------------------
+    # ---- Phase 5: agent errors
     try {
         $errs = @(Get-DexEvent -LogName 'Application' -Level 1, 2 -StartTime (Get-Date).AddHours(-$EventLookbackHours) -MaxEvents $MaxEventsScanned -ErrorStop |
                   Where-Object { $_.ProviderName -match $AgentEventProviderPattern })
@@ -457,7 +446,7 @@ try {
         else { Write-Log "Application log read failed: $($_.Exception.Message)" -Level 'WARN' }
     }
 
-    # ---- Phase 6: clone type, persistence, time sync, boot ------------------------------------------
+    # ---- Phase 6: clone type, persistence, time sync, boot
     if ($CloneTypeDetection -eq 'Heuristic') {
         foreach ($d in $AgentLogDirs) {
             if (-not (Test-Path -LiteralPath $d)) { continue }
@@ -480,18 +469,18 @@ try {
     $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
     if ($os -and $os.LastBootUpTime) { $m.BootTime = ([datetime]$os.LastBootUpTime).ToString('s'); $m.UptimeMinutes = [int]((Get-Date) - [datetime]$os.LastBootUpTime).TotalMinutes }
 
-    # ---- Phase 7: score ------------------------------------------------------------------------------
-    # Deduction table: VDI/Horizon/SPEC.md 5.1. A -1 metric never deducts (every comparison is against a positive threshold).
+    # ---- Phase 7: score
+    # Deduction table: SPEC 5.1. A -1 metric never deducts (every threshold is positive)
     $ded = New-Object System.Collections.Generic.List[object]
     function Ded { param([string]$R, [int]$P) $ded.Add(@{ R = $R; P = $P }) }
     if ($m.AgentServiceRunning -eq 0) { Ded 'AgentServiceStopped' 40 }
-    # 'NotPaired' (35) is KB-HZN-04 gated: the public build cannot prove unpaired, so it reports NoBrokerKnown instead.
+    # NotPaired (35) is KB-HZN-04 gated; the public build reports NoBrokerKnown instead
     if ($m.BrokerCount -gt 0 -and $m.BrokerProbeResult -eq 'Unresolvable') { Ded 'BrokerUnresolvable' 30 }
     if ($m.BrokerCount -gt 0 -and $m.BrokerProbeResult -eq 'Unreachable') { Ded 'BrokerUnreachable' 30 }
     if ($m.BlastServicePresent -eq 1 -and $m.BlastServiceRunning -eq 0) { Ded 'BlastServiceStopped' 25 }
     if ($m.BlastPacketLossPpmMax -gt $BlastLossWarnPpm -or $m.PcoipLossPpmMax -gt $BlastLossWarnPpm) { Ded 'HighPacketLoss' 20 }
     if ($m.BlastRttMsMax -gt $BlastRttWarnMs -or $m.PcoipRttMsMax -gt $BlastRttWarnMs) { Ded 'HighRtt' 15 }
-    if ($m.BlastTcpFallbackSessions -gt 0 -and $m.BlastUdpEnabled -eq 1) { Ded 'BlastTcpFallback' 15 }   # never true in the public build (KB-HZN-09)
+    if ($m.BlastTcpFallbackSessions -gt 0 -and $m.BlastUdpEnabled -eq 1) { Ded 'BlastTcpFallback' 15 }  # never true in the public build (KB-HZN-09)
     if ($m.FirewallRulesDisabled -gt 0) { Ded 'FirewallRulesDisabled' 15 }
     if ($m.BrokerCount -eq 0) { Ded 'NoBrokerKnown' 10 }
     if ($m.AgentErrorCount24h -ge $AgentErrorWarnCount) { Ded 'AgentErrorsElevated' 10 }
@@ -505,7 +494,7 @@ try {
     $m.Deductions = (@($ded | Sort-Object { $_.P } -Descending | ForEach-Object { "$($_.R):$($_.P)" }) -join ';')
     $m.Status = if ($ded.Count -eq 0) { 'Healthy' } else { 'Degraded' }
 
-    # FaultPresentAtBoot: decided once per boot, on the first run after it; carried unchanged afterwards (SPEC 5.3).
+    # FaultPresentAtBoot: decided once per boot, on the first run after it (SPEC 5.3)
     $priorBoot = if ($prior) { [string]$prior.BootTime } else { '' }
     if ($m.BootTime -and $priorBoot -ne $m.BootTime) { $m.FaultPresentAtBoot = [int]($m.HealthReason -ne 'Healthy') }
     elseif ($prior -and $null -ne $prior.FaultPresentAtBoot) { $m.FaultPresentAtBoot = [int]$prior.FaultPresentAtBoot }
@@ -524,6 +513,5 @@ catch {
 }
 }
 
-# Entry point. The param block is inside the function because the Workspace ONE engine
-# does not bind a script-scope param block.
+# Entry point (param block inside the function: the Workspace ONE engine does not bind a script-scope one)
 Invoke-HorizonAgentStateCollection
