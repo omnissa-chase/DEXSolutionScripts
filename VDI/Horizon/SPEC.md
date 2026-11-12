@@ -617,10 +617,14 @@ pool with the disconnect timeout set to Never.
 
 | Break | Lever | Expect | Validate |
 |---|---|---|---|
-| `UsbServiceDisabled` | stop + Disabled | Fixed | Running, not Disabled, line `[Failed ] Horizon Client USB Service: ...-> Remediation ran` |
-| `ClientFirewallRuleDisabled` | disable one rule | Fixed | enabled, line `[Failed ] Horizon Client Firewall Rules: ...` |
-| `ServerHostsPoisoned` | hosts entry for the configured server to `127.0.0.2` | ReportedOnly | `[Warning] Server Connectivity (443): No Horizon server answers ...` |
-| `ServerUnresolvable` | configure a server name under a non-existent TLD in the test user's HKCU (`-TestServer`) | ReportedOnly | `[Failed ] Server DNS Resolution: Server name(s) do not resolve: ... -> Remediation ran` and still unresolvable afterwards |
+| `UsbServiceDisabled` | stop + Disabled | Fixed | Running, not Disabled, line `[Failed ] Horizon Client USB Service: ...-> Remediation ran`, cache `RemediationsRun >= 1`, exit 0 |
+| `ClientFirewallRuleDisabled` | disable one matching rule; when the install shipped none (8.20.0 on the lab VMs ships none) the harness creates an Allow rule named `Omnissa Horizon Client (DEXTest)` for `horizon-client.exe` and removes it afterwards | Fixed | enabled, line `[Failed ] Horizon Client Firewall Rules: ...-> Remediation ran`, exit 0 |
+| `ServerHostsPoisoned` | a DNS-resolvable server name (a configured one, else `www.omnissa.com` seeded as `DefaultServer`) pointed at `127.0.0.2` through the hosts file; step 3 resolves because it asks DNS only, step 4's TcpClient uses the OS resolver | ReportedOnly | `[Passed ] Server DNS Resolution: ...`, `[Warning] Server Connectivity (443): No Horizon server answers ...`, hosts line still present, exit 0 |
+| `ServerUnresolvable` | every client key (both policy roots, both roots in the console user's hive) moved aside with `reg copy` and one fresh user key written with `DefaultServer = hzn-dex-test.invalid` | ReportedOnly | `[Failed ] Server DNS Resolution: Server name(s) do not resolve: ... -> Remediation ran`, `[Passed ] Server Connectivity (443): Not testable`, still unresolvable afterwards, cache written, exit 0 (the flush counts as a remediation, so the step is not "unfixed") |
+
+Written 2026-11-12 as `Invoke-AutoRemediateHorizonClient_BreakTest.ps1` 1.0.0 (all four
+breaks ungated, no `-TestServer`: the server breaks seed the console user's own key and put
+the original keys back). Runs elevated as the console user on a lab VM with the client.
 
 ### 11.5 Lab hosts needed
 
@@ -695,3 +699,11 @@ was built from in every script header (`Built from VDI/Horizon/SPEC.md rev 1`).
   again by hand). The collector had reported `CloneType Unknown` on it, so the KB-HZN-10
   heuristic (cloneprep files under the agent log folders) misses an Omnissa 8.20 instant
   clone; a lab probe sensor is collecting what the clone actually leaves behind.
+- 2026-11-12: Omnissa Horizon Client 8.20.0 is on both lab VMs since 2026-11-10, so the
+  client side ran for real through UEM against `Test_Treddy`: collector and remediation
+  (WhatIf) `ea9707`, the four client sensors `d49f45`, all Passed on both devices (score 90
+  `NoServerKnown`, `Usb USBArbService`, `Root Omnissa`, no client firewall rules shipped,
+  `Fail24` 0 on the VM whose client has been opened and -1 on the one whose client never
+  wrote a log). `_AutomatedTesting/Invoke-AutoRemediateHorizonClient_BreakTest.ps1` 1.0.0
+  written to 11.4 (table updated to the implemented levers); awaiting the user's elevated
+  run and the client parity run.
