@@ -3,7 +3,7 @@
 .NOTES
     Sensor Name  : vdi_role
     Data Type    : String
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
@@ -67,7 +67,7 @@ try {
     if ((Test-Uninstall '(?i)^Citrix Workspace|^Citrix Receiver') -or
         (Test-AnyPath @('HKLM:\SOFTWARE\WOW6432Node\Citrix\ICA Client', 'HKLM:\SOFTWARE\Citrix\ICA Client'))) { $isClient = $true }
     $appx = @(Get-ChildItem -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore\Applications' -ErrorAction SilentlyContinue |
-              Where-Object { $_.PSChildName -match '(?i)^MicrosoftCorporationII\.Windows365|WindowsApp|MicrosoftCorporationII\.AzureVirtualDesktop' })
+              Where-Object { $_.PSChildName -match '(?i)^MicrosoftCorporationII\.(Windows365|AzureVirtualDesktop)' })
     if ((Test-AnyPath @('HKLM:\SOFTWARE\Microsoft\MSRDC')) -or
         (Test-Uninstall '(?i)^Remote Desktop$|^Windows App$') -or
         ($appx.Count -gt 0)) { $isClient = $true }

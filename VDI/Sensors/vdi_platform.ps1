@@ -3,7 +3,7 @@
 .NOTES
     Sensor Name  : vdi_platform
     Data Type    : String
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
@@ -68,7 +68,7 @@ try {
     $avdHost   = (Test-AnyPath @('HKLM:\SOFTWARE\Microsoft\RDInfraAgent')) -or
                  (Test-Svc -Names @('RDAgentBootLoader') -Display '(?i)Remote Desktop Agent Loader')
     $appx      = @(Get-ChildItem -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Appx\AppxAllUserStore\Applications' -ErrorAction SilentlyContinue |
-                   Where-Object { $_.PSChildName -match '(?i)^MicrosoftCorporationII\.Windows365|WindowsApp|MicrosoftCorporationII\.AzureVirtualDesktop' })
+                   Where-Object { $_.PSChildName -match '(?i)^MicrosoftCorporationII\.(Windows365|AzureVirtualDesktop)' })
     $avdClient = (Test-AnyPath @('HKLM:\SOFTWARE\Microsoft\MSRDC')) -or
                  (Test-Uninstall '(?i)^Remote Desktop$|^Windows App$') -or
                  ($appx.Count -gt 0)

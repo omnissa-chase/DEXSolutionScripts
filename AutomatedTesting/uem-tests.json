@@ -109,6 +109,15 @@
     "variables": { "ServiceName": "Spooler", "WhatIf": "" },
     "note": "Print Spooler exists on every Windows build and restarts cleanly."
   },
+  "Restart-CrashedServices.ps1": {
+    "expect": "Completed",
+    "note": "No input (new 2026-11-12, 1.0.0): finds services with a 7031/7034 crash event in the last 24 h that are still stopped and starts them. A healthy lab VM reports 'No service crash events' or lists recovered services, exit 0. Exit 1 means a start failed or a service is held in cool-down; read the output before calling it a test failure. First run under Hub's ARM64 engine also proves the .NET event reader on the System log."
+  },
+  "Restart-HungServices.ps1": {
+    "expect": "Completed",
+    "timeoutMinutes": 6,
+    "note": "No input (new 2026-11-12, 1.0.0): finds services stuck in a pending state for 60 s, ends the process and starts the service. A healthy lab VM reports 'No service is in a pending state', exit 0, in seconds; a run that finds a pending service watches it for up to 60 s. Exit 1 means a hung service could not be touched (shared host, deny list, cool-down) or a recovery failed."
+  },
   "Restart-WinProcess.ps1": {
     "variables": { "FileDescription": "Google Chrome", "StartService": "true" },
     "note": "High impact: run with -IncludeHighImpact. Target chosen 2026-10-30: Chrome is on the lab VMs and supports both the blunt and the graceful restart. Exits 0 when no matching process is running, so a device without Chrome open passes trivially; the device-side proof is Chrome's PIDs changing. Under UEM the relaunch runs as SYSTEM in session 0, so the user does not see the new window; that is a design limitation to record, not a test failure."

@@ -642,110 +642,107 @@ reset via the vendor clean-up tool (Opt-in, destroys user store config, off by d
 
 ### 5.1 AVD / Windows 365 session host
 
-Windows 365 Cloud PCs run the same AVD agent, are always persistent, and are Intune-managed;
-the scripts behave identically and `Persistence = Persistent` is set when a Cloud PC is
-detected (detection marker to verify). Pooled AVD hosts are `NonPersistent` unless the
-host pool is personal, which is not knowable on-device, so the default is `Unknown`:
-relief fixes and the agent restart run, results are reported as possibly temporary, and
-only the withheld class (1.1) is held back.
+Build contract: `VDI/Microsoft/SPEC.md` (rev 1, 2026-11-10, researched against the
+current Microsoft Learn pages; nothing verified on a host yet). What the research changed
+from the first draft of this section:
+
+- The **Geneva monitoring agent is not a service**. It runs as the scheduled task
+  `GenevaTask_<version>`; health is "task exists, enabled, not stuck", and the fix when
+  it is missing is the MSI under `C:\Program Files\Microsoft RDInfra`. Read it through
+  the `Schedule.Service` COM object so the one-time sensor can do it without a process.
+- **AVD needs no inbound firewall rules.** Sessions arrive over the reverse-connect
+  transport through the gateway. The only inbound rule that ever matters is UDP 3390 for
+  the managed-network Shortpath listener, and only when that policy is on. The earlier
+  "re-enable the Remote Desktop group" step is gone.
+- **Health checks are not readable locally** (KB-AVD-10). The agent reports
+  `DomainJoinedCheck`, `DomainTrustCheck`, `SxSStackListenerCheck`, `UrlsAccessibleCheck`,
+  `MonitoringAgentCheck`, `MetaDataServiceCheck`, `AppAttachHealthCheck`,
+  `WebRTCRedirectorCheck`, `SupportedEncryptionCheck`, `FSLogixHealthCheck` to the broker
+  only. The collector re-derives the first six and publishes `DerivedStatus`
+  (`Available`, `NeedsAssistance`, `Unavailable`, `NotRegistered`) in the portal's
+  vocabulary so a help-desk agent sees the same word without portal access.
+- **The agent tells you its own FQDN list**: `WVD-Agent` event 3701 lists the
+  region-specific endpoints. The collector probes those plus the broker from
+  `BrokerResourceIdURI` and the broker health URL (`/api/health`, body
+  `RD Broker is Healthy`), which is Microsoft's own documented test. Azure Government is
+  detected from the broker URI suffix or IMDS `azEnvironment` and swaps the list.
+- **Transport per session comes from `RdpCoreCDV` event 135** ("transport type set to
+  UDP"), which is the documented verification. Counters: `RemoteFX Network` (UDP/TCP
+  RTT, loss, UDP bandwidth) and `User Input Delay per Session\Max Input Delay`, one
+  instance per session suffixed with the session number, no `_Total`. Insights calls
+  input delay over 500 ms "poor", so that is the threshold.
+- **Windows 365 has no documented on-device marker.** Candidates are the hardware model
+  string (`Cloud PC Enterprise 2vCPU/8GB/128GB` as Intune shows it) and the `CPC-`
+  computer-name prefix; both are KB-AVD-14 and `Persistence` stays `Unknown` until one
+  matches. Pooled vs personal host pools are not knowable on-device.
+- **Fourteen steps need two scripts.** With the pasted event reader the single
+  remediation cannot fit 32,767 characters, so it is `Part1` (steps 1-7, the Unavailable
+  class: services, connections allowed, stack listener, Geneva task, registration) and
+  `Part2` (steps 8-14: broker and URLs, IMDS, transport and Shortpath, Teams redirector,
+  disconnected sessions, update readiness, image fault). A Quickflow runs both.
+- **Update readiness** is worth a step: free disk under 2 GB breaks agent updates
+  (`DownloadMsiException`), .NET below 4.7.2 makes them revert (event 3389), and
+  boot-loader start timeouts (System 7000/7011) are a documented cause of hosts that
+  look unhealthy after boot. All report-only, all cheap to measure.
 
 **Collector:** `Invoke-AvdSessionHostStateCollection.ps1`, cache `...\VDI\Microsoft\SessionHost`.
+Measurements, sources and bounds are SPEC section 9.1; the deduction table (25 rows,
+`BootLoaderStopped` 40 and `NotRegistered` 40 at the top, `ShortpathRuleMissing` 5 at
+the bottom) is SPEC 5.1.
 
-| # | Measurement | Source |
-|---|---|---|
-| 1 | Agent installed, version | `HKLM:\SOFTWARE\Microsoft\RDInfraAgent`, `C:\Program Files\Microsoft RDInfra\RDAgent_<ver>` |
-| 2 | Services: `RDAgentBootLoader`, `RDAgent`, Geneva monitoring agent, `TermService`, `UmRdpService`, `RDWebRTCSvc` | `Get-Service` |
-| 3 | Registration: `IsRegistered` = 1 and `RegistrationToken` blank (confirmed by Microsoft agent troubleshooting doc); `IsRegistered` = 0 usually means the token expired | registry |
-| 4 | SxS stack listener present (`rdp-sxs*` WinStation) and `fDenyTSConnections` = 0 | `HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations`, policy key |
-| 5* | Required URL reachability (broker, `*.wvd.microsoft.com`, login, catalog, Geneva, IMDS `169.254.169.254`, host health `168.63.129.16`) | `TcpClient` 443 with 2 s each; optionally dispatches the agent's own `WVDAgentUrlTool.exe` asynchronously and reads its output next run |
-| 6* | Agent health-check outcomes as the agent itself logs them (domain joined, domain trust, FSLogix, SxS listener, URLs, monitoring agent, metadata service, encryption, WebRTC, app attach, UDP transport -- full list to verify against the current "session host statuses and health checks" doc) | Application log providers `WVD-Agent`, `WVD-Agent-Updater`, `RDAgentBootLoader`; `RemoteDesktopServices` log |
-| 7 | Session inventory, client name/IP per session | LSM events (existing parser) |
-| 8 | RDP transport and quality per session: UDP (Shortpath) vs TCP, RTT, loss | `RemoteFX Network(*)` counters (`Current UDP RTT`, `Current TCP RTT`, `Loss Rate`); `RdpCoreCDV/Operational` 135 transport-type event (verify) |
-| 9 | Teams WebRTC redirector ready | `RDWebRTCSvc` + `HKLM:\SOFTWARE\Microsoft\Teams\IsWVDEnvironment` = 1 |
-| 10 | FSLogix health | `...\VDI\Shared\FSLogix` cache (5.3), not re-measured |
-| 11* | Agent errors 24 h | same providers, Level <= Error |
-| 12 | Persistence | Cloud PC marker (verify) else `Unknown` |
-| 13 | Score | below |
+**Sensors.** Ship (4): `avd_host_health_score`, `avd_host_health_reason`,
+`avd_host_status`, `avd_host_pool_name`. Everything else (`IsRegistered`, session
+counts, transport, RTT, loss, input delay, versions, last client name, Teams readiness)
+stays in the cache and in the all-in-one sensor `avd_host_health` under the
+no-DEX-duplication rule; whether DEX has any AVD data source at all is KB-AVD-00.
 
-| Reason | Points | Trigger |
-|---|---:|---|
-| `BootLoaderStopped` | 40 | the documented first fix for "Unavailable" |
-| `NotRegistered` | 40 | `IsRegistered` = 0 -- needs a new token, ADMIN |
-| `AgentStopped` | 35 | |
-| `SxsListenerMissing` | 30 | |
-| `TsConnectionsDenied` | 30 | `fDenyTSConnections` = 1 |
-| `BrokerUrlsUnreachable` | 30 | broker/login URLs fail |
-| `ImdsUnreachable` | 20 | "Needs Assistance" class |
-| `MonitoringAgentUnhealthy` | 10 | "Needs Assistance" class |
-| `RdpTcpFallback` | 15 | Shortpath expected, sessions on TCP |
-| `HighRdpRtt` | 15 | > 250 ms |
-| `TeamsRedirectorStopped` | 10 | |
-| `FsLogixUnhealthy` | 10 | from shared cache |
-| `StaleDisconnectedSessions` | 10 | |
-| `AgentErrorsElevated` | 10 | |
-| `CollectionError` / `Healthy` | | |
-
-**Sensors.** Ship (11): `avd_host_agent_version`, `avd_host_health_score`,
-`avd_host_health_reason`, `avd_host_registered`, `avd_host_session_count`,
-`avd_host_disconnected_session_count`, `rdp_transport`, `rdp_rtt_ms`, `rdp_loss_ppm`,
-`avd_host_teams_redirector_ready`, `avd_host_last_client_name`.
-Cache only: `BootLoaderRunning`, `AgentRunning`, `SxsListenerOk`, `BrokerUrlsReachable`,
-`ImdsReachable`, `ErrorCount24h`, `HealthCheckFailures` (names, `;`-joined).
-
-**Remediation:** `Invoke-AutoRemediateAvdSessionHost.ps1`:
-
-| # | Step | Action |
-|---|---|---|
-| 1 | `RDAgentBootLoader` | AUTO -- start / un-disable |
-| 2 | `RDAgent`, Geneva agent, `TermService`, `UmRdpService`, `RDWebRTCSvc` | AUTO |
-| 3 | `fDenyTSConnections` = 1 | AUTO -- set 0 (policy value left alone; if policy-enforced, report ADMIN) |
-| 4 | Remote Desktop / Shortpath firewall rules | AUTO -- re-enable the Remote Desktop group; Shortpath UDP 3390 rule only if the Shortpath policy is already enabled |
-| 5 | Required URLs unreachable | AUTO flush DNS; then report -- proxy/firewall ADMIN |
-| 6 | `IsRegistered` = 0 | report -- ADMIN must issue a new registration token; the device cannot |
-| 7 | SxS listener missing | report -- agent/stack reinstall, ADMIN |
-| 8 | Disconnected sessions | Opt-in logoff, default report |
-| 9 | TCP fallback / high RTT | report -- Shortpath policy, STUN/TURN egress |
-| 10 | Agent errors | report |
-
-Steps 1-5 and 8 run on pooled hosts as relief (1.1). Tier 2:
-`Invoke-AutoRemediateAvdAgentRestart.ps1` -- stop `RDAgent`, restart `RDAgentBootLoader`
-(which re-launches the agent and re-runs health checks). Cooldown 1 h, no
-`ConfirmHighImpact` needed (it is the vendor's own documented remedy and sessions survive),
-runs on pooled hosts, but skipped while any session is in the connecting state. A host that
-is already `Unavailable` at first boot is an image fault; the restart still runs, and the
-report names the host pool image.
+**Remediation:** `Invoke-AutoRemediateAvdSessionHostPart1.ps1` and `Part2.ps1`, step
+tables and exact messages in SPEC 8.1 and 8.2. Steps 1-6, 8 (DNS flush), 10 (Shortpath
+rule), 11 and 12 run on pooled hosts as relief (1.1). Tier 2:
+`Invoke-AutoRemediateAvdAgentRestart.ps1` restarts `RDAgentBootLoader` (stop `RDAgent`
+first), which is the vendor's documented remedy and also applies a pending registration
+token. Cooldown 1 h, no `ConfirmHighImpact` for established sessions (they survive),
+skipped while a session is still connecting. Registration itself is never touched: a
+new key must come from the host pool, and re-registering a live host risks
+`NAME_ALREADY_REGISTERED`.
 
 ### 5.2 Microsoft clients (endpoint)
 
-Three clients coexist: **Windows App** (Store package; identity to verify), the **Remote
-Desktop client** `msrdc.exe` (`HKLM:\SOFTWARE\Microsoft\MSRDC`, per-user feeds under
-`HKCU:\SOFTWARE\Microsoft\RdClientRadc`), and **mstsc** (in-box, RDS/direct RDP only).
+**Windows App is the client.** The Remote Desktop client `msrdc` left support on
+2026-03-27; it is detected as a legacy finding (`LegacyClientOnly` 15 when it is the only
+client, `LegacyClientPresent` 5 when it sits beside Windows App), never scored as a
+working client. `mstsc` is noted for RDS and never scored. Windows App is a Store
+package (`9N1F85V9T8BN`, family `MicrosoftCorporationII.Windows365_8wekyb3d8bbwe`,
+KB-AVD-18) also available as an MSIX; it does not yet connect to on-premises RDS.
 
 **Collector:** `Invoke-MicrosoftRdClientStateCollection.ps1`, cache `...\VDI\Microsoft\Client`.
 
 | # | Measurement | Source |
 |---|---|---|
-| 1 | Client type(s) present, versions | Store package (`Get-AppxPackage -AllUsers`), MSRDC key, mstsc file version |
-| 2 | Subscribed workspaces / feeds for the console user | `RdClientRadc` (msrdc) / Windows App equivalent (verify) |
-| 3* | Feed and gateway reachability (`rdweb.wvd.microsoft.com`, `rdgateway.wvd.microsoft.com`, `client.wvd.microsoft.com`, 443) | `TcpClient` |
-| 4* | Connect attempts, failures, last disconnect reason code, UDP multi-transport used | `Microsoft-Windows-TerminalServices-RDPClient/Operational` (1024 attempt, 1026 disconnect + reason, 1027 connected, 1105 multi-transport; verify set), 24 h |
-| 5 | Credential cache entries for `TERMSRV/*` | `cmdkey /list` parse (count only) |
-| 6 | Endpoint network context | `VPN` and `NetworkStack` caches |
+| 1 | Client types present, versions, console user | Appx registration keys (no `Get-AppxPackage`), `MSRDC` key, `mstsc.exe` file version |
+| 2 | Client UDP policy | `...\Terminal Services\Client\fClientDisableUDP` (documented) |
+| 3* | Service endpoint DNS and 443 (`rdweb`, `rdgateway`, `rdbroker` under `wvd.microsoft.com`, `login.microsoftonline.com`, `windows.cloud.microsoft`; Government variants) | `TcpClient`, max 5 hosts |
+| 4* | Connect attempts, successes, failures, last server, last disconnect reason, UDP evidence | `Microsoft-Windows-TerminalServices-RDPClient/Operational` 1024, 1026 (reason code), 1027, 1105 (meaning to verify), 24 h |
+| 5 | Windows App log failures | `%temp%\DiagOutputDir\Windows365\Logs` tail (documented folder, regex to verify) |
+| 6 | Trace folder size | `%temp%\DiagOutputDir\RdClientAutoTrace` (documented, known to grow to gigabytes) |
+| 7 | `TERMSRV/*` credential count | `cmdkey /list` under the user's token |
+| 8 | Endpoint network context | `VPN` and `NetworkStack` caches |
 
-Reasons: `FeedUnreachable` 35, `GatewayUnreachable` 30, `RepeatedConnectFailures` 25,
-`NoClientInstalled` 20 (when the device is in a VDI-user smart group), `ClientOutdated` 10,
-`TcpOnlyTransport` 10 (never saw 1105), `VpnDegraded` 5.
+Reasons: `EndpointUnresolvable` 35, `EndpointUnreachable443` 35,
+`RepeatedConnectFailures` 25, `NoClientInstalled` 20, `LegacyClientOnly` 15,
+`UdpDisabledByPolicy` 10, `ClientOutdated` 10, `LegacyClientPresent` 5,
+`TraceFolderBloated` 5, `VpnDegraded` 5.
 
-**Sensors.** Ship (6): `avd_client_type`, `avd_client_version`, `avd_client_health_score`,
-`avd_client_health_reason`, `avd_client_connect_failure_count_24h`,
-`avd_client_last_connect_time`.
-Cache only: `FeedCount`, `FeedReachable`, `LastDisconnectReason`, `UdpUsed` (surfaces as
-the `TcpOnlyTransport` reason), `TermsrvCredentialCount`.
+**Sensors.** Ship (3): `avd_client_health_score`, `avd_client_health_reason`,
+`avd_client_connect_failure_count_24h`. Client type and version are UEM app inventory;
+the rest is cache and `avd_client_health`.
 
-**Remediation:** `Invoke-AutoRemediateMicrosoftRdClient.ps1`: DNS (AUTO), proxy report,
-Store client stale (report; Store updates are user/Intune-owned), msrdc outdated (ADMIN
-app deploy), stale `TERMSRV` credential entries (Opt-in: delete; off by default), feed
-refresh (USER instruction).
+**Remediation:** `Invoke-AutoRemediateMicrosoftRdClient.ps1` (SPEC 8.3): endpoint DNS
+(AUTO), endpoint 443 (report), UDP policy (report), connection failures (report), legacy
+client (report, ADMIN removes it and deploys Windows App), version floor (report), VPN
+context (report), stale `TERMSRV` credentials (opt-in, off), Windows App cache reset
+(opt-in, off, `ConfirmHighImpact`), trace folder cleanup (AUTO over 2 GB, files older
+than 7 days).
 
 ### 5.3 Surrounding components (Microsoft, and shared)
 
@@ -762,10 +759,14 @@ refresh (USER instruction).
   non-persistent hosts because a leftover temp profile blocks the *next* logon on that
   clone until refresh, so removing it is relief); locked VHD (another host holds the
   handle) report with the holding host from the log.
-- **RDP Shortpath**: inside 5.1 (`rdp_transport`). Managed-network Shortpath needs the
-  listener policy and a UDP 3390 rule; both are reported, the rule is AUTO only when the
-  policy is already on.
-- **Teams WebRTC redirector**: inside 5.1.
+- **RDP Shortpath**: inside 5.1 (cache values `UdpSessionCount`, `TcpSessionCount`,
+  `SelectTransportPolicy`; reasons `RdpTcpFallback`, `TransportForcedTcp`,
+  `ShortpathRuleMissing`). Managed-network Shortpath needs the listener policy and an
+  inbound UDP 3390 rule; the policy is reported, the rule is AUTO only when the policy
+  is already on. Public-network Shortpath (STUN/TURN) needs no host configuration, only
+  outbound UDP 3478 to `51.5.0.0/16`, which is reported when sessions land on TCP.
+- **Teams media redirector**: inside 5.1 (`TeamsRedirectorStopped`; a missing service
+  with `IsWVDEnvironment` set is a Warning because new Teams may use SlimCore).
 - **MSIX app attach / App attach**: `avd_host_appattach_failures_24h` from the agent log;
   report only.
 - **Classic RDS session hosts** (`rds_` sensors, collector
@@ -800,10 +801,12 @@ all-in-one JSON sensor (2.7), Tier 1 remediation, any Tier 2 script, `Runbook-*.
 | 2 | App Volumes, DEM, Teams redirection sensor | 2 collectors, 9 sensors, 1 remediation | this VM (App Volumes present), DEM share |
 | 3 | Citrix VDA + Workspace app | 2 collectors, 15 sensors, 2 remediations, 1 Tier 2, 2 runbooks, 2 break tests | Citrix lab or DaaS trial: 1 DDC/Cloud Connector, 1 MCS VDA, Workspace app on this VM |
 | 4 | UPM, WEM, PVS, Teams sensors | 2 collectors, 9 sensors, 1 remediation | same |
-| 5 | AVD session host + Microsoft clients | 2 collectors, 17 sensors, 2 remediations, 1 Tier 2, 2 runbooks, 2 break tests | AVD host pool (1 pooled host), msrdc + Windows App on this VM |
+| 5 | AVD session host + Windows App (`VDI/Microsoft/SPEC.md` rev 1) | 2 collectors, 7 sensors, 3 remediations (host Part1/Part2, client), 1 Tier 2, 2 runbooks, 2 break tests | AVD host pool (1 pooled multi-session host enrolled in UEM), Windows App on this VM; a Cloud PC when available |
 | 6 | FSLogix (shared), RDS classic, app attach | 2 collectors, 11 sensors, 2 remediations | AVD host + one Server RDSH |
 
-Shipped scalar sensor total: 78 objects (2 + 15 + 9 + 15 + 9 + 17 + 11). Roughly 45 more
+Shipped scalar sensor total: planning figure 78 objects (2 + 15 + 9 + 15 + 9 + 17 + 11)
+before the no-DEX-duplication rule; Horizon shipped 6 of its 15 and AVD ships 7 of its
+17, so expect roughly half once every phase is cut the same way. Roughly 45 more
 values are cache-only and can be promoted to sensors per customer without touching a
 collector. On top of that, one all-in-one JSON sensor per component: 13 objects (Horizon
 Agent, Horizon Client, App Volumes, DEM, Citrix VDA, Workspace app, UPM, WEM, AVD host,
@@ -821,7 +824,7 @@ and 5 with the measurement table swapped. Budget the Horizon pair to be reviewed
 | Horizon agent | stop/disable `wsnm`, `VMBlast`, feature services; disable Horizon firewall rules; set bogus broker DNS via hosts file; create a disconnected session via a second RDP logon and `tsdiscon` | unpairing the agent (needs reinstall); instant-clone image edits |
 | Horizon client | stop USB arbitration; hosts-file poison the server name; block 8443 with a firewall rule | corrupting prefs on a real user |
 | Citrix VDA | stop Desktop/ICA services; disable rules; empty `ListOfDDCs` **copy** (restore from backup value); hosts-file poison DDC | `BrokerAgent.exe.config` edits |
-| AVD host | stop `RDAgentBootLoader`/`RDAgent`; `fDenyTSConnections` = 1; disable RD firewall group; hosts-file poison `rdbroker` | clearing `IsRegistered` (needs a new token to recover) |
+| AVD host | stop/disable `RDAgentBootLoader`, stop `RDAgent`; `fDenyTSConnections` = 1; disable the `GenevaTask_*` task; named outbound block rules to the broker (443) and IMDS (169.254.169.254:80); `SelectTransport` = 1 policy copy; `tsdiscon` | clearing `IsRegistered` (needs a new token; `NAME_ALREADY_REGISTERED` risk); stack reinstall; domain trust |
 | FSLogix | stop `frxsvc`; set `VHDLocations` to an unreachable share **copy**; seed a `local_test` temp profile folder | detaching a live user's VHD |
 
 All use `Assert-DexTestHost` and the existing restore pattern. Every break test's
@@ -853,7 +856,7 @@ Decided 2026-11-03:
 
 Still open:
 
-4. **Windows 365 and Hub:** confirm whether target customers run Hub on Cloud PCs. If not,
+4. **Windows 365 and Hub (now KB-AVD-26, which also asks whether multi-session hosts are enrolled at all):** confirm whether target customers run Hub on Cloud PCs. If not,
    the AVD host work still applies to AVD; W365 becomes client-side only.
 5. **Disconnected-session logoff default:** Opt-in everywhere above. If customers want it
    AUTO with a threshold (ControlUp row 151 suggests demand), it becomes a tunable on the
@@ -876,9 +879,9 @@ answer goes into the script header.
 | Blast per-session transport (UDP/TCP) source | Blast log vs counter vs `ViewClient_*` |
 | Citrix service short names; registration-success event ID; `root\Citrix\euem` and `root\Citrix\hdx` class names | `Get-Service *Citrix*`; `Get-WinEvent -ProviderName 'Citrix Desktop Service' -MaxEvents 50`; `Get-CimClass -Namespace root\Citrix\hdx` |
 | Workspace app store registry, log paths, updater service names | `Get-ChildItem HKCU:\Software\Citrix -Recurse -Depth 2` on a configured client |
-| AVD health-check list and how each is logged locally; `RdpCoreCDV` 135 transport event; `RemoteFX Network` counter availability on AVD | Microsoft "session host statuses and health checks" page; `Get-WinEvent -LogName 'Microsoft-Windows-RemoteDesktopServices-RdpCoreCDV/Operational'`; `Get-Counter -ListSet 'RemoteFX Network'` |
-| Windows App package identity and feed storage; RDPClient event ID set | `Get-AppxPackage -AllUsers *Windows365*,*WindowsApp*`; `Get-WinEvent -LogName 'Microsoft-Windows-TerminalServices-RDPClient/Operational' -MaxEvents 100` |
-| Cloud PC detection marker | inspect a W365 Cloud PC registry (`HKLM:\SOFTWARE\Microsoft\Windows365*`, IMDS tags) |
+| AVD health-check list (resolved 2026-11-10 from the docs: ten named checks, none readable locally, KB-AVD-10); `RdpCoreCDV` 135 transport event (documented, KB-AVD-11); `RemoteFX Network` and `User Input Delay` instance naming on multi-session (KB-AVD-13) | on the AVD lab host: the `Get-DexEvent` reader against `Microsoft-Windows-RemoteDesktopServices-RdpCoreCDV/Operational`; `Get-Counter -ListSet 'RemoteFX Network','User Input Delay per Session'` |
+| Windows App package family (`MicrosoftCorporationII.Windows365_8wekyb3d8bbwe`, KB-AVD-18) and workspace storage (KB-AVD-25); RDPClient event 1105 meaning (KB-AVD-21) | `Get-AppxPackage -AllUsers *Windows365*` on this VM after a Store install; one good and one failed connection, then the `Get-DexEvent` reader on `Microsoft-Windows-TerminalServices-RDPClient/Operational` |
+| Cloud PC detection marker (KB-AVD-14: no documented marker; candidates are the `Cloud PC ...` hardware model string and the `CPC-` name prefix) | `Get-CimInstance Win32_ComputerSystemProduct, Win32_ComputerSystem` and `HKLM:\SOFTWARE\Microsoft\RDInfraAgent` on a Cloud PC |
 | FSLogix per-session registry value names; operational log name; `frx.exe` output format | `Get-ChildItem HKLM:\SOFTWARE\FSLogix\Profiles\Sessions -Recurse`; `Get-WinEvent -ListLog *FSLogix*` |
 | App Volumes attached-volume source | `svservice.log` tail vs `svdriver` parameters on this VM |
 | RDS licensing event IDs, grace-period value decoding | `Get-WinEvent -LogName 'Microsoft-Windows-TerminalServices-Licensing/Operational'` on an RDSH |
@@ -906,8 +909,30 @@ answer goes into the script header.
 - Microsoft, Troubleshoot common Azure Virtual Desktop Agent issues (RDAgentBootLoader,
   `IsRegistered`, `RegistrationToken`, event sources):
   https://learn.microsoft.com/azure/virtual-desktop/troubleshoot-agent
-- Microsoft, Session host statuses and health checks:
-  https://learn.microsoft.com/azure/virtual-desktop/troubleshoot-statuses-checks
+- Microsoft, Session host statuses and health checks (statuses, the fatal and non-fatal
+  check lists):
+  https://learn.microsoft.com/azure/virtual-desktop/session-host-status-health-checks
+- Microsoft, Required FQDNs and endpoints (session host and end-user tables, Government
+  tab, IMDS and WireServer addresses, event 3701 tip):
+  https://learn.microsoft.com/azure/virtual-desktop/required-fqdn-endpoint
+- Microsoft, Check access to required FQDNs (`WVDAgentUrlTool.exe` location and version floor):
+  https://learn.microsoft.com/azure/virtual-desktop/check-access-validate-required-fqdn-endpoint
+- Microsoft, RDP Shortpath (managed and public networks, STUN/TURN ranges, UDP 3478 to 51.5.0.0/16):
+  https://learn.microsoft.com/azure/virtual-desktop/rdp-shortpath
+- Microsoft, Configure RDP Shortpath (`SelectTransport`, `fClientDisableUDP`, listener port 3390, verify via `RdpCoreCDV` event 135, `UdpUse` values):
+  https://learn.microsoft.com/azure/virtual-desktop/configure-rdp-shortpath
+- Microsoft, Get started with the Azure Virtual Desktop Agent (components, three versions kept, Geneva task rotation):
+  https://learn.microsoft.com/azure/virtual-desktop/agent-overview
+- Microsoft, Use Microsoft Teams on Azure Virtual Desktop (`IsWVDEnvironment`, WebRTC Redirector Service, SlimCore):
+  https://learn.microsoft.com/azure/virtual-desktop/teams-on-avd
+- Microsoft, Collect logs from Windows App (`%temp%\DiagOutputDir\Windows365\Logs`):
+  https://learn.microsoft.com/windows-app/troubleshoot-collect-logs
+- Microsoft, Troubleshoot the Remote Desktop client for Windows (`RdClientAutoTrace`):
+  https://learn.microsoft.com/previous-versions/remote-desktop-client/troubleshoot-client-windows
+- Microsoft, Azure Virtual Desktop Insights glossary (default counters, input delay bands):
+  https://learn.microsoft.com/azure/virtual-desktop/insights-glossary
+- Microsoft Windows IT Pro blog, Remote Desktop client for Windows end of support (2026-03-27):
+  https://techcommunity.microsoft.com/blog/windows-itpro-blog/prepare-for-the-remote-desktop-client-for-windows-end-of-support/4397724
 - Citrix CTX133769 (VDA registration events 1017/1022):
   https://support.citrix.com/s/article/CTX133769-vda-registration-failure-with-event-id-1001
 - Citrix CTX136668 (registration troubleshooting, 1018/1022):
