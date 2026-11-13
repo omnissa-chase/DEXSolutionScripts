@@ -29,6 +29,10 @@
                            -> still Stopped and Disabled, exit 0
       WhatIfNoStart        crashed and stopped, WhatIf=true -> "WhatIf: would start",
                            still Stopped, exit 0
+      StartFailedAndStopped  a fixture service (DEXTestFailSvc, Automatic) is started
+                           while its binary is missing, so the SCM logs 7000; the binary
+                           is then compiled into place -> started, exit 0, one history
+                           entry (needs Windows PowerShell 5.1)
       CleanStopIgnored     Themes stopped cleanly with no crash event in the lookback
                            -> Themes still Stopped, exit 0 (a stopped service alone is
                            never a target)
@@ -57,7 +61,7 @@
     Run specific scenarios instead of a random selection.
 
 .PARAMETER BreakCount
-    How many scenarios to run when selecting randomly. Default 6 (all).
+    How many scenarios to run when selecting randomly. Default 7 (all).
 
 .PARAMETER Restore
     Put the Spooler, Themes and the cool-down history back after an interrupted run.
@@ -67,7 +71,7 @@
 
 .NOTES
     Script Name  : Restart-CrashedServices_BreakTest.ps1
-    Version      : 1.0.0
+    Version      : 1.1.0
     Architecture : Any (x86/x64/ARM64)
     Context      : Administrator (elevated)
     Author       : Chase Bradley, Omnissa DEX team
@@ -89,7 +93,7 @@ param(
     [ValidateSet('Snapshot', 'Physical')][string]$Environment = 'Physical',
     [int]$Seed = 0,
     [string[]]$BreakName,
-    [int]$BreakCount = 6,
+    [int]$BreakCount = 7,
     [switch]$IncludeRebootBreaks,
     [switch]$Restore,
     [switch]$Resume,
@@ -129,12 +133,41 @@ function ConvertTo-StartupType {
 }
 
 function Get-CrashEventCount {
-    # 7031/7034 naming the service (display name is the first parameter) since $Since.
-    param([string]$Name, [datetime]$Since)
+    # Events naming the service (display name is one of the parameters) since $Since.
+    param([string]$Name, [datetime]$Since, [int[]]$Ids = @(7031, 7034))
     $display = (Get-SvcCim -Name $Name).DisplayName
-    $ev = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager'; Id = 7031, 7034; StartTime = $Since } -ErrorAction SilentlyContinue |
-            Where-Object { $_.Properties.Count -gt 0 -and "$($_.Properties[0].Value)" -eq $display })
+    $ev = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager'; Id = $Ids; StartTime = $Since } -ErrorAction SilentlyContinue |
+            Where-Object { @($_.Properties | ForEach-Object { "$($_.Value)" }) -contains $display })
     return $ev.Count
+}
+
+# -- Start-failure fixture: a service whose binary is missing when it is first started --
+$FailSvc        = 'DEXTestFailSvc'
+$FailDir        = 'C:\Temp\FixReport\Restart-CrashedServices\fixture'
+$FailExe        = Join-Path $FailDir 'DEXTestFailSvc.exe'
+$FailHistoryKey = "HKLM:\Software\AirWatch\Extensions\ServiceRecovery\Crashed\$FailSvc"
+$FailSource = @'
+using System.ServiceProcess;
+public class DexTestFailSvc : ServiceBase {
+    public static void Main(string[] a) { ServiceBase.Run(new DexTestFailSvc()); }
+    public DexTestFailSvc() { ServiceName = "DEXTestFailSvc"; CanStop = true; }
+    protected override void OnStart(string[] args) { }
+    protected override void OnStop() { }
+}
+'@
+
+function Remove-FailFixture {
+    $c = Get-SvcCim -Name $FailSvc
+    if ($c) {
+        if ([int]$c.ProcessId -gt 4) { Stop-Process -Id ([int]$c.ProcessId) -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }
+        & sc.exe delete $FailSvc | Out-Null
+    }
+    if (Test-Path -LiteralPath $FailHistoryKey) { Remove-Item -LiteralPath $FailHistoryKey -Recurse -Force -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath $FailDir) { Start-Sleep -Milliseconds 500; Remove-Item -LiteralPath $FailDir -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+function Get-FailHistoryCount {
+    try { return @((Get-ItemProperty -Path $FailHistoryKey -Name History -ErrorAction Stop).History | Where-Object { "$_" }).Count } catch { return 0 }
 }
 
 function Get-HistoryValues {
@@ -184,6 +217,7 @@ function Restore-Snapshot {
         if ($h.Count -gt 0) { New-ItemProperty -Path $HistoryKey -Name History -PropertyType MultiString -Value $h -Force | Out-Null }
     }
     if ("$($Original.CleanState)" -eq 'Running') { Start-Service -Name $CleanSvc -ErrorAction SilentlyContinue }
+    Remove-FailFixture
 }
 
 function Clear-History {
@@ -323,6 +357,34 @@ $BreakCatalog = @(
             $h  = @(Get-HistoryValues | Where-Object { "$_" }).Count
             Write-DexNote -Name 'Validate WhatIfNoStart' -Message "state=$st history=$h"
             ($st -eq 'Stopped') -and ($h -eq 0) -and (Test-Run -ExitCode 0 -Contains 'WhatIf: would start')
+        }
+    },
+
+    @{
+        Name = 'StartFailedAndStopped'; ExpectedOutcome = 'ExpectFixed'; RequiresReboot = $false; Variables = @{}
+        Methods  = @(@{ Name = 'BinaryMissingAtStart'; Apply = {
+            if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'This scenario compiles a fixture service and needs Windows PowerShell 5.1.' }
+            Remove-FailFixture
+            New-Item -ItemType Directory -Path $FailDir -Force | Out-Null
+            New-Service -Name $FailSvc -BinaryPathName "`"$FailExe`"" -DisplayName 'DEX Test Fail Service' -StartupType Automatic | Out-Null
+            $since = Get-Date
+            try { (Get-Service -Name $FailSvc).Start() } catch { }   # fails: the binary is not there yet
+            $deadline = (Get-Date).AddSeconds(20)
+            while ((Get-Date) -lt $deadline -and (Get-CrashEventCount -Name $FailSvc -Since $since.AddSeconds(-2) -Ids 7000, 7009) -eq 0) { Start-Sleep -Milliseconds 500 }
+            # The cause goes away (the binary appears), as a transient boot-time failure does.
+            Add-Type -TypeDefinition $FailSource -OutputAssembly $FailExe -OutputType ConsoleApplication -ReferencedAssemblies 'System.ServiceProcess'
+            $script:failSince = $since
+        } })
+        Verify   = {
+            $c  = Get-SvcCim -Name $FailSvc
+            $ev = Get-CrashEventCount -Name $FailSvc -Since $script:failSince.AddSeconds(-2) -Ids 7000, 7009
+            Write-DexNote -Name 'Verify StartFailedAndStopped' -Message "state=$($c.State) startMode=$($c.StartMode) startFailureEvents=$ev binaryPresent=$(Test-Path -LiteralPath $FailExe)"
+            [bool]($c -and $c.State -eq 'Stopped' -and $ev -gt 0 -and (Test-Path -LiteralPath $FailExe))
+        }
+        Validate = {
+            $c = Get-SvcCim -Name $FailSvc; $h = Get-FailHistoryCount
+            Write-DexNote -Name 'Validate StartFailedAndStopped' -Message "state=$($c.State) history=$h"
+            ($c.State -eq 'Running') -and ($h -eq 1) -and (Test-Run -ExitCode 0 -Contains "($FailSvc) has been started") -and (Test-Run -ExitCode 0 -Contains 'failed to start')
         }
     },
 

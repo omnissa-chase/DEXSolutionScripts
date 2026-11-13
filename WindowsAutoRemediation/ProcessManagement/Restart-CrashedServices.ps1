@@ -7,8 +7,13 @@
     The self-targeting counterpart to Restart-WinService.ps1 for use where no script
     variable can be passed. The target is derived from the root cause instead of named:
 
-      1. Read Service Control Manager events 7031 and 7034 ("terminated unexpectedly")
-         from the System log for the last $LookbackHours.
+      1. Read Service Control Manager events from the System log for the last
+         $LookbackHours: 7031 and 7034 ("terminated unexpectedly") and, with
+         $IncludeStartFailures, the start failures 7000 (failed to start), 7001 (a
+         dependency failed), 7009 (timed out connecting), 7022 (hung on starting),
+         7023 and 7024 (terminated with an error). A service that never came up at
+         boot is the same case as one that crashed: Automatic, stopped, with a
+         failure on record. 7038 (logon failure) is left out; a start cannot fix it.
       2. Keep the services that are Stopped right now, are not Disabled, are Automatic
          (Manual too when $RestartManualServices), and are not on the deny list.
       3. Start them, most recent crash first, at most $MaxRestartsPerRun per run.
@@ -26,12 +31,16 @@
 
 .NOTES
     Script Name  : Restart-CrashedServices.ps1
-    Version      : 1.0.0
+    Version      : 1.1.0
     Architecture : Any (x86/x64/ARM64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-11-12
     Timeout      : 60 seconds
+
+    1.1.0: start-failure events (7000, 7001, 7009, 7022, 7023, 7024) count as well as
+    crashes; an event is matched to its service by any of its parameters, since 7009
+    carries the service name second.
 
     Inputs: none required. Settings are the constants in the SETTINGS block below.
       WhatIf   Optional environment variable; an explicit "true" reports without starting.
@@ -51,6 +60,7 @@
 # ==============================================================================
 $MaxRestartsPerRun      = 2       # services started in one run; the rest are reported
 $LookbackHours          = 24      # how far back a crash event counts
+$IncludeStartFailures   = $true   # also act on services that failed to start (7000, 7001, 7009, 7022, 7023, 7024)
 $CooldownHours          = 24      # window for the per-service restart history
 $MaxRestartsPerCooldown = 2       # starts allowed per service inside that window
 $RestartManualServices  = $false  # Manual services are demand-started by Windows; report only
@@ -191,7 +201,7 @@ function Add-RestartHistory {
 }
 
 # -- entry point ---------------------------------------------------------------
-$SCRIPT_VERSION = '1.0.0'
+$SCRIPT_VERSION = '1.1.0'
 $RunEventId     = ([Random]::new()).Next(1000,9999)
 $HEAD           = "[$RunEventId]"
 $failures       = 0
@@ -209,17 +219,19 @@ if (-not $whatIf -and -not $principal.IsInRole([System.Security.Principal.Window
 }
 
 # -- 1. crash events -------------------------------------------------------------
-$since  = (Get-Date).AddHours(-$LookbackHours)
-$events = @()
+$since    = (Get-Date).AddHours(-$LookbackHours)
+$crashIds = 7031, 7034
+$eventIds = if ($IncludeStartFailures) { $crashIds + 7000, 7001, 7009, 7022, 7023, 7024 } else { $crashIds }
+$events   = @()
 try {
-    $events = @(Get-DexEvent -LogName 'System' -ProviderName 'Service Control Manager' -Id 7031,7034 -StartTime $since -ErrorStop)
+    $events = @(Get-DexEvent -LogName 'System' -ProviderName 'Service Control Manager' -Id $eventIds -StartTime $since -ErrorStop)
 } catch {
     Write-Output "$HEAD Error: could not read the System event log: $($_.Exception.Message)"
     Exit 1
 }
 
 if ($events.Count -eq 0) {
-    Write-Output "$HEAD No service crash events (7031/7034) in the last $LookbackHours h. Nothing to do."
+    Write-Output "$HEAD No service crash or start-failure events in the last $LookbackHours h. Nothing to do."
     Exit 0
 }
 
@@ -229,9 +241,11 @@ $services = @(Get-CimInstance -ClassName Win32_Service -ErrorAction SilentlyCont
 $byName = @{}; $byDisplay = @{}
 foreach ($s in $services) { $byName[$s.Name.ToLower()] = $s; $byDisplay["$($s.DisplayName)".ToLower()] = $s }
 
-# The event's first parameter is the display name; its binary payload is the short
-# name in UTF-16, which is locale-independent, so that is tried first.
-$crashes = @{}   # short name -> @{ Service; Latest; Count }
+# The event's binary payload is the short name in UTF-16, which is locale-independent,
+# so that is tried first. Otherwise the display name is one of the parameters: the
+# first on most events, the second on 7009 (the first is the timeout), so each
+# parameter is tried in order.
+$crashes = @{}   # short name -> @{ Service; Latest; Crashed; StartFailed }
 $unmatched = @{}
 foreach ($ev in $events) {
     $svc = $null
@@ -242,20 +256,29 @@ foreach ($ev in $events) {
             if ($short -and $byName.ContainsKey($short.ToLower())) { $svc = $byName[$short.ToLower()] }
         }
     }
-    $display = if ($props.Count -gt 0) { "$($props[0].Value)" } else { '' }
-    if (-not $svc -and $display) {
-        if ($byDisplay.ContainsKey($display.ToLower())) { $svc = $byDisplay[$display.ToLower()] }
-        elseif ($byName.ContainsKey($display.ToLower())) { $svc = $byName[$display.ToLower()] }
+    $display = ''
+    if (-not $svc) {
+        foreach ($p in $props) {
+            if ($p.Value -is [byte[]]) { continue }
+            $v = "$($p.Value)".ToLower()
+            if (-not $v) { continue }
+            if ($byDisplay.ContainsKey($v)) { $svc = $byDisplay[$v]; break }
+            if ($byName.ContainsKey($v))    { $svc = $byName[$v]; break }
+        }
+        if (-not $svc) {
+            $i = if ($ev.Id -eq 7009 -and $props.Count -gt 1) { 1 } else { 0 }
+            if ($props.Count -gt $i) { $display = "$($props[$i].Value)" }
+        }
     }
     if (-not $svc) { if ($display) { $unmatched[$display] = $true }; continue }
     if (-not $crashes.ContainsKey($svc.Name)) {
-        $crashes[$svc.Name] = @{ Service = $svc; Latest = $ev.TimeCreated; Count = 0 }   # events arrive newest first
+        $crashes[$svc.Name] = @{ Service = $svc; Latest = $ev.TimeCreated; Crashed = 0; StartFailed = 0 }   # events arrive newest first
     }
-    $crashes[$svc.Name].Count++
+    if ($crashIds -contains $ev.Id) { $crashes[$svc.Name].Crashed++ } else { $crashes[$svc.Name].StartFailed++ }
 }
 
 foreach ($u in $unmatched.Keys) {
-    Write-Output "$HEAD Info: '$u' crashed but no longer exists as a service (removed, or a per-user service instance). Skipped."
+    Write-Output "$HEAD Info: '$u' has a failure event but no longer exists as a service (removed, or a per-user service instance). Skipped."
 }
 
 # -- 3. classify -----------------------------------------------------------------
@@ -263,7 +286,10 @@ $candidates = @()
 foreach ($c in ($crashes.Values | Sort-Object { $_.Latest } -Descending)) {
     $s     = $c.Service
     $label = "$($s.DisplayName) ($($s.Name))"
-    $what  = "crashed $($c.Count)x, last $($c.Latest.ToString('yyyy-MM-dd HH:mm:ss'))"
+    $kinds = @()
+    if ($c.Crashed -gt 0)     { $kinds += "crashed $($c.Crashed)x" }
+    if ($c.StartFailed -gt 0) { $kinds += "failed to start $($c.StartFailed)x" }
+    $what  = "$($kinds -join ' and '), last $($c.Latest.ToString('yyyy-MM-dd HH:mm:ss'))"
 
     if ($s.State -ne 'Stopped') {
         Write-Output "$HEAD OK: $label $what; now $($s.State) (recovered). No action."
@@ -284,14 +310,14 @@ foreach ($c in ($crashes.Values | Sort-Object { $_.Latest } -Descending)) {
     $history = Get-RestartHistory -Name $s.Name
     if ($history.Count -ge $MaxRestartsPerCooldown) {
         $failures++
-        Write-Output "$HEAD Held: $label $what and is stopped, but this script already started it $($history.Count)x in the last $CooldownHours h (last $($history[-1].ToString('yyyy-MM-dd HH:mm:ss'))). It keeps crashing; a restart is not the fix. Not started."
+        Write-Output "$HEAD Held: $label $what and is stopped, but this script already started it $($history.Count)x in the last $CooldownHours h (last $($history[-1].ToString('yyyy-MM-dd HH:mm:ss'))). It keeps failing; a restart is not the fix. Not started."
         continue
     }
     $candidates += @{ Service = $s; Label = $label; What = $what }
 }
 
 if ($candidates.Count -eq 0) {
-    Write-Output "$HEAD No crashed service needs starting."
+    Write-Output "$HEAD No crashed or failed service needs starting."
     if ($failures -gt 0) { Exit 1 }
     Exit 0
 }

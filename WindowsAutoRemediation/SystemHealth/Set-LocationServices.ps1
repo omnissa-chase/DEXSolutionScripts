@@ -37,11 +37,11 @@
 
 .NOTES
     Script Name  : Set-LocationServices.ps1
-    Version      : 1.1.0
+    Version      : 1.2.0
     Architecture : Any (x86/x64/ARM64)
     Context      : System (elevation required for the HKLM value)
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-06
+    Last Modified: 2026-11-12
     Timeout      : 30 seconds
 
     Script variables (UEM environment variables):
@@ -68,7 +68,9 @@
 
     Exit codes: 0 = values set (or already set); 1 = bad input, not elevated, or a write failed.
 
-    1.1.0: DesktopApps and ModernApps variables; per-app entries under each user's
+    1.2.0: PRESET block: each variable falls back to an in-script preset, so a copy
+    with the preset filled in runs with no variables (Enable-LocationServices.ps1,
+    Disable-LocationServices.ps1). 1.1.0: DesktopApps and ModernApps variables; per-app entries under each user's
     location key. 1.0.1: helper writes status lines only. 1.0.0: device and user switches.
 
 .DISCLAIMER
@@ -79,11 +81,25 @@
 #>
 
 $ErrorActionPreference = 'Stop'
-$SCRIPT_VERSION = '1.1.0'
+$SCRIPT_VERSION = '1.2.0'
+$SCRIPT_NAME    = 'Set-LocationServices'
 
-Write-Output "-- Set-LocationServices $SCRIPT_VERSION ---------------------------------"
+# ==============================================================================
+# PRESET -- used when the script variable of the same name is not passed. Empty
+# means the variable is required (LocationServices) or takes its default.
+# Enable-LocationServices.ps1 and Disable-LocationServices.ps1 are this file with
+# $PresetLocationServices filled in, for use where no script variable can be passed.
+# ==============================================================================
+$PresetLocationServices = ''
+$PresetDesktopApps      = ''
+$PresetModernApps       = ''
+
+Write-Output "-- $SCRIPT_NAME $SCRIPT_VERSION ---------------------------------"
 
 # -- Input ----------------------------------------------------------------------
+if (-not "$env:LocationServices".Trim()) { $env:LocationServices = $PresetLocationServices }
+if (-not "$env:DesktopApps".Trim())      { $env:DesktopApps      = $PresetDesktopApps }
+if (-not "$env:ModernApps".Trim())       { $env:ModernApps       = $PresetModernApps }
 $mode = "$env:LocationServices".Trim()
 if ($mode -notmatch '^(?i)(enable|disable)$') {
     Write-Output "  Script variable LocationServices must be Enable or Disable (got '$mode')."

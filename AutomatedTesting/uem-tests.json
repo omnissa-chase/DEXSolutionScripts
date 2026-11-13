@@ -113,6 +113,18 @@
     "expect": "Completed",
     "note": "No input (new 2026-11-12, 1.0.0): finds services with a 7031/7034 crash event in the last 24 h that are still stopped and starts them. A healthy lab VM reports 'No service crash events' or lists recovered services, exit 0. Exit 1 means a start failed or a service is held in cool-down; read the output before calling it a test failure. First run under Hub's ARM64 engine also proves the .NET event reader on the System log."
   },
+  "Enable-LocationServices.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Preset copy of Set-LocationServices.ps1 1.2.0 (LocationServices preset to Enable), new 2026-11-12. Run with WhatIf so nothing changes on the lab devices: Completed proves the preset is accepted with no LocationServices variable (the parent script exits 1 without one)."
+  },
+  "Disable-LocationServices.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Preset copy of Set-LocationServices.ps1 1.2.0 (LocationServices preset to Disable), new 2026-11-12. Run with WhatIf: a live run would turn location off on the lab devices."
+  },
+  "Restart-HungApps.ps1": {
+    "expect": "Completed",
+    "note": "No input (new 2026-11-12, 1.0.0). High impact: run with -IncludeHighImpact. Dispatch-only script: Completed proves the watchdog was staged and its task registered for the logged-on user (or, with nobody logged on, that the script exited 0 with nothing to do). The outcome is in %ProgramData%\\AirWatch\\Extensions\\HungApps\\state (result.json, watchdog.log); a healthy device shows NoHungApps within seconds. A second run prints the first run's outcome."
+  },
   "Restart-HungServices.ps1": {
     "expect": "Completed",
     "timeoutMinutes": 6,
