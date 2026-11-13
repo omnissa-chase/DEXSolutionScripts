@@ -382,6 +382,28 @@
     "min": -1,
     "note": "Integer MB of the npm, Yarn, pip, NuGet, Go cache for the console user; -1 when not installed or nobody signed in."
   },
+  "Start-DiskCleanupSafe.ps1": {
+    "variables": { "WhatIf": "true" },
+    "timeoutMinutes": 6,
+    "note": "No input (new 2026-11-13, 1.0.0). Run with WhatIf: Completed proves the measurement under Hub as SYSTEM and writes LastCleanupWouldFreeMb to HKLM\\Software\\AirWatch\\Extensions\\DiskState. A live run deletes the lab devices' old temp files, which is harmless but not needed for the UEM proof (the break test covers deletion)."
+  },
+  "Invoke-DiskStateCollection.ps1": {
+    "expect": "Completed",
+    "timeoutMinutes": 6,
+    "note": "Collector for the disk_* sensors (new 2026-11-13, 1.0.0). Read only apart from its cache key; walks the disk for up to 100 s. Run it before the disk sensors so they have a cache to read."
+  },
+  "disk_reclaimable_safe_mb.ps1": {
+    "match": "^-?\\d+$",
+    "note": "Integer; -1 until Invoke-DiskStateCollection.ps1 has run on the device."
+  },
+  "disk_top_consumer.ps1": {
+    "match": "^(Unknown|None|SafeCleanup|CrashDumps|PreviousWindows|RecycleBin|ShadowCopies|HibernationFile|PageFile|OutlookData|OneDriveLocal|VirtualDisks|Downloads|UserFolders)$",
+    "note": "String key; Unknown until the collector has run."
+  },
+  "disk_space_health.ps1": {
+    "match": "^\\{\"Schema\":1,\"At\":\"[^\"]*\",.*\"SafeMb\":-?\\d+,\"Safe\":\\{.*\\},\"Own\":\\{.*\\},\"Rep\":\\{.*\\},\"Top\":\"[A-Za-z]+\".*\"TO\":(true|false)\\}$",
+    "note": "One-time JSON sensor (new 2026-11-13); 459 characters non-elevated on CBRADLEYSWIN11. Cached figures are -1 until the collector has run."
+  },
   "app_cache_health.ps1": {
     "match": "^\\{\"Schema\":1,\"User\":\"[^\"]*\",.*\"TotalMb\":\\d+,\"Over\":\\[.*\\],\"Apps\":\\{.*\\},\"TO\":(true|false)\\}$",
     "note": "One-time JSON sensor across every Clear-<App>Cache product; under 1 KB by construction (168 to 700 bytes on CBRADLEYSWIN11, 2026-11-12)."
@@ -392,5 +414,61 @@
   "rdp_logon_health.ps1": {
     "match": "^\\{\"Schema\":2,\"Comp\":\"RemoteLogon\",.*\"Score\":-?\\d+,\"Reason\":\"[A-Za-z]+\",\"Next\":\"(AUTO|USER|ADMIN|NONE)\".*\\}$",
     "note": "One-time JSON sensor, Schema 2 compact keys, trimmed under Hub's 1 KB cap (486 bytes Healthy, 659 bytes LogonDeniedByRight on avdpersonal-1, 2026-11-12). Works on any Windows device; without an AVD agent the Avd keys read 0 / -2."
+  },
+  "Clear-SlackCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Slack cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "slack_cache_mb.ps1": {
+    "min": -1,
+    "note": "Integer MB of the Slack cache for the console user; -1 when not installed or nobody signed in."
+  },
+  "Clear-DiscordCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Discord cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "Clear-PostmanCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Postman cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "Clear-NotionCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Notion cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "Clear-ObsidianCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Obsidian cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "Clear-WebexCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Webex cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "Clear-FirefoxCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Firefox cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "firefox_cache_mb.ps1": {
+    "min": -1,
+    "note": "Integer MB of the Firefox cache for the console user; -1 when not installed or nobody signed in."
+  },
+  "Clear-AcrobatCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Acrobat cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "Clear-CitrixWorkspaceCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Citrix Workspace cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "Clear-JavaCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Java cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "Clear-OutlookCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Outlook cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "outlook_cache_mb.ps1": {
+    "min": -1,
+    "note": "Integer MB of the Outlook cache for the console user; -1 when not installed or nobody signed in."
   }
 }

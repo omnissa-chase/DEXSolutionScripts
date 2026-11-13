@@ -2,7 +2,7 @@
 # Re-run after editing the template or a catalogue; every generated file is overwritten.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent   # repository root; this file lives in AutomatedTesting\Tools
-$date = '2026-11-12'
+$date = '2026-11-13'
 
 $template = @'
 <#
@@ -249,6 +249,16 @@ function Entry([string]$Name, [string[]]$Paths, [bool]$Optional = $false, [strin
     $ex = if ($Exclude) { "; Exclude = '$Exclude'" } else { '' }
     return "    @{ Name = '$Name'; Paths = @($(Q $Paths)); Optional = `$$($Optional.ToString().ToLower())$ex }"
 }
+function Write-Generated([string]$Path, [string]$Text) {
+    # $Text still carries __DATE__. A file whose content is unchanged apart from its date is left alone, so a tested
+    # script keeps its date and its Full Pass when another product is added to the table.
+    if (Test-Path -LiteralPath $Path) {
+        $old = [IO.File]::ReadAllText($Path)
+        if ([regex]::Replace($old, 'Last Modified: \d{4}-\d{2}-\d{2}', 'Last Modified: __DATE__') -eq $Text) { return 'unchanged' }
+    }
+    [IO.File]::WriteAllText($Path, $Text.Replace('__DATE__', $date), (New-Object Text.UTF8Encoding($false)))
+    return 'written'
+}
 
 
 $apps = @(
@@ -414,6 +424,139 @@ $apps = @(
         Clears = @('npm: %LocalAppData%\npm-cache\_cacache and _logs', 'Yarn: %LocalAppData%\Yarn\Cache', 'pip: %LocalAppData%\pip\cache', 'NuGet: v3-cache, plugins-cache, Cache under %LocalAppData%\NuGet', 'Go: %LocalAppData%\go-build', 'optional (IncludeOptional=true, large and slow to rebuild): ~\.nuget\packages, ~\.gradle\caches, ~\.m2\repository, ~\.cargo\registry\cache, the pnpm store')
         Never = @('global installs: %AppData%\npm\node_modules, ~\.cargo\bin, ~\go\bin, pipx and venv folders', 'configuration: .npmrc, NuGet.Config, ~\.gradle\gradle.properties, ~\.m2\settings.xml, ~\.cargo\config', 'Gradle wrapper distributions (~\.gradle\wrapper)', 'project folders and their node_modules')
         Gate = 'none (package managers hold no long-lived process); a file a running install holds is counted as locked and left.'
+    },
+    @{
+        Key = 'Slack'; Product = 'Slack'; Dir = 'ApplicationSpecific\Slack'
+        Processes = @('slack')
+        Markers = @('{Local}\slack\app-*', '{Roaming}\Slack', '{Packages}\91750D7E.Slack_8wekyb3d8bbwe')
+        Catalogue = @(
+            (Entry 'Electron caches' @('{Roaming}\Slack\Cache', '{Roaming}\Slack\Code Cache', '{Roaming}\Slack\GPUCache', '{Roaming}\Slack\DawnGraphiteCache', '{Roaming}\Slack\DawnWebGPUCache')),
+            (Entry 'Store (MSIX) install caches' @('{Packages}\91750D7E.Slack_8wekyb3d8bbwe\LocalCache\Roaming\Slack\Cache', '{Packages}\91750D7E.Slack_8wekyb3d8bbwe\LocalCache\Roaming\Slack\Code Cache', '{Packages}\91750D7E.Slack_8wekyb3d8bbwe\LocalCache\Roaming\Slack\GPUCache')),
+            (Entry 'Service worker storage and logs' @('{Roaming}\Slack\Service Worker\CacheStorage', '{Roaming}\Slack\Service Worker\ScriptCache', '{Roaming}\Slack\logs') $true)
+        )
+        Clears = @('Cache, Code Cache, GPUCache and the Dawn caches under %AppData%\Slack (and the same under the Store package LocalCache)', 'optional: Service Worker storage and logs')
+        Never = @('storage, Local Storage, Session Storage, IndexedDB (sign-in, workspaces, drafts)', 'the app binaries under %LocalAppData%\slack')
+        Gate = 'slack.exe.'
+    },
+    @{
+        Key = 'Discord'; Product = 'Discord'; Dir = 'ApplicationSpecific\Discord'
+        Processes = @('Discord')
+        Markers = @('{Local}\Discord', '{Roaming}\discord')
+        Catalogue = @(
+            (Entry 'Electron caches' @('{Roaming}\discord\Cache', '{Roaming}\discord\Code Cache', '{Roaming}\discord\GPUCache', '{Roaming}\discord\DawnGraphiteCache', '{Roaming}\discord\DawnWebGPUCache')),
+            (Entry 'Service worker storage' @('{Roaming}\discord\Service Worker\CacheStorage', '{Roaming}\discord\Service Worker\ScriptCache') $true)
+        )
+        Clears = @('Cache, Code Cache, GPUCache and the Dawn caches under %AppData%\discord', 'optional: Service Worker storage')
+        Never = @('Local Storage, Session Storage, IndexedDB, settings.json (sign-in and settings)', 'the app binaries under %LocalAppData%\Discord')
+        Gate = 'Discord.exe.'
+    },
+    @{
+        Key = 'Postman'; Product = 'Postman'; Dir = 'ApplicationSpecific\Postman'
+        Processes = @('Postman')
+        Markers = @('{Local}\Postman', '{Roaming}\Postman')
+        Catalogue = @(
+            (Entry 'Electron caches' @('{Roaming}\Postman\Cache', '{Roaming}\Postman\Code Cache', '{Roaming}\Postman\GPUCache', '{Roaming}\Postman\DawnGraphiteCache', '{Roaming}\Postman\DawnWebGPUCache')),
+            (Entry 'Logs' @('{Roaming}\Postman\logs') $true)
+        )
+        Clears = @('Cache, Code Cache, GPUCache and the Dawn caches under %AppData%\Postman', 'optional: logs')
+        Never = @('Partitions (per-workspace IndexedDB: collections, environments, unsynced work)', 'Local Storage, Session Storage, storage (sign-in)', 'the app binaries under %LocalAppData%\Postman')
+        Gate = 'Postman.exe.'
+    },
+    @{
+        Key = 'Notion'; Product = 'Notion'; Dir = 'ApplicationSpecific\Notion'
+        Processes = @('Notion')
+        Markers = @('{Local}\Programs\Notion', '{Roaming}\Notion')
+        Catalogue = @(
+            (Entry 'Electron caches of the app and of each workspace partition' @('{Roaming}\Notion\Cache', '{Roaming}\Notion\Code Cache', '{Roaming}\Notion\GPUCache', '{Roaming}\Notion\DawnGraphiteCache', '{Roaming}\Notion\DawnWebGPUCache', '{Roaming}\Notion\Partitions\*\Cache', '{Roaming}\Notion\Partitions\*\Code Cache', '{Roaming}\Notion\Partitions\*\GPUCache', '{Roaming}\Notion\Partitions\*\DawnGraphiteCache', '{Roaming}\Notion\Partitions\*\DawnWebGPUCache')),
+            (Entry 'Service worker storage (offline pages download again)' @('{Roaming}\Notion\Service Worker\CacheStorage', '{Roaming}\Notion\Partitions\*\Service Worker\CacheStorage') $true)
+        )
+        Clears = @('Cache, Code Cache, GPUCache and the Dawn caches under %AppData%\Notion and under each Partitions\<workspace>', 'optional: Service Worker storage')
+        Never = @('Partitions\*\IndexedDB and Local Storage (offline content, drafts, sign-in)', 'Notion settings files', 'the app binaries under %LocalAppData%\Programs\Notion')
+        Gate = 'Notion.exe.'
+    },
+    @{
+        Key = 'Obsidian'; Product = 'Obsidian'; Dir = 'ApplicationSpecific\Obsidian'
+        Processes = @('Obsidian')
+        Markers = @('{Local}\Obsidian', '{Roaming}\obsidian')
+        Catalogue = @(
+            (Entry 'Electron caches' @('{Roaming}\obsidian\Cache', '{Roaming}\obsidian\Code Cache', '{Roaming}\obsidian\GPUCache', '{Roaming}\obsidian\DawnGraphiteCache', '{Roaming}\obsidian\DawnWebGPUCache'))
+        )
+        Clears = @('Cache, Code Cache, GPUCache and the Dawn caches under %AppData%\obsidian')
+        Never = @('obsidian.json (the vault list), Local Storage, IndexedDB (settings, sign-in)', 'the vaults themselves: notes live in the user''s own folders', 'the app binaries under %LocalAppData%\Obsidian')
+        Gate = 'Obsidian.exe.'
+    },
+    @{
+        Key = 'Webex'; Product = 'Webex (App and Meetings)'; Dir = 'ApplicationSpecific\Cisco\Webex'
+        Processes = @('CiscoCollabHost', 'atmgr')
+        Markers = @('{Local}\WebEx', '{Local}\CiscoSpark', '{Local}\CiscoSparkLauncher', '{PF86}\Webex', '{PF}\Webex')
+        Catalogue = @(
+            (Entry 'Meetings client cache' @('{Local}\WebEx\wbxcache')),
+            (Entry 'Webex App renderer caches' @('{Local}\CiscoSpark\*\Cache', '{Local}\CiscoSpark\*\Code Cache', '{Local}\CiscoSpark\*\GPUCache'))
+        )
+        Clears = @('%LocalAppData%\WebEx\wbxcache (the Meetings client cache Cisco documents clearing)', 'Cache, Code Cache and GPUCache folders under %LocalAppData%\CiscoSpark\<profile> when present')
+        Never = @('the rest of %LocalAppData%\CiscoSpark (sign-in, message store): a full reset is a sign-out and is not done here', '%AppData%\WebEx (preferences)', 'the installed binaries')
+        Gate = 'CiscoCollabHost.exe (Webex App) and atmgr.exe (a Meetings session).'
+    },
+    @{
+        Key = 'Firefox'; Product = 'Mozilla Firefox'; Dir = 'ApplicationSpecific\Mozilla\Firefox'
+        Processes = @('firefox')
+        Markers = @('{Local}\Mozilla\Firefox\Profiles', '{PF}\Mozilla Firefox\firefox.exe', '{PF86}\Mozilla Firefox\firefox.exe')
+        Catalogue = @(
+            (Entry 'Profile disk caches (under %LocalAppData%, one set per profile)' @('{Local}\Mozilla\Firefox\Profiles\*\cache2', '{Local}\Mozilla\Firefox\Profiles\*\startupCache', '{Local}\Mozilla\Firefox\Profiles\*\OfflineCache', '{Local}\Mozilla\Firefox\Profiles\*\jumpListCache', '{Local}\Mozilla\Firefox\Profiles\*\thumbnails', '{Local}\Mozilla\Firefox\Profiles\*\shader-cache')),
+            (Entry 'Safe Browsing lists (downloaded again)' @('{Local}\Mozilla\Firefox\Profiles\*\safebrowsing') $true)
+        )
+        Clears = @('cache2, startupCache, OfflineCache, jumpListCache, thumbnails and shader-cache of every profile under %LocalAppData%\Mozilla\Firefox\Profiles', 'optional: the safebrowsing lists')
+        Never = @('%AppData%\Mozilla\Firefox\Profiles: places.sqlite (history, bookmarks), cookies, logins, sessionstore, prefs.js, extensions, storage', 'profiles.ini')
+        Gate = 'firefox.exe.'
+    },
+    @{
+        Key = 'Acrobat'; Product = 'Adobe Acrobat and Acrobat Reader'; Dir = 'ApplicationSpecific\Adobe\Acrobat'
+        Processes = @('Acrobat', 'AcroRd32', 'AcroCEF', 'RdrCEF')
+        Markers = @('{Local}\Adobe\Acrobat', '{Local}\Adobe\AcroCef', '{PF}\Adobe\Acrobat DC\Acrobat\Acrobat.exe', '{PF86}\Adobe\Acrobat DC\Acrobat\Acrobat.exe', '{PF86}\Adobe\Acrobat Reader DC\Reader\AcroRd32.exe')
+        Catalogue = @(
+            (Entry 'Acrobat caches (font list, connector icons)' @('{Local}\Adobe\Acrobat\*\Cache', '{Local}\Adobe\Acrobat\*\ConnectorIcons')),
+            (Entry 'Embedded browser (AcroCEF) caches' @('{Local}\Adobe\AcroCef\*\*\Cache', '{Local}\Adobe\AcroCef\*\*\Code Cache', '{Local}\Adobe\AcroCef\*\*\GPUCache'))
+        )
+        Clears = @('%LocalAppData%\Adobe\Acrobat\<version>\Cache and ConnectorIcons', 'Cache, Code Cache and GPUCache under %LocalAppData%\Adobe\AcroCef\<version>\<Acrobat or Reader>')
+        Never = @('%AppData%\Adobe\Acrobat (preferences, security settings, digital IDs, stamps, JavaScripts, Collab)', 'Adobe licensing and sign-in (%ProgramData%\Adobe, OOBE)', 'the installed binaries')
+        Gate = 'Acrobat.exe, AcroRd32.exe, AcroCEF.exe and RdrCEF.exe.'
+    },
+    @{
+        Key = 'CitrixWorkspace'; Product = 'Citrix Workspace app'; Dir = 'ApplicationSpecific\Citrix\Workspace'
+        Processes = @('wfica32', 'CDViewer')
+        Markers = @('{PF86}\Citrix\ICA Client\wfica32.exe', '{PF}\Citrix\ICA Client\wfica32.exe', '{Roaming}\ICAClient')
+        Catalogue = @(
+            (Entry 'ICA client bitmap and persistent caches' @('{Roaming}\ICAClient\Cache'))
+        )
+        Clears = @('%AppData%\ICAClient\Cache (the session bitmap cache; rebuilt as sessions draw)')
+        Never = @('%AppData%\ICAClient\APPSRV.INI and the rest of ICAClient (connection settings)', '%LocalAppData%\Citrix\SelfService (the store sign-in and app list: Workspace''s own Reset does that and signs the user out)', 'the installed binaries')
+        Gate = 'wfica32.exe and CDViewer.exe (an open session holds the cache); the resident SelfService and Receiver processes do not block the clear.'
+    },
+    @{
+        Key = 'Java'; Product = 'Java deployment (Web Start and plug-in)'; Dir = 'ApplicationSpecific\Oracle\Java'
+        Processes = @('javaws', 'jp2launcher')
+        Markers = @('{Profile}\AppData\LocalLow\Sun\Java\Deployment', '{PF}\Java', '{PF86}\Java')
+        Catalogue = @(
+            (Entry 'Deployment cache and temp (applets and Web Start apps download again)' @('{Profile}\AppData\LocalLow\Sun\Java\Deployment\cache', '{Profile}\AppData\LocalLow\Sun\Java\Deployment\tmp')),
+            (Entry 'Deployment logs' @('{Profile}\AppData\LocalLow\Sun\Java\Deployment\log') $true)
+        )
+        Clears = @('%UserProfile%\AppData\LocalLow\Sun\Java\Deployment\cache and \tmp (what the Java Control Panel''s Delete Files button does)', 'optional: the deployment log folder')
+        Never = @('deployment.properties and the security folder (exception site list, trusted certificates)', 'the JRE and JDK installs')
+        Gate = 'javaws.exe and jp2launcher.exe.'
+    },
+    @{
+        Key = 'Outlook'; Product = 'Microsoft Outlook'; Dir = 'ApplicationSpecific\Microsoft\Outlook'; Destructive = $true
+        Processes = @('OUTLOOK', 'olk')
+        Markers = @('{Local}\Microsoft\Outlook', '{Local}\Microsoft\Olk', '{PF}\Microsoft Office\root\Office16\OUTLOOK.EXE', '{PF86}\Microsoft Office\root\Office16\OUTLOOK.EXE')
+        Catalogue = @(
+            (Entry 'Autocomplete cache (RoamCache: the nickname list rebuilds as mail is sent)' @('{Local}\Microsoft\Outlook\RoamCache')),
+            (Entry 'Offline Address Books (downloaded again on the next send/receive)' @('{Local}\Microsoft\Outlook\Offline Address Books')),
+            (Entry 'Secure temp folder for opened attachments' @('{Local}\Microsoft\Windows\INetCache\Content.Outlook')),
+            (Entry 'New Outlook (olk) WebView2 caches' @('{Local}\Microsoft\Olk\EBWebView\*\Cache', '{Local}\Microsoft\Olk\EBWebView\*\Code Cache', '{Local}\Microsoft\Olk\EBWebView\*\GPUCache', '{Local}\Microsoft\Olk\EBWebView\*\DawnGraphiteCache', '{Local}\Microsoft\Olk\EBWebView\*\DawnWebGPUCache'))
+        )
+        Clears = @('only with AllowDestructiveActions=true (without it the script reports sizes and clears nothing): RoamCache (autocomplete; the user loses the nickname list, which is the usual fix for a corrupt one), Offline Address Books, INetCache\Content.Outlook (opened attachments) and the new Outlook WebView2 Cache, Code Cache, GPUCache and Dawn caches')
+        Never = @('OST and PST files under %LocalAppData%\Microsoft\Outlook and Documents\Outlook Files: the mailbox and archives. An OST rebuild is Invoke-AutoRemediateOutlook''s gated step, not a cache clear', '%AppData%\Microsoft\Outlook (profiles, signatures, rules, .srs, .xml, Forms)', 'new Outlook data, UserSettings.json and Attachments')
+        Gate = 'OUTLOOK.exe (classic) and olk.exe (new Outlook).'
     }
 )
 
@@ -421,7 +564,7 @@ $written = @()
 foreach ($a in $apps) {
     $destructive = [bool]$a.Destructive
     $t = $template
-    $t = $t.Replace('__KEY__', $a.Key).Replace('__PRODUCT__', $a.Product).Replace('__DATE__', $date)
+    $t = $t.Replace('__KEY__', $a.Key).Replace('__PRODUCT__', $a.Product)
     $t = $t.Replace('__CLEARS__', (Lines $a.Clears)).Replace('__NEVER__', (Lines $a.Never)).Replace('__GATE__', $a.Gate)
     $t = $t.Replace('__PROCESSES__', (Q $a.Processes)).Replace('__MARKERS__', (Q $a.Markers))
     $t = $t.Replace('__CATALOGUE__', ($a.Catalogue -join ",`r`n"))
@@ -430,9 +573,9 @@ foreach ($a in $apps) {
     $dir = Join-Path $repo $a.Dir
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     $path = Join-Path $dir "Clear-$($a.Key)Cache.ps1"
-    [IO.File]::WriteAllText($path, $t, (New-Object Text.UTF8Encoding($false)))
+    $state = Write-Generated $path $t
     $e = $null; [void][Management.Automation.Language.Parser]::ParseInput($t, [ref]$null, [ref]$e)
-    "{0,-70} {1,6} chars  parse errors {2}" -f $path.Replace("$repo\", ''), $t.Length, $e.Count
+    "{0,-70} {1,6} chars  parse errors {2}  {3}" -f $path.Replace("$repo\", ''), $t.Length, $e.Count, $state
     $written += $path
 }
 "$($written.Count) scripts written"
@@ -441,8 +584,9 @@ foreach ($a in $apps) {
 # Sensors: <app>_cache_mb (Integer, recurring) for the caches that grow large, and the
 # one-time JSON app_cache_health across every product.
 # ==============================================================================
-$sizeApps = @{ Chrome = 500; Edge = 500; Teams = 500; VSCode = 1000; Office = 1000; JetBrains = 2000; DevPackage = 2000 }
-$warnMb   = @{ Chrome = 500; Edge = 500; Teams = 500; Zoom = 300; Office = 1000; OneNote = 2000; VSCode = 1000; Claude = 300; GitHubDesktop = 300; VisualStudio = 500; JetBrains = 2000; DevPackage = 2000 }
+$sizeApps = @{ Chrome = 500; Edge = 500; Teams = 500; VSCode = 1000; Office = 1000; JetBrains = 2000; DevPackage = 2000; Firefox = 500; Slack = 300; Outlook = 500 }
+$warnMb   = @{ Chrome = 500; Edge = 500; Teams = 500; Zoom = 300; Office = 1000; OneNote = 2000; VSCode = 1000; Claude = 300; GitHubDesktop = 300; VisualStudio = 500; JetBrains = 2000; DevPackage = 2000
+               Slack = 300; Discord = 300; Postman = 300; Notion = 300; Obsidian = 300; Webex = 300; Firefox = 500; Acrobat = 300; CitrixWorkspace = 300; Java = 500; Outlook = 500 }
 
 $measureBlock = @'
 function Expand-Token { param([string]$Path, $User)
@@ -542,14 +686,14 @@ exit 0
 
 foreach ($a in $apps) {
     if (-not $sizeApps.ContainsKey($a.Key)) { continue }
-    $t = $sizeTemplate.Replace('__KEY__', $a.Key).Replace('__LKEY__', $a.Key.ToLower()).Replace('__PRODUCT__', $a.Product).Replace('__DATE__', $date).Replace('__WARN__', [string]$sizeApps[$a.Key])
+    $t = $sizeTemplate.Replace('__KEY__', $a.Key).Replace('__LKEY__', $a.Key.ToLower()).Replace('__PRODUCT__', $a.Product).Replace('__WARN__', [string]$sizeApps[$a.Key])
     $t = $t.Replace('__MARKERS__', (Q $a.Markers)).Replace('__CATALOGUE__', ($a.Catalogue -join ",`r`n")).Replace('__MEASURE__', $measureBlock)
     $dir = Join-Path (Join-Path $repo $a.Dir) 'Sensors'
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     $path = Join-Path $dir "$($a.Key.ToLower())_cache_mb.ps1"
-    [IO.File]::WriteAllText($path, $t, (New-Object Text.UTF8Encoding($false)))
+    $state = Write-Generated $path $t
     $e = $null; [void][Management.Automation.Language.Parser]::ParseInput($t, [ref]$null, [ref]$e)
-    "{0,-70} {1,6} chars  parse errors {2}" -f $path.Replace("$repo\", ''), $t.Length, $e.Count
+    "{0,-70} {1,6} chars  parse errors {2}  {3}" -f $path.Replace("$repo\", ''), $t.Length, $e.Count, $state
 }
 
 $healthTemplate = @'
@@ -574,7 +718,7 @@ $healthTemplate = @'
 .NOTES
     Sensor Name  : app_cache_health
     Data Type    : String (JSON)
-    Version      : 1.0.0
+    Version      : 1.1.0
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
@@ -624,10 +768,10 @@ foreach ($a in $apps) {
     $cat = ($a.Catalogue | ForEach-Object { $_.Trim() }) -join ', '
     $prodLines += "    @{ Key = '$($a.Key)'; WarnMb = $($warnMb[$a.Key]); Processes = @($(Q $a.Processes)); Markers = @($(Q $a.Markers)); Catalogue = @($cat) }"
 }
-$t = $healthTemplate.Replace('__DATE__', $date).Replace('__PRODUCTS__', ($prodLines -join ",`r`n")).Replace('__MEASURE__', $measureBlock)
+$t = $healthTemplate.Replace('__PRODUCTS__', ($prodLines -join ",`r`n")).Replace('__MEASURE__', $measureBlock)
 $dir = Join-Path $repo 'ApplicationSpecific\OneTimeSensor'
 if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
 $path = Join-Path $dir 'app_cache_health.ps1'
-[IO.File]::WriteAllText($path, $t, (New-Object Text.UTF8Encoding($false)))
+$state = Write-Generated $path $t
 $e = $null; [void][Management.Automation.Language.Parser]::ParseInput($t, [ref]$null, [ref]$e)
-"{0,-70} {1,6} chars  parse errors {2}" -f $path.Replace("$repo\", ''), $t.Length, $e.Count
+"{0,-70} {1,6} chars  parse errors {2}  {3}" -f $path.Replace("$repo\", ''), $t.Length, $e.Count, $state

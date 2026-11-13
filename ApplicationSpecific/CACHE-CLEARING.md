@@ -1,10 +1,12 @@
 # Cache-clearing action scripts
 
-Twelve `Clear-<App>Cache.ps1` scripts, one per product, built from one shared engine so they behave
-the same and differ only in their catalogue. Added 2026-11-12 at the request of a customer who asked
-for a "generic clear-application-cache script"; the answer is a catalogue per product, because
-Windows has no notion of an application cache and the only way a script knows a folder is safe to
-delete is that someone wrote it down for that app.
+Twenty-three `Clear-<App>Cache.ps1` scripts, one per product, built from one shared engine so they
+behave the same and differ only in their catalogue. The first twelve were added 2026-11-12 at the
+request of a customer who asked for a "generic clear-application-cache script"; the answer is a
+catalogue per product, because Windows has no notion of an application cache and the only way a
+script knows a folder is safe to delete is that someone wrote it down for that app. Eleven more
+(Slack, Discord, Postman, Notion, Obsidian, Webex, Firefox, Acrobat, Citrix Workspace, Java
+deployment, Outlook) followed on 2026-11-13.
 
 ## Contract (every script)
 
@@ -16,7 +18,7 @@ delete is that someone wrote it down for that app.
 | Gate | If the product's process runs for the user, that user is `[Skipped]` and reported. `CloseApp=true` asks it to close (`CloseMainWindow`, 20 s) and still skips if it stays open. Nothing is killed. |
 | WhatIf | `WhatIf=true` measures and reports, deletes nothing. The UEM sweep manifest runs every script this way. |
 | Optional | Entries marked optional (offline web storage, add-in caches, large package stores) need `IncludeOptional=true`. |
-| Destructive | OneNote only: clears nothing without `AllowDestructiveActions=true`, because its cache holds notebook content until it has synced. |
+| Destructive | OneNote and Outlook: clear nothing without `AllowDestructiveActions=true`. OneNote's cache holds notebook content until it has synced; Outlook's RoamCache is the autocomplete list the user loses. |
 | Budget | Stops deleting after 50 s, reports `Partial`; the next run finishes. Keeps the report inside Hub's 60 s timeout. |
 | Locked files | Counted and left; reported per user and in the summary. |
 | Output | One line per user (`[Cleared]`, `[WhatIf ]`, `[Skipped]` with the reason) and a summary line. |
@@ -40,13 +42,25 @@ delete is that someone wrote it down for that app.
 | `Microsoft\VisualStudio\Clear-VisualStudioCache.ps1` | ComponentModelCache and Designer\ShadowCache of every instance, WebsiteCache; optional telemetry and ActivityLog | Extensions, Settings, privateregistry.bin, `%AppData%\Microsoft\VisualStudio`, `.vs` folders | devenv |
 | `JetBrains\Clear-JetBrainsCache.ps1` | `<Product><ver>\caches`, `\tmp`; optional `\log` (Toolbox excluded by regex) | `%AppData%\JetBrains`, Toolbox and its IDEs, projects | idea64, pycharm64, webstorm64, rider64, clion64, goland64, phpstorm64, datagrip64, rubymine64, dataspell64, fleet |
 | `DeveloperTools\Clear-DevPackageCache.ps1` | npm `_cacache` and `_logs`, Yarn Cache, pip cache, NuGet v3-cache, plugins-cache, Cache, Go build cache; optional `.nuget\packages`, `.gradle\caches`, `.m2\repository`, `.cargo\registry\cache`, pnpm store | global installs, config files, Gradle wrapper, project folders | none |
+| `Slack\Clear-SlackCache.ps1` | Cache, Code Cache, GPUCache, Dawn caches under `%AppData%\Slack` and under the Store package LocalCache; optional Service Worker storage, logs | storage, Local Storage, Session Storage, IndexedDB (sign-in, workspaces, drafts), binaries | slack |
+| `Discord\Clear-DiscordCache.ps1` | Cache, Code Cache, GPUCache, Dawn caches under `%AppData%\discord`; optional Service Worker storage | Local Storage, Session Storage, IndexedDB, settings.json, binaries | Discord |
+| `Postman\Clear-PostmanCache.ps1` | Cache, Code Cache, GPUCache, Dawn caches under `%AppData%\Postman`; optional logs | Partitions (collections, environments, unsynced work), Local Storage, Session Storage, storage, binaries | Postman |
+| `Notion\Clear-NotionCache.ps1` | Cache, Code Cache, GPUCache, Dawn caches under `%AppData%\Notion` and each `Partitions\<workspace>`; optional Service Worker storage | the partitions' IndexedDB and Local Storage (offline content, drafts, sign-in), settings, binaries | Notion |
+| `Obsidian\Clear-ObsidianCache.ps1` | Cache, Code Cache, GPUCache, Dawn caches under `%AppData%\obsidian` | obsidian.json (vault list), Local Storage, IndexedDB, the vaults, binaries | Obsidian |
+| `Cisco\Webex\Clear-WebexCache.ps1` | `%LocalAppData%\WebEx\wbxcache` (Meetings); Cache, Code Cache, GPUCache under `%LocalAppData%\CiscoSpark\<profile>` when present | the rest of CiscoSpark (sign-in, message store: a full reset is a sign-out), `%AppData%\WebEx`, binaries | CiscoCollabHost, atmgr |
+| `Mozilla\Firefox\Clear-FirefoxCache.ps1` | cache2, startupCache, OfflineCache, jumpListCache, thumbnails, shader-cache of every profile under `%LocalAppData%\Mozilla\Firefox\Profiles`; optional safebrowsing | the roaming profile (places.sqlite, cookies, logins, sessionstore, prefs.js, extensions, storage), profiles.ini | firefox |
+| `Adobe\Acrobat\Clear-AcrobatCache.ps1` | `Acrobat\<ver>\Cache` and ConnectorIcons; Cache, Code Cache, GPUCache under `Adobe\AcroCef` | `%AppData%\Adobe\Acrobat` (preferences, security, digital IDs, stamps, JavaScripts), licensing, binaries | Acrobat, AcroRd32, AcroCEF, RdrCEF |
+| `Citrix\Workspace\Clear-CitrixWorkspaceCache.ps1` | `%AppData%\ICAClient\Cache` (session bitmap cache) | APPSRV.INI and the rest of ICAClient, `%LocalAppData%\Citrix\SelfService` (store sign-in, app list), binaries | wfica32, CDViewer (an open session); the resident SelfService and Receiver do not block |
+| `Oracle\Java\Clear-JavaCache.ps1` | `AppData\LocalLow\Sun\Java\Deployment\cache` and `\tmp`; optional `\log` | deployment.properties, the security folder (exception sites, certificates), JRE and JDK installs | javaws, jp2launcher |
+| `Microsoft\Outlook\Clear-OutlookCache.ps1` | RoamCache (autocomplete), Offline Address Books, `INetCache\Content.Outlook`, new Outlook `Olk\EBWebView` Cache, Code Cache, GPUCache, Dawn caches, only with AllowDestructiveActions | OST and PST (the mailbox; an OST rebuild is `Invoke-AutoRemediateOutlook`'s gated step), `%AppData%\Microsoft\Outlook` (profiles, signatures, rules), new Outlook data | OUTLOOK, olk |
 
 ## Sensors
 
 - `<app>_cache_mb.ps1` (Integer, recurring) for the caches that grow large: Chrome, Edge, Teams,
-  Office, VS Code, JetBrains, package managers. Same catalogue (non-optional entries), console user
-  only, -1 when not installed or nobody signed in. Thresholds documented in each header (500 MB for
-  the browsers and Teams, 1,000 for Office and VS Code, 2,000 for JetBrains and the package caches).
+  Office, VS Code, JetBrains, package managers, Firefox, Slack, Outlook. Same catalogue (non-optional
+  entries), console user only, -1 when not installed or nobody signed in. Thresholds documented in
+  each header (500 MB for the browsers, Teams and Outlook, 300 for Slack, 1,000 for Office and VS
+  Code, 2,000 for JetBrains and the package caches).
 - `OneTimeSensor\app_cache_health.ps1` (JSON, run once from the console): every product's MB, folder
   count, whether its process runs, and the last clear's Status and MB freed from the AppCache keys,
   plus `Over`, the products at or above their threshold. Under 1 KB by a trim ladder; 25 s budget.

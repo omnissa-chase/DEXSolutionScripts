@@ -26,10 +26,10 @@
 
 .NOTES
     Script Name  : Test-ClearCacheScripts.ps1
-    Version      : 1.0.0
+    Version      : 1.1.0
     Context      : Administrator (elevated), signed in as the console user
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-12
+    Last Modified: 2026-11-13
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -63,6 +63,17 @@ $Products = @(
     @{ Key = 'VisualStudio';  Script = "$app\Microsoft\VisualStudio\Clear-VisualStudioCache.ps1"; Sensor = '';                                                    Procs = @('devenv');  Fixture = "$L\Microsoft\VisualStudio\17.0_dextest\ComponentModelCache";                                          Sentinel = "$L\Microsoft\VisualStudio\17.0_dextest\Extensions\dextest.sentinel" }
     @{ Key = 'JetBrains';     Script = "$app\JetBrains\Clear-JetBrainsCache.ps1";                Sensor = "$app\JetBrains\Sensors\jetbrains_cache_mb.ps1";       Procs = @('idea64', 'pycharm64', 'webstorm64', 'rider64', 'clion64', 'goland64', 'phpstorm64', 'datagrip64', 'rubymine64', 'dataspell64', 'fleet'); Fixture = "$L\JetBrains\DEXTestIDE2026.1\caches"; Sentinel = "$L\JetBrains\Toolbox\caches\dextest.sentinel" }
     @{ Key = 'DevPackage';    Script = "$app\DeveloperTools\Clear-DevPackageCache.ps1";          Sensor = "$app\DeveloperTools\Sensors\devpackage_cache_mb.ps1"; Procs = @();          Fixture = "$L\npm-cache\_cacache\dextest";                                                                        Sentinel = "$L\npm-cache\dextest.sentinel"; SubFolder = $true }
+    @{ Key = 'Slack';         Script = "$app\Slack\Clear-SlackCache.ps1";                        Sensor = "$app\Slack\Sensors\slack_cache_mb.ps1";               Procs = @('slack');   Fixture = "$R\Slack\Cache";                                                                                       Sentinel = "$R\Slack\Local Storage\dextest.sentinel" }
+    @{ Key = 'Discord';       Script = "$app\Discord\Clear-DiscordCache.ps1";                    Sensor = '';                                                     Procs = @('Discord'); Fixture = "$R\discord\Cache";                                                                                     Sentinel = "$R\discord\Local Storage\dextest.sentinel" }
+    @{ Key = 'Postman';       Script = "$app\Postman\Clear-PostmanCache.ps1";                    Sensor = '';                                                     Procs = @('Postman'); Fixture = "$R\Postman\Cache";                                                                                     Sentinel = "$R\Postman\Partitions\dextest.sentinel" }
+    @{ Key = 'Notion';        Script = "$app\Notion\Clear-NotionCache.ps1";                      Sensor = '';                                                     Procs = @('Notion');  Fixture = "$R\Notion\Partitions\DEXTest\Cache";                                                                   Sentinel = "$R\Notion\Partitions\DEXTest\IndexedDB\dextest.sentinel" }
+    @{ Key = 'Obsidian';      Script = "$app\Obsidian\Clear-ObsidianCache.ps1";                  Sensor = '';                                                     Procs = @('Obsidian'); Fixture = "$R\obsidian\Cache";                                                                                   Sentinel = "$R\obsidian\Local Storage\dextest.sentinel" }
+    @{ Key = 'Webex';         Script = "$app\Cisco\Webex\Clear-WebexCache.ps1";                  Sensor = '';                                                     Procs = @('CiscoCollabHost', 'atmgr'); Fixture = "$L\WebEx\wbxcache";                                                                  Sentinel = "$L\WebEx\dextest.sentinel" }
+    @{ Key = 'Firefox';       Script = "$app\Mozilla\Firefox\Clear-FirefoxCache.ps1";            Sensor = "$app\Mozilla\Firefox\Sensors\firefox_cache_mb.ps1";   Procs = @('firefox'); Fixture = "$L\Mozilla\Firefox\Profiles\dextest.default\cache2";                                                   Sentinel = "$R\Mozilla\Firefox\Profiles\dextest.default\dextest.sentinel" }
+    @{ Key = 'Acrobat';       Script = "$app\Adobe\Acrobat\Clear-AcrobatCache.ps1";              Sensor = '';                                                     Procs = @('Acrobat', 'AcroRd32', 'AcroCEF', 'RdrCEF'); Fixture = "$L\Adobe\Acrobat\DC\Cache";                                          Sentinel = "$R\Adobe\Acrobat\DC\dextest.sentinel" }
+    @{ Key = 'CitrixWorkspace'; Script = "$app\Citrix\Workspace\Clear-CitrixWorkspaceCache.ps1"; Sensor = '';                                                     Procs = @('wfica32', 'CDViewer'); Fixture = "$R\ICAClient\Cache";                                                                     Sentinel = "$R\ICAClient\dextest.sentinel" }
+    @{ Key = 'Java';          Script = "$app\Oracle\Java\Clear-JavaCache.ps1";                   Sensor = '';                                                     Procs = @('javaws', 'jp2launcher'); Fixture = "$profile\AppData\LocalLow\Sun\Java\Deployment\cache";                                   Sentinel = "$profile\AppData\LocalLow\Sun\Java\Deployment\security\dextest.sentinel" }
+    @{ Key = 'Outlook';       Script = "$app\Microsoft\Outlook\Clear-OutlookCache.ps1";          Sensor = "$app\Microsoft\Outlook\Sensors\outlook_cache_mb.ps1"; Procs = @('OUTLOOK', 'olk'); Fixture = "$L\Microsoft\Olk\EBWebView\DEXTest\Cache";                                                 Sentinel = "$L\Microsoft\Olk\EBWebView\DEXTest\dextest.sentinel"; Destructive = $true }
 )
 if ($Only.Count -gt 0) { $Products = @($Products | Where-Object { @($Only -split ',' | ForEach-Object { $_.Trim() }) -contains $_.Key }) }
 
