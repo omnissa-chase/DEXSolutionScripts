@@ -62,7 +62,7 @@ $Products = @(
     @{ Key = 'GitHubDesktop'; Script = "$app\GitHub\Clear-GitHubDesktopCache.ps1";               Sensor = '';                                                     Procs = @('GitHubDesktop'); Fixture = "$R\GitHub Desktop\Cache";                                                                        Sentinel = "$R\GitHub Desktop\Local Storage\dextest.sentinel" }
     @{ Key = 'VisualStudio';  Script = "$app\Microsoft\VisualStudio\Clear-VisualStudioCache.ps1"; Sensor = '';                                                    Procs = @('devenv');  Fixture = "$L\Microsoft\VisualStudio\17.0_dextest\ComponentModelCache";                                          Sentinel = "$L\Microsoft\VisualStudio\17.0_dextest\Extensions\dextest.sentinel" }
     @{ Key = 'JetBrains';     Script = "$app\JetBrains\Clear-JetBrainsCache.ps1";                Sensor = "$app\JetBrains\Sensors\jetbrains_cache_mb.ps1";       Procs = @('idea64', 'pycharm64', 'webstorm64', 'rider64', 'clion64', 'goland64', 'phpstorm64', 'datagrip64', 'rubymine64', 'dataspell64', 'fleet'); Fixture = "$L\JetBrains\DEXTestIDE2026.1\caches"; Sentinel = "$L\JetBrains\Toolbox\caches\dextest.sentinel" }
-    @{ Key = 'DevPackage';    Script = "$app\DeveloperTools\Clear-DevPackageCache.ps1";          Sensor = "$app\DeveloperTools\Sensors\devpackage_cache_mb.ps1"; Procs = @();          Fixture = "$L\npm-cache\_cacache\dextest";                                                                        Sentinel = "$L\npm-cache\dextest.sentinel" }
+    @{ Key = 'DevPackage';    Script = "$app\DeveloperTools\Clear-DevPackageCache.ps1";          Sensor = "$app\DeveloperTools\Sensors\devpackage_cache_mb.ps1"; Procs = @();          Fixture = "$L\npm-cache\_cacache\dextest";                                                                        Sentinel = "$L\npm-cache\dextest.sentinel"; SubFolder = $true }
 )
 if ($Only.Count -gt 0) { $Products = @($Products | Where-Object { @($Only -split ',' | ForEach-Object { $_.Trim() }) -contains $_.Key }) }
 
@@ -125,7 +125,12 @@ foreach ($p in $Products) {
             Assert "$($p.Key): app running -> skipped and fixture intact" (($r.Output -match '\[Skipped\]') -and ($left -eq $planted)) "left=$left"
         } else {
             Assert "$($p.Key): cleared the fixture" (($r.Output -match '\[Cleared\]') -and ($left -eq 0)) "left=$left"
-            Assert "$($p.Key): fixture folder itself kept" (Test-Path -LiteralPath $p.Fixture) ''
+            if ($p.SubFolder) {
+                # The fixture is a sub-folder inside a catalogue folder (npm's _cacache), so the engine removes it with the rest of the contents.
+                Assert "$($p.Key): fixture sub-folder removed with the cache contents" (-not (Test-Path -LiteralPath $p.Fixture)) ''
+            } else {
+                Assert "$($p.Key): fixture folder itself kept" (Test-Path -LiteralPath $p.Fixture) ''
+            }
         }
         Assert "$($p.Key): sentinel untouched" (Test-Path -LiteralPath $p.Sentinel) $p.Sentinel
         $reg = Get-ItemProperty -Path "HKLM:\Software\AirWatch\Extensions\AppCache\$($p.Key)" -ErrorAction SilentlyContinue

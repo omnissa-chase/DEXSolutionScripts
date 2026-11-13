@@ -2361,7 +2361,16 @@ Delivered in commit 76a3a07: `Clear-ChromeCache`, `Clear-EdgeCache`, `Clear-Team
 | the seven `<app>_cache_mb.ps1` | Sensor | `PASS - UEM` with a value matching the clear script's WhatIf figure | same hour: 101, 39, 51, 1, 507, -1 (JetBrains), 349 |
 | `app_cache_health.ps1` | One-time sensor | `PASS - UEM` under 1 KB | same hour: 9 installed products, 1,055 MB total, `Over` empty, 22.7 s of measurement, 700 bytes; a first version timed out at 25 s because `Get-ChildItem -Recurse` on cache folders is slow, replaced by a .NET directory walk |
 
-Still to run: `Test-ClearCacheScripts.ps1` elevated on this VM, and the UEM sweep of the twenty new items against `Test_Treddy`.
+**Full Pass for all twenty (2026-11-13).** Evidence, in the results bundle under `uem-results/` and `lab-results/Test-ClearCacheScripts/`:
+
+| Run | Target | Outcome |
+|---|---|---|
+| UEM sweep e123dd (scripts, WhatIf) | `Cbrad_test`: `CHASEWIN11_2` (22660) and `avdpersonal-1` (22786); `VDIW11-12` (22784) excluded as not seen for two days | all twelve Completed on `avdpersonal-1`; `Clear-JetBrainsCache` and `Clear-DevPackageCache` Completed on both; the other ten returned nothing from `CHASEWIN11_2` inside the 5-minute window because the connector assigned the batch of ten at once and Hub ran them one after another on that slow VM (each is 13 s of PowerShell start-up plus the measurement) |
+| UEM rerun 76e85c (the ten, `-BatchSize 5 -ScriptTimeoutMinutes 12`) | same group | all ten Completed on both devices. Rule for this family: batches of five or fewer |
+| UEM sweep e32fd6 (sensors) | same group | all eight Passed on both devices. `CHASEWIN11_2`: chrome 23, edge 4, teams 0, office 0, vscode -1, jetbrains -1, devpackage -1; `avdpersonal-1` -1 throughout (no console user). `app_cache_health` on `CHASEWIN11_2`: 43 MB over Chrome, Edge, Teams, Office and GitHub Desktop, 24.9 s, `TO` true (the 25 s budget was reached after the installed products were measured, so nothing was lost); on `avdpersonal-1` an empty report with `User` blank, 750 ms |
+| `Test-ClearCacheScripts.ps1` elevated on `CBRADLEYSWIN11`, 09:41 (`20261113_094159.json`) | this VM | 112 passed, 1 failed. Fixtures cleared with the folder kept and the sentinel untouched for Zoom, Office, OneNote, Visual Studio, JetBrains and DevPackage; `[Skipped]` with the fixture intact for Chrome, Edge, Teams, VS Code, Claude and GitHub Desktop because the apps were running; AppCache key written for all twelve; health sensor one line, 657 bytes, 10.7 s. The one failure was the harness's own expectation: the DevPackage fixture is a sub-folder of npm's `_cacache`, which the engine clears by contents, so the sub-folder goes with them; the harness now asserts that (no script change) |
+
+Inventory: the twelve `Clear-<App>Cache.ps1` rows and the eight sensor rows are `4) Complete - Tested`.
 
 ---
 
