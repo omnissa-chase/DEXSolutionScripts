@@ -3,11 +3,11 @@
 
   "vdi_platform.ps1": {
     "match": "^(Horizon|Citrix|AVD|RDS|Multiple|None)$",
-    "note": "Fleet-wide platform detection. Horizon on the Horizon session host (VDIW11-12, smart group Test_HorizonHost); None on the lab VMs, which carry no VDI agent or client."
+    "note": "Fleet-wide platform detection. Horizon on the Horizon session host (Test_HorizonHost) and on CHASEWIN11_2 (Horizon Client 8.20.0 since 2026-11-10); Multiple on avdpersonal-1 (AVD agent plus the Horizon Client, confirmed correct 2026-11-10). None needs a device with no VDI product, which no lab VM is any more."
   },
   "vdi_role.ps1": {
     "match": "^(SessionHost|Client|Both|None)$",
-    "note": "SessionHost on the Horizon session host; None on the lab VMs."
+    "note": "Client on CHASEWIN11_2 (Horizon Client only); Both on avdpersonal-1 (AVD agent plus Horizon Client); SessionHost or Both on the Horizon session host (3edabb said Both at 1.0.0, 1.0.1 rerun pending)."
   },
   "Invoke-HorizonAgentStateCollection.ps1": {
     "note": "Session host collector. Completed proves exit 0; the device-side proof is the cache under HKLM:\\Software\\AirWatch\\Extensions\\VDI\\Horizon\\Agent (Installed, HealthScore, HealthReason, BrokerProbeResult, LastRun), read back through the hzn_agent_* sensors in the next sensor run. Writes Installed 0 / HealthScore -1 / NotInstalled on a device without the agent."
