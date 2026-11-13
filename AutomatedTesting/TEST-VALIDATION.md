@@ -2381,6 +2381,8 @@ Inventory: the twelve `Clear-<App>Cache.ps1` rows and the eight sensor rows are 
 
 UEM, same day: run `3c9783` (the eleven scripts, WhatIf, `-BatchSize 5 -ScriptTimeoutMinutes 12`) all Completed on `CHASEWIN11_2` and `avdpersonal-1`; run `a7698f` (the three size sensors and `app_cache_health` 1.1.0) all Passed on both. `CHASEWIN11_2`: firefox 43, outlook 12, slack -1; health 7 installed products, 115 MB, 3.9 s, `Last` now carrying the WhatIf runs of the morning sweep; `avdpersonal-1` -1 and an empty report (no console user). Both result files are in the bundle. The four sensors are `4) Complete - Tested`; the eleven scripts hold `PASS - UEM` and wait for the harness's observed effect.
 
+Observed effect, `Test-ClearCacheScripts.ps1` 1.1.0 elevated on `CBRADLEYSWIN11` 12:12 (`20261113_121317.json`, in the bundle): 106 passed, 0 failed. Every one of the eleven cleared its fixture with the folder kept, the sentinel untouched and the AppCache key written; none of the gated apps was running, so all took the real-clear path (Outlook's real run also cleared the user's RoamCache, address books and attachment temp, 23 MB in all, as warned). Size sensors counted the fixtures (Slack 4, Firefox 48, Outlook 23); health sensor one line, 774 bytes, 2.2 s. **Full Pass for the whole family: 23 scripts, 10 size sensors and `app_cache_health` are `4) Complete - Tested`.**
+
 ---
 
 ## 16. Remote Desktop logon rights: live outage and break sequence on an AVD host (2026-11-12)
