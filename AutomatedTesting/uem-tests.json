@@ -305,5 +305,92 @@
   "startup_apps_health.ps1": {
     "match": "^\\{\"Schema\":1,\"User\":\"[^\"]*\",.*\"Score\":-?\\d+,\"Reason\":\"[A-Za-z]+\",\"NextStep\":\"(AUTO|USER|ADMIN|NONE)\".*\\}$",
     "note": "One-time JSON sensor, companion of Disable-NonEssentialStartupApps.ps1 2.0.0. Under Hub's 1 KB cap by construction (794 and 819 bytes on CBRADLEYSWIN11, 2026-11-06). Under SYSTEM it reports on the console user."
+  },
+  "Clear-ChromeCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Chrome cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "chrome_cache_mb.ps1": {
+    "min": -1,
+    "note": "Integer MB of the Chrome cache for the console user; -1 when not installed or nobody signed in."
+  },
+  "Clear-EdgeCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Edge cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "edge_cache_mb.ps1": {
+    "min": -1,
+    "note": "Integer MB of the Edge cache for the console user; -1 when not installed or nobody signed in."
+  },
+  "Clear-TeamsCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Teams cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "teams_cache_mb.ps1": {
+    "min": -1,
+    "note": "Integer MB of the Teams cache for the console user; -1 when not installed or nobody signed in."
+  },
+  "Clear-ZoomCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Zoom cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "Clear-OfficeCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Office cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "office_cache_mb.ps1": {
+    "min": -1,
+    "note": "Integer MB of the Office cache for the console user; -1 when not installed or nobody signed in."
+  },
+  "Clear-OneNoteCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's OneNote cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "Clear-VSCodeCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's VS Code cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "vscode_cache_mb.ps1": {
+    "min": -1,
+    "note": "Integer MB of the VS Code cache for the console user; -1 when not installed or nobody signed in."
+  },
+  "Clear-ClaudeCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Claude cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "Clear-GitHubDesktopCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's GitHub Desktop cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "Clear-VisualStudioCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's Visual Studio cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "Clear-JetBrainsCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's JetBrains IDEs cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "jetbrains_cache_mb.ps1": {
+    "min": -1,
+    "note": "Integer MB of the JetBrains IDEs cache for the console user; -1 when not installed or nobody signed in."
+  },
+  "Clear-DevPackageCache.ps1": {
+    "variables": { "WhatIf": "true" },
+    "note": "Action script. The sweep runs it with WhatIf so it measures and reports the console user's npm, Yarn, pip, NuGet, Go cache without deleting; the real clear is a lab run (Test-ClearCacheScripts.ps1) or a targeted UEM run without the variable. Exit 0 whether installed, skipped (app running) or cleared."
+  },
+  "devpackage_cache_mb.ps1": {
+    "min": -1,
+    "note": "Integer MB of the npm, Yarn, pip, NuGet, Go cache for the console user; -1 when not installed or nobody signed in."
+  },
+  "app_cache_health.ps1": {
+    "match": "^\\{\"Schema\":1,\"User\":\"[^\"]*\",.*\"TotalMb\":\\d+,\"Over\":\\[.*\\],\"Apps\":\\{.*\\},\"TO\":(true|false)\\}$",
+    "note": "One-time JSON sensor across every Clear-<App>Cache product; under 1 KB by construction (168 to 700 bytes on CBRADLEYSWIN11, 2026-11-12)."
+  },
+  "Invoke-AutoRemediateRdpLogonRights.ps1": {
+    "note": "Run without ConfirmHighImpact on purpose: step 1 then reports and changes nothing, so the default sweep never loosens a logon right. Exits 0 with 'Nothing to process' where Remote Desktop is off and no session host agent is present. The confirmed fix was proven separately on avdpersonal-1 (Test_AvdHost, runs e4dc6d report-only, 296d5c fixed, 2ca80e all five steps Passed on 1.0.1); TEST-VALIDATION.md section 16."
+  },
+  "rdp_logon_health.ps1": {
+    "match": "^\\{\"Schema\":2,\"Comp\":\"RemoteLogon\",.*\"Score\":-?\\d+,\"Reason\":\"[A-Za-z]+\",\"Next\":\"(AUTO|USER|ADMIN|NONE)\".*\\}$",
+    "note": "One-time JSON sensor, Schema 2 compact keys, trimmed under Hub's 1 KB cap (486 bytes Healthy, 659 bytes LogonDeniedByRight on avdpersonal-1, 2026-11-12). Works on any Windows device; without an AVD agent the Avd keys read 0 / -2."
   }
 }
