@@ -51,11 +51,14 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateHorizonClient_BreakTest.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : Administrator (elevated), signed in as the console user
     Author       : Chase Bradley, Omnissa DEX team
     Last Modified: 2026-11-12
+    1.0.1        : helpers that return ,@(...) were wrapped in @() again at four call
+                   sites, which nested the array; ServerHostsPoisoned could not verify
+                   (run ff473071ca19) and ServerUnresolvable verified by accident.
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -406,7 +409,7 @@ $BreakCatalog = @(
         Capture         = {
             $u = Get-ConsoleUser
             if ((Resolve-A -Name $TestServerName).Count -gt 0) { throw "$TestServerName resolves on this network; the break cannot be made" }
-            @{ Sid = $u.Sid; User = $u.Name; Before = @(Get-ConfiguredServers -Sid $u.Sid); Seed = $null }
+            @{ Sid = $u.Sid; User = $u.Name; Before = (Get-ConfiguredServers -Sid $u.Sid); Seed = $null }
         }
         Methods         = @(@{ Name = 'SeedUnresolvableServer'; Apply = {
             param($Original)
@@ -415,7 +418,7 @@ $BreakCatalog = @(
         } })
         Verify   = {
             param($Original)
-            $now = @(Get-ConfiguredServers -Sid $Original.Sid)
+            $now = Get-ConfiguredServers -Sid $Original.Sid
             $resolves = (Resolve-A -Name $TestServerName).Count -gt 0
             Write-DexNote -Name 'Verify ServerUnresolvable' -Message "configured=[$($now -join ',')] (was [$($Original.Before -join ',')]) resolves=$resolves"
             ($now.Count -eq 1) -and ($now[0] -eq $TestServerName) -and (-not $resolves)
@@ -438,13 +441,13 @@ $BreakCatalog = @(
         Variables       = @{}
         Capture         = {
             $u = Get-ConsoleUser
-            $configured = @(Get-ConfiguredServers -Sid $u.Sid)
+            $configured = Get-ConfiguredServers -Sid $u.Sid
             $name = ''; $seeded = $false
             foreach ($c in $configured) { if ((Resolve-A -Name $c).Count -gt 0) { $name = $c; break } }
             if (-not $name) { foreach ($c in $PoisonCandidates) { if ((Resolve-A -Name $c).Count -gt 0) { $name = $c; $seeded = $true; break } } }
             if (-not $name) { throw "No DNS-resolvable server name available (configured: $($configured -join ', '); candidates: $($PoisonCandidates -join ', '))" }
             if (([IO.File]::ReadAllText($HostsPath)) -match [regex]::Escape($HostsTag)) { throw "A $HostsTag line is already in $HostsPath; remove it first" }
-            @{ Sid = $u.Sid; Name = $name; Seeded = $seeded; Seed = $null; DnsAddresses = @(Resolve-A -Name $name) }
+            @{ Sid = $u.Sid; Name = $name; Seeded = $seeded; Seed = $null; DnsAddresses = (Resolve-A -Name $name) }
         }
         Methods         = @(@{ Name = 'HostsFileToLoopback'; Apply = {
             param($Original)
@@ -453,8 +456,8 @@ $BreakCatalog = @(
         } })
         Verify   = {
             param($Original)
-            $os = @(Get-OsAddresses -Name $Original.Name)
-            $dns = @(Resolve-A -Name $Original.Name)
+            $os = Get-OsAddresses -Name $Original.Name
+            $dns = Resolve-A -Name $Original.Name
             $open = Test-TcpPort -TargetHost $Original.Name -Port 443
             Write-DexNote -Name 'Verify ServerHostsPoisoned' -Message "$($Original.Name): os=[$($os -join ',')] dns=[$($dns -join ',')] port443Open=$open"
             ($os -contains $PoisonAddress) -and ($dns.Count -gt 0) -and (-not $open)

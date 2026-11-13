@@ -625,6 +625,9 @@ pool with the disconnect timeout set to Never.
 Written 2026-11-12 as `Invoke-AutoRemediateHorizonClient_BreakTest.ps1` 1.0.0 (all four
 breaks ungated, no `-TestServer`: the server breaks seed the console user's own key and put
 the original keys back). Runs elevated as the console user on a lab VM with the client.
+First run 2026-11-12 22:18 on `CBRADLEYSWIN11`: `ff473071ca19` BreakFailed, three of four
+passed; `ServerHostsPoisoned` could not verify because the harness nested its own arrays
+(fixed in 1.0.1, pinned rerun pending). Client parity `20261112_222121` PASS (65 = 65).
 
 ### 11.5 Lab hosts needed
 
@@ -705,5 +708,7 @@ was built from in every script header (`Built from VDI/Horizon/SPEC.md rev 1`).
   `NoServerKnown`, `Usb USBArbService`, `Root Omnissa`, no client firewall rules shipped,
   `Fail24` 0 on the VM whose client has been opened and -1 on the one whose client never
   wrote a log). `_AutomatedTesting/Invoke-AutoRemediateHorizonClient_BreakTest.ps1` 1.0.0
-  written to 11.4 (table updated to the implemented levers); awaiting the user's elevated
-  run and the client parity run.
+  written to 11.4 (table updated to the implemented levers). Evening: break test
+  `ff473071ca19` BreakFailed (three passes, hosts poison blocked by a harness array bug,
+  1.0.1), client parity `20261112_222121` PASS; client collector and the four client
+  sensors are `4) Complete - Tested`, the client remediation waits for the pinned rerun.
