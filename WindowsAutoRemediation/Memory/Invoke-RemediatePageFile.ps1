@@ -22,14 +22,14 @@
 
 .NOTES
     Script Name  : Invoke-RemediatePageFile.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-02 (1.0.1: advisory Warning findings exit 0 as documented
-                   instead of 1; only a Failed state that could not be repaired, or a
-                   repair that threw, exits 1. The reset message is written after the
-                   reset happens, not before it is attempted.)
+    Last Modified: 2026-11-16 (1.0.2: a reset that lands after the next reboot reports
+                   [Pending] and registry Status 'Pending' instead of [Remediated], the
+                   runbook's Pending status; 1.0.1: advisory Warning findings exit 0, only
+                   an unrepaired Failed state or a repair that threw exits 1.)
     Timeout      : 30 seconds
 
 .DISCLAIMER
@@ -98,7 +98,9 @@ if ($status -eq 'Failed' -and $cs -and -not $cs.AutomaticManagedPagefile) {
     try {
         $cs | Set-CimInstance -Property @{ AutomaticManagedPagefile = $true } -ErrorAction Stop
         $remediated = $true
-        $message   += ' Reset to system-managed; takes effect after the next reboot.'
+        # The change only lands at the next reboot: Pending, not fixed and not failed.
+        $status     = 'Pending'
+        $message   += ' Reset to system-managed; applies after the next reboot.'
     } catch {
         $remError = $_.Exception.Message
         $message += ' Reset to system-managed failed.'
@@ -106,9 +108,8 @@ if ($status -eq 'Failed' -and $cs -and -not $cs.AutomaticManagedPagefile) {
 }
 
 # -- Output -------------------------------------------------------------------
-$color   = switch ($status) { 'Passed' { 'Green' } 'Warning' { 'Yellow' } 'Failed' { 'Red' } default { 'White' } }
-$tag     = if ($remediated) { '[Remediated]' } else { "[$status]" }
-$remNote = if ($remediated)   { '  -> Reboot recommended for page file changes to take full effect.' }
+$tag     = "[$status]"
+$remNote = if ($remediated)   { '  -> Remediation ran; reboot recommended for the page file change to take full effect.' }
            elseif ($remError) { "  -> Remediation ERROR: $remError" }
            else               { '' }
 
@@ -126,9 +127,9 @@ try {
         New-Item -Path $regPath -Force -ErrorAction Stop | Out-Null
     }
 
-    $regStatus = if ($remediated) { 'Remediated' } else { $status }
+    # Status is Pending after a reset (the companion sensor shows it until the next run re-detects).
     Set-ItemProperty -Path $regPath -Name 'LastScanTime'      -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') -Type String
-    Set-ItemProperty -Path $regPath -Name 'Status'            -Value $regStatus -Type String
+    Set-ItemProperty -Path $regPath -Name 'Status'            -Value $status    -Type String
     Set-ItemProperty -Path $regPath -Name 'Message'           -Value $message   -Type String
     if ($remediated) {
         Set-ItemProperty -Path $regPath -Name 'RebootRequired' -Value 'True'    -Type String

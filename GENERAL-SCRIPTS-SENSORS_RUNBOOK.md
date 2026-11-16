@@ -593,6 +593,9 @@ $Steps = @(
         ResolutionScript = {
             # Runs only when detection warrants it.
             # $null for detection-only / reporting-only steps.
+            # MAY return @{ Status = 'Pending'; Message = '...' } when the repair was
+            # applied but only lands later (after a reboot, a sign-out, a background
+            # job). The engine then prints Pending instead of the pre-fix detection.
         }
     }
 )
@@ -607,8 +610,33 @@ foreach ($step in ($Steps | Where-Object { $_.Enabled } | Sort-Object { [int]$_.
     # Detection runs in try/catch; a thrown detection is a step failure,
     # not a script failure.
     $shouldRemediate = ($status -eq 'Failed') -or ($status -eq 'Warning' -and $step.ResolveOnWarning)
+
+    if ($shouldRemediate -and $step.ResolutionScript) {
+        try {
+            $r = & $step.ResolutionScript
+            $remediated = $true
+            if ($r -is [hashtable] -and $r.Status -eq 'Pending') { $status = 'Pending'; $message = $r.Message }
+        } catch { $remError = $_.Exception.Message }
+    }
 }
 ```
+
+### Step Statuses
+
+| Status | Printed as | Meaning | Counts as |
+|---|---|---|---|
+| `Passed` | `[Passed ]` | Nothing wrong | success |
+| `Warning` | `[Warning]` | Advisory, or a fault the step only reports | success (exit 0) |
+| `Pending` | `[Pending]` | The repair ran and will take effect later; the message says what it waits on ("applies after the next reboot", "Windows Disk Cleanup still running, re-run to confirm") | success (exit 0), never a failure |
+| `Failed` | `[Failed ]` | A fault the step could not, or did not, repair | failure (exit 1) |
+
+`Pending` exists because UEM and the DEX console show any non-zero exit as a failure, and a device that needed a reboot used to show as failed with nothing after the reboot saying it worked. The summary line always carries the column, even at zero, so parsers stay stable:
+
+```
+  Passed: 9  |  Warnings: 3  |  Pending: 1  |  Failed: 0  |  Remediations run: 1
+```
+
+A script that persists its outcome to the registry writes `Status = Pending` the same way, so the companion sensor shows it until the next run re-detects and reports `Passed`. Do not use an exit code (2, 3010) to say "reboot needed": the console cannot tell it from a failure. `3010` stays only where a caller explicitly opts in to consume it (for example `AllowReboot=true` on the driver updater).
 
 ### Rules
 
@@ -937,9 +965,9 @@ Scripts MUST use deliberate exit codes. Never let PowerShell exit with an ambigu
 
 | Exit Code | Meaning |
 |---|---|
-| `0` | Success (including "no action required" and "high-impact gate declined") |
+| `0` | Success (including "no action required", "high-impact gate declined" and a `Pending` repair that lands after a reboot; see section 7, Step Statuses) |
 | `1` | Failure / general error |
-| `3010` | Success, reboot required (standard Windows) |
+| `3010` | Success, reboot required (standard Windows). UEM and the DEX console show it as a failure, so use it only when the caller opts in to consume it; otherwise report `Pending` and exit 0 |
 | `1641` | Success, reboot initiated |
 
 ### Every Path MUST Exit
@@ -1421,6 +1449,7 @@ The agent MUST NOT generate these patterns.
 | Staging to `ProgramData\AirWatch\Extensions` without documenting the AV exception | Payload quarantined; task "succeeds" doing nothing | State the exclusion requirement in the deliverable |
 | PowerShell 7 syntax in a PS5 script | Incompatible syntax or module failures | Target PS5 unless explicitly confirmed |
 | `Get-WinEvent` in a script or sensor | Throws "Cannot marshal 'parameter #8'" under Hub's embedded 7.2 engine; the step or sensor fails on every device | .NET `EventLogReader` with an explicit log name and XPath ([§2](#2-runtime-target)) |
+| `[Environment]::OSVersion` for an OS build gate | A host without a Windows 8.1/10 app manifest is told build 9200; the Hub engine on an AVD session host is one, so the script exits "unsupported OS" on every run there | `CurrentBuildNumber` under `HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion`, or `Win32_OperatingSystem.BuildNumber` |
 
 ---
 
@@ -1431,6 +1460,7 @@ The agent MUST NOT generate these patterns.
 - [ ] Targets Windows PowerShell 5.1 x64
 - [ ] No third-party modules or packages
 - [ ] No `Get-WinEvent`; event logs read through the .NET `EventLogReader` ([§2](#2-runtime-target))
+- [ ] OS build read from the registry or `Win32_OperatingSystem`, never `[Environment]::OSVersion` (§19)
 - [ ] Runs as SYSTEM (or specified context)
 - [ ] Completes within 30 s (60 s absolute ceiling) or dispatches asynchronously
 - [ ] `[CmdletBinding(SupportsShouldProcess=$true)]` with the `$env:WhatIf` bridge, defaulting to `$false`
@@ -1457,7 +1487,7 @@ The agent MUST NOT generate these patterns.
 - [ ] `AbandonedMutexException` handled as "acquired, prior run died"
 - [ ] Payload self-enforces a deadline
 - [ ] Payload logs to file, never stdout
-- [ ] Registry status stamped: `Dispatched` / `Running` / `Completed` / `TimedOut` / `Failed`
+- [ ] Registry status stamped: `Dispatched` / `Running` / `Completed` / `Pending` (repair lands later, see section 7) / `TimedOut` / `Failed`
 - [ ] Payload cleans up its own task and state files
 
 ### For Sensors

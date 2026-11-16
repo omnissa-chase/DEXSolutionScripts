@@ -25,9 +25,12 @@
         1    -- Driver updates available (non-compliant; MDM triggers Install run).
 
     Exit codes (Install mode):
-        0    -- All updates installed. No reboot signal, or AllowReboot=$false.
+        0    -- All updates installed. No reboot signal, or AllowReboot=$false; when a
+                reboot is needed the output carries a [Pending] line (runbook section 7,
+                Step Statuses) so the console shows success, not a failure.
         1    -- One or more updates failed, or a script/environment error occurred.
-        3010 -- All updates installed. Reboot required (AllowReboot=$true).
+        3010 -- All updates installed. Reboot required (AllowReboot=$true, an explicit
+                opt-in: UEM and the DEX console show 3010 as a failure).
 
 .PARAMETER Mode
     Detect  -- Report available driver updates and exit without installing.
@@ -57,14 +60,14 @@
 
 .NOTES
     Script Name  : Invoke-DriverUpdates.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (1.0.1: the driver-exclusion policies are read before the search, so a
-                   policy-blocked device reports which policy blocks it and exits 0 instead of a generic
-                   search error; the reboot signals are checked in Detect mode too and reported before
-                   the exit, so a pre-existing pending reboot is visible without installing anything)
+    Last Modified: 2026-11-16 (1.0.2: a successful install that needs a reboot prints a [Pending]
+                   status line and exits 0 unless AllowReboot opts in to 3010; 1.0.1: the
+                   driver-exclusion policies are read before the search and reported, and the reboot
+                   signals are checked in Detect mode too)
     Timeout      : 120 seconds
 
 .DISCLAIMER
@@ -302,11 +305,13 @@ if ($failedCount -gt 0) {
 }
 
 if ($rebootNeeded) {
+    # Installed, but the drivers only load at the next reboot: Pending, not a failure.
+    Write-Output "  [Pending] Driver Install: $installedCount driver update(s) installed; they take effect after the next reboot"
     if ($AllowReboot) {
-        Write-Output 'Reboot required. Signaling exit 3010 for SmartReboot / DEX scheduling.'
+        Write-Output 'AllowReboot=$true: signaling exit 3010 for SmartReboot / DEX scheduling.'
         exit 3010
     } else {
-        Write-Output 'Reboot recommended but AllowReboot=$false. Exiting 0 -- schedule a reboot separately.'
+        Write-Output 'Exiting 0 -- schedule a reboot separately.'
         exit 0
     }
 }

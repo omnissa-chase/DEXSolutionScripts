@@ -214,7 +214,7 @@
     "note": "Deprovisions consumer inbox AppX packages on the test device. Expected and acceptable on a disposable VM; the first run changes the image."
   },
   "Enable-HardwareAcceleratedGPUScheduling.ps1": {
-    "note": "Exits 1 on the run that enables HwSchMode (no re-detect) and 0 on every later run. A Failed verdict on a fresh device is expected once; re-run to confirm."
+    "note": "Since 1.0.3 the run that enables HwSchMode reports step 3 as Pending and exits 0, so Completed is expected on a fresh device too. Exits 1 only below build 19041 (read from the registry since 1.0.4; [Environment]::OSVersion reports 9200 under the Hub engine on avdpersonal-1) or when a step throws."
   },
   "Invoke-RemediatePageFile.ps1": {
     "note": "Exits 1 (Warning) when the page file is manually sized but under threshold, or system-managed with high usage. On the lab VM the page file is system-managed, so Completed is expected."

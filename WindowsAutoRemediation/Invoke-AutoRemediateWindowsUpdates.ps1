@@ -24,7 +24,11 @@
 
     Each step returns @{ Status = 'Passed'|'Warning'|'Failed'; Message = '...' }
     Resolution scripts run silently; a script may return one line of text, which is
-    shown beside its result. Errors are captured and reported at the end.
+    shown beside its result, and may return @{ Status = 'Pending'; Message = '...' }
+    when its repair is still landing (step 7 after it starts Windows Disk Cleanup in
+    the background): the run prints [Pending], counts it in the summary's Pending
+    column and exits 0 (runbook section 7, Step Statuses). Errors are captured and
+    reported at the end.
 
     Step 7 treats low disk as the reason a device is unpatched, not as a note. It
     frees space itself, in tiers, cheapest and safest first, and stops as soon as
@@ -42,11 +46,13 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateWindowsUpdates.ps1
-    Version      : 1.1.0
+    Version      : 1.1.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-11-16 (1.1.1: step 7 reports Pending while Windows Disk Cleanup
+                   runs in the background instead of Failed-then-remediated; the summary
+                   carries a Pending column)
     Timeout      : 60 seconds (step 7 holds itself to 40 of them)
 
 .DISCLAIMER
@@ -175,8 +181,9 @@ function Start-WindowsDiskCleanupInBackground {
 
 function Invoke-DiskCleanup {
     # Works through the catalog up to MaxTier and returns a one-line account of what it
-    # freed. Tier 2 costs the user a re-download, so it takes only what is needed to get
-    # back above the warning line. The time budget keeps the step inside the script timeout.
+    # freed, followed by a Pending result when Windows Disk Cleanup was left running in
+    # the background. Tier 2 costs the user a re-download, so it takes only what is needed
+    # to get back above the warning line. The time budget keeps the step inside the timeout.
     param([int]$MaxTier)
     $stopwatch  = [System.Diagnostics.Stopwatch]::StartNew()
     $totalBytes = 0
@@ -202,15 +209,17 @@ function Invoke-DiskCleanup {
     }
     $nowGB = Get-DiskFreeGB
     $notes = @()
+    $background = $false
     if ($freed.Count -gt 0) { $notes += ($freed -join ', ') }
     if ($stoppedBy)         { $notes += $stoppedBy }
     if ($MaxTier -ge 2 -and $nowGB -lt $DiskMinFreeGB) {
-        if (Start-WindowsDiskCleanupInBackground) { $notes += 'still below minimum; Windows Disk Cleanup (Update Cleanup) started in the background, re-run to confirm' }
+        if (Start-WindowsDiskCleanupInBackground) { $background = $true; $notes += 'still below minimum; Windows Disk Cleanup (Update Cleanup) started in the background' }
         else                                      { $notes += 'still below minimum and cleanmgr.exe is not available; needs a human' }
     }
     $summary = "freed $([math]::Round($totalBytes / 1MB)) MB, now $nowGB GB free"
     if ($notes.Count -gt 0) { $summary += " ($($notes -join '; '))" }
-    return $summary
+    $summary
+    if ($background) { @{ Status = 'Pending'; Message = "$nowGB GB free on C:; Windows Disk Cleanup is still running in the background, re-run to confirm" } }
 }
 
 # -- Step Definitions ----------------------------------------------------------
@@ -462,9 +471,12 @@ foreach ($step in $activeSteps) {
     if ($shouldRemediate -and $step.ResolutionScript) {
         try {
             # A resolution script may return one line of text to show beside the result,
-            # e.g. what step 7 freed. Anything else it emits is discarded as before.
-            $remOutput  = @(& $step.ResolutionScript | Where-Object { $_ -is [string] })
-            $remNote    = ($remOutput -join '; ')
+            # e.g. what step 7 freed, and a Pending result when its repair is still landing.
+            # Anything else it emits is discarded as before.
+            $remOutput  = @(& $step.ResolutionScript)
+            $remNote    = (@($remOutput | Where-Object { $_ -is [string] }) -join '; ')
+            $pendingRes = $remOutput | Where-Object { $_ -is [hashtable] -and $_.Status -eq 'Pending' } | Select-Object -First 1
+            if ($pendingRes) { $status = 'Pending'; $message = $pendingRes.Message }
             $remediated = $true
         } catch {
             $remError = $_.Exception.Message
@@ -472,12 +484,6 @@ foreach ($step in $activeSteps) {
     }
 
     # -- Output ---------------------------------------------------------------
-    $color = switch ($status) {
-        'Passed'  { 'Green'  }
-        'Warning' { 'Yellow' }
-        'Failed'  { 'Red'    }
-        default   { 'White'  }
-    }
     $remText = if ($remediated -and $remNote) { "  -> Remediation ran: $remNote" }
                elseif ($remediated)          { '  -> Remediation ran' }
                elseif ($remError)            { "  -> Remediation ERROR: $remError" }
@@ -501,11 +507,12 @@ foreach ($step in $activeSteps) {
 # lone Failed step would otherwise yield $null here and the script would exit 0.
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
+$pending  = @($results | Where-Object { $_.Status -eq 'Pending' }).Count
 $failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"
-Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Pending: $pending  |  Failed: $failed  |  Remediations run: $remCount"
 Write-Output "`r`n----------------------------------------------------------------"
 
 if ($failed -gt 0) { exit 1 }

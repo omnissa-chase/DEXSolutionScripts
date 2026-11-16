@@ -22,14 +22,19 @@
 
     Each step returns @{ Status = 'Passed'|'Warning'|'Failed'; Message = '...' }
     Resolution scripts run silently; errors are captured and reported at the end.
+    Step 4's resolution returns @{ Status = 'Pending'; ... } after the Winsock and IP
+    resets, which only complete at the next reboot: the run prints [Pending], counts it
+    in the summary's Pending column and exits 0 (runbook section 7, Step Statuses).
 
 .NOTES
     Script Name  : Invoke-AutoRemediateNetworkStack.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-11-16 (1.0.2: the Winsock / IP reset reports Pending instead of
+                   Failed-then-remediated; Get-CimInstance replaces Get-WmiObject for
+                   the Hub PowerShell 7 engine)
     Timeout      : 30 seconds
 
 .DISCLAIMER
@@ -52,7 +57,7 @@ $Steps = @(
         ResolveOnWarning = $false
         DetectionScript  = {
             $dns = (
-                Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = 1' `
+                Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = 1' `
                     -ErrorAction SilentlyContinue |
                 Select-Object -ExpandProperty DNSServerSearchOrder |
                 Select-Object -Unique
@@ -80,7 +85,7 @@ $Steps = @(
         Enabled          = $true
         ResolveOnWarning = $false
         DetectionScript  = {
-            $gw = Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = 1' `
+            $gw = Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = 1' `
                       -ErrorAction SilentlyContinue |
                   Select-Object -ExpandProperty DefaultIPGateway |
                   Select-Object -First 1
@@ -147,8 +152,9 @@ $Steps = @(
         ResolutionScript = {
             netsh winsock reset | Out-Null
             netsh int ip reset  | Out-Null
-            # Note: a reboot is required to fully apply winsock/IP stack reset;
-            # subsequent steps may still fail until the device is rebooted.
+            # The resets only complete at the next reboot; later steps may still fail
+            # until then. Reported as Pending, not as a failure.
+            return @{ Status = 'Pending'; Message = 'Winsock and IP stack reset; the repair completes after the next reboot' }
         }
     },
 
@@ -261,20 +267,16 @@ foreach ($step in $activeSteps) {
 
     if ($shouldRemediate -and $step.ResolutionScript) {
         try {
-            & $step.ResolutionScript | Out-Null
+            $r = & $step.ResolutionScript
             $remediated = $true
+            # A resolution that lands later (after a reboot) reports Pending, not the pre-fix state.
+            if ($r -is [hashtable] -and $r.Status -eq 'Pending') { $status = 'Pending'; $message = $r.Message }
         } catch {
             $remError = $_.Exception.Message
         }
     }
 
     # -- Output ---------------------------------------------------------------
-    $color = switch ($status) {
-        'Passed'  { 'Green'  }
-        'Warning' { 'Yellow' }
-        'Failed'  { 'Red'    }
-        default   { 'White'  }
-    }
     $remNote = if ($remediated)          { '  -> Remediation ran' }
                elseif ($remError)        { "  -> Remediation ERROR: $remError" }
                else                      { '' }
@@ -296,11 +298,12 @@ foreach ($step in $activeSteps) {
 # lone Failed step would otherwise yield $null here and the script would exit 0.
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
+$pending  = @($results | Where-Object { $_.Status -eq 'Pending' }).Count
 $failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"
-Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Pending: $pending  |  Failed: $failed  |  Remediations run: $remCount"
 Write-Output "`r`n----------------------------------------------------------------"
 Write-Output ''
 

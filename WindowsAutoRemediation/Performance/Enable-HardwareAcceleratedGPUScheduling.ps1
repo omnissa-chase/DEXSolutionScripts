@@ -21,19 +21,25 @@
     |  4   | Pending Reboot Flag                        | -- (informational) |
     +------+--------------------------------------------+--------------------+
 
-    Each step returns @{ Status = 'Passed'|'Warning'|'Failed'; Message = '...' }
+    Each step returns @{ Status = 'Passed'|'Warning'|'Failed'; Message = '...' }.
+    Step 3's resolution returns @{ Status = 'Pending'; ... } once HwSchMode is written,
+    because HAGS only activates after the next reboot: the run prints [Pending], counts it
+    in the summary's Pending column and exits 0 (runbook section 7, Step Statuses).
 
 .NOTES
     Script Name  : Enable-HardwareAcceleratedGPUScheduling.ps1
-    Version      : 1.0.2
+    Version      : 1.0.4
     Architecture : x64 (HAGS is not applicable to x86 systems)
     Context      : System (HKLM registry write required)
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-02 (1.0.2: a step that was repaired no longer counts as a
-                   failure, so a successful remediation exits 0 instead of 1; the step 4
-                   "HAGS requires reboot" warning fires only in the run that changed the
-                   value, not forever after; results are written to the DEXRecords
-                   registry key like the rest of the family; unused variables removed.)
+    Last Modified: 2026-11-16 (1.0.4: step 1 reads the build from the registry, since the
+                   Hub engine on an AVD session host reports build 9200 through
+                   [Environment]::OSVersion and exited 1 as "unsupported OS";
+                   1.0.3: the enabling run reports step 3 as Pending instead
+                   of Failed-then-remediated, step 4 no longer repeats the same reboot
+                   as a Warning, Get-CimInstance replaces Get-WmiObject for the Hub
+                   PowerShell 7 engine; 1.0.2: a repaired step is not a failure, results
+                   in the DEXRecords registry key.)
     Timeout      : 30 seconds
 
 .DISCLAIMER
@@ -48,7 +54,6 @@ $HagsRegPath  = 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers'
 $HagsRegValue = 'HwSchMode'
 $HagsEnabled  = 2   # 1 = disabled, 2 = enabled
 $MinBuild     = 19041  # Windows 10 2004 (first build with HAGS support)
-$script:HagsChangedThisRun = $false   # set by step 3's resolution, read by step 4
 $DexRecordsPath = 'HKLM:\Software\AirWatch\Extension\DEXRecords\PerformanceErrors\HAGS'
 
 # -- Step Definitions ----------------------------------------------------------
@@ -60,14 +65,17 @@ $Steps = @(
         Enabled          = $true
         ResolveOnWarning = $false
         DetectionScript  = {
-            $build = [System.Environment]::OSVersion.Version.Build
+            # Registry, not [Environment]::OSVersion: a host without a Windows 10 app manifest
+            # (the Hub engine on an AVD session host) is told build 9200 and would exit 1 here.
+            $build = [int](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name CurrentBuildNumber -ErrorAction SilentlyContinue).CurrentBuildNumber
+            if ($build -lt 1) { $build = [int](Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue).BuildNumber }
             if ($build -lt $MinBuild) {
                 return @{
                     Status  = 'Failed'
                     Message = "OS build $build is below minimum $MinBuild (Windows 10 2004). HAGS not supported on this OS."
                 }
             }
-            $caption = (Get-WmiObject -Class Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption
+            $caption = (Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption
             return @{ Status = 'Passed'; Message = "OS compatible: $caption (build $build)" }
         }
         ResolutionScript = $null   # Cannot resolve -- OS requirement cannot be changed
@@ -82,7 +90,7 @@ $Steps = @(
             # WDDM version is stored as a feature in the driver INF but the most accessible
             # proxy is the driver date and the GPU generation. Query display adapters and
             # check DriverVersion -- WDDM 2.7 shipped with drivers from mid-2020 onwards.
-            $adapters = Get-WmiObject -Class Win32_VideoController -ErrorAction SilentlyContinue |
+            $adapters = Get-CimInstance -ClassName Win32_VideoController -ErrorAction SilentlyContinue |
                 Where-Object { $_.AdapterCompatibility -notmatch 'Microsoft' -and $_.Name -notmatch 'Remote|Virtual|Basic' }
 
             if (-not $adapters) {
@@ -142,7 +150,8 @@ $Steps = @(
             # Read back: the repair only counts if the value is now what we set.
             $after = (Get-ItemProperty -Path $HagsRegPath -Name $HagsRegValue -ErrorAction Stop).$HagsRegValue
             if ($after -ne $HagsEnabled) { throw "HwSchMode reads back as '$after' after the write." }
-            $script:HagsChangedThisRun = $true
+            # Written, but HAGS only activates after the next reboot.
+            return @{ Status = 'Pending'; Message = "HwSchMode set to $HagsEnabled; HAGS activates after the next reboot" }
         }
     },
 
@@ -157,18 +166,17 @@ $Steps = @(
             $wuPending    = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired' -ErrorAction SilentlyContinue) -ne $null
             $fileRename   = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations
 
-            # HAGS itself needs a reboot only when this run changed the value. Reading the
-            # value back here would report "requires reboot" forever after it was enabled.
+            # A HAGS change made by this run is already reported as Pending by step 3;
+            # this step only reports reboots the OS itself has queued.
             $reasons = @()
             if ($cbsPending)            { $reasons += 'CBS component servicing' }
             if ($wuPending)             { $reasons += 'Windows Update' }
             if ($fileRename)            { $reasons += 'pending file rename operations' }
-            if ($script:HagsChangedThisRun) { $reasons += 'HAGS enabled by this run (requires reboot to activate)' }
 
             if ($reasons.Count -gt 0) {
                 return @{
                     Status  = 'Warning'
-                    Message = "Reboot pending for: $($reasons -join ', '). Schedule a reboot to apply HAGS."
+                    Message = "Reboot pending for: $($reasons -join ', ')."
                 }
             }
             return @{ Status = 'Passed'; Message = 'No pending reboot detected' }
@@ -178,7 +186,9 @@ $Steps = @(
 )
 
 # -- Engine --------------------------------------------------------------------
-$activeSteps = $Steps | Where-Object { $_.Enabled } | Sort-Object Order
+# Scriptblock sort: 'Order' is a hashtable key, not a property, so a bare Sort-Object Order
+# left the steps in hashtable order (3, 4, 1, 2) under Windows PowerShell 5.1.
+$activeSteps = $Steps | Where-Object { $_.Enabled } | Sort-Object { [int]$_.Order }
 
 # If OS is incompatible (step 1 fails), skip remaining steps
 try {
@@ -223,8 +233,10 @@ foreach ($step in $activeSteps) {
 
     if ($shouldRemediate -and $step.ResolutionScript) {
         try {
-            & $step.ResolutionScript | Out-Null
+            $r = & $step.ResolutionScript
             $remediated = $true
+            # A resolution that lands later (after a reboot) reports Pending, not the pre-fix state.
+            if ($r -is [hashtable] -and $r.Status -eq 'Pending') { $status = 'Pending'; $message = $r.Message }
         } catch {
             $remError = $_.Exception.Message
         }
@@ -252,12 +264,13 @@ foreach ($step in $activeSteps) {
 # lone Failed step would otherwise yield $null here and the script would exit 0.
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
+$pending  = @($results | Where-Object { $_.Status -eq 'Pending' }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 # A failure that was repaired in this run is not a failure; a remediation that threw is.
 $failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"
-Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Failed: $failed  |  Remediations run: $remCount"
+Write-Output "  Passed: $passed  |  Warnings: $warnings  |  Pending: $pending  |  Failed: $failed  |  Remediations run: $remCount"
 Write-Output "`r`n----------------------------------------------------------------"
 Write-Output ''
 
@@ -276,11 +289,12 @@ try {
     Set-ItemProperty -Path $DexRecordsPath -Name 'TotalSteps'      -Value $results.Count -Type DWord
     Set-ItemProperty -Path $DexRecordsPath -Name 'PassedCount'     -Value $passed        -Type DWord
     Set-ItemProperty -Path $DexRecordsPath -Name 'WarningCount'    -Value $warnings      -Type DWord
+    Set-ItemProperty -Path $DexRecordsPath -Name 'PendingCount'    -Value $pending       -Type DWord
     Set-ItemProperty -Path $DexRecordsPath -Name 'FailedCount'     -Value $failed        -Type DWord
     Set-ItemProperty -Path $DexRecordsPath -Name 'RemediatedCount' -Value $remCount      -Type DWord
     $results | Where-Object { $_.Status -ne 'Passed' -or $_.Remediated } | ForEach-Object {
         $valueName = 'Step{0:D2}_{1}' -f $_.Order, ($_.Name -replace '[^A-Za-z0-9]', '')
-        $tag       = if ($_.Remediated) { '[Remediated]' } else { "[$($_.Status)]" }
+        $tag       = if ($_.Status -eq 'Pending') { '[Pending]' } elseif ($_.Remediated) { '[Remediated]' } else { "[$($_.Status)]" }
         Set-ItemProperty -Path $DexRecordsPath -Name $valueName -Value "$tag $($_.Message)" -Type String
     }
     Write-Output "  [Registry] Results written to $DexRecordsPath"
