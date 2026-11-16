@@ -83,7 +83,16 @@ Describe 'Invoke-AutoRemediateDriverIssues -- escalation chain' {
         Assert-PnpNotCalled -Run $run -Pattern '^/remove-device'
         Assert-OutputContains -Run $run -Pattern 'Unfixed \(1\): HDAUDIO\\FAKE\\AUDIO1'
         Assert-OutputContains -Run $run -Pattern '\[NOTICE\] The following device\(s\) could not be resolved without a reboot'
+        Assert-OutputContains -Run $run -Pattern 'HDAUDIO\\FAKE\\AUDIO1\s+\(no previous driver to roll back to\)'
         Assert-Equal 2 $run.ExitCode 'exit code'
+    }
+
+    It 'stops at Rollback when the previous driver clears the error' {
+        $run = Invoke-DriverScriptUnderStubs -ScriptPath $ScriptUnderTest -Devices (New-Fleet -AudioCode 10) -DriverFilter 'Realtek' -FixOn 'rollback-driver'
+        Assert-PnpOrder     -Run $run -Verbs @('scan-devices', 'restart-device', 'rollback-driver HDAUDIO\FAKE\AUDIO1')
+        Assert-PnpNotCalled -Run $run -Pattern '^/remove-device'
+        Assert-OutputContains -Run $run -Pattern 'Fixed\s+\(1\): HDAUDIO\\FAKE\\AUDIO1'
+        Assert-Equal 0 $run.ExitCode 'exit code'
     }
 }
 

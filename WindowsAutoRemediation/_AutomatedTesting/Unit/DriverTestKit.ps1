@@ -6,12 +6,17 @@
     Dot-source this file from a *.Tests.ps1. It provides Invoke-DriverScriptUnderStubs,
     which runs a driver remediation script in a child Windows PowerShell 5.1 process
     exactly the way the Workspace ONE script engine does (as a file, functions in
-    script scope, nothing dot-sourced into the console), but with the three things
-    that touch hardware replaced by stubs:
+    script scope, nothing dot-sourced into the console), but with the things that
+    touch hardware replaced by stubs:
 
-        Get-WmiObject   returns a fake Win32_PnPEntity fleet from a JSON state file
+        Get-CimInstance returns a fake Win32_PnPEntity fleet from a JSON state file
+        (Get-WmiObject)  (same fleet, kept for older script versions)
         pnputil         logs every call and, when its verb matches -FixOn, heals the
                         targeted device(s) by writing ErrorCode 0 back to the state file
+        DexDriverRollback  a fake of the scripts' DiRollbackDriver wrapper type: logs the
+                        call as '/rollback-driver <id>' (so the pnputil assertions read
+                        it) and heals the device when -FixOn is 'rollback-driver', else
+                        returns 259 (no previous driver)
         Start-Sleep     no-op, so a full escalation chain completes in well under a second
 
     Nothing here needs elevation, a snapshot, or real PnP hardware. It exercises the
@@ -20,11 +25,11 @@
 
 .NOTES
     Script Name  : DriverTestKit.ps1
-    Version      : 1.0.0
+    Version      : 1.1.0
     Architecture : Any (x86/x64)
     Context      : Any (no elevation required)
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-11-16
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -43,9 +48,11 @@ function New-FakeDevice {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
         [string]$DeviceID = ('FAKE\' + ($Name -replace '[^A-Za-z0-9]', '_') + '\1'),
-        [int]$ErrorCode = 0
+        [int]$ErrorCode = 0,
+        # Win32_PnPEntity.PNPClass; empty for a device Windows has no class for ("Other devices").
+        [string]$PnpClass = ''
     )
-    @{ Name = $Name; DeviceID = $DeviceID; ConfigManagerErrorCode = $ErrorCode }
+    @{ Name = $Name; DeviceID = $DeviceID; ConfigManagerErrorCode = $ErrorCode; PNPClass = $PnpClass }
 }
 
 function Invoke-DriverScriptUnderStubs {
@@ -60,9 +67,10 @@ function Invoke-DriverScriptUnderStubs {
         Fake PnP fleet. Use New-FakeDevice. Each entry needs Name, DeviceID, ConfigManagerErrorCode.
 
     .PARAMETER FixOn
-        pnputil verb that heals devices: 'scan-devices', 'restart-device', 'rollback-driver',
-        'remove-device', or '' (default) for a device that never recovers. scan-devices heals
-        every errored device; the others heal only the instance id passed on the command line.
+        Stage that heals devices: 'scan-devices', 'restart-device', 'rollback-driver' (the fake
+        DiRollbackDriver wrapper), 'remove-device', or '' (default) for a device that never
+        recovers. scan-devices heals every errored device; the others heal only the instance
+        id they are given.
 
     .PARAMETER DriverFilter
         Value for the DriverFilter environment variable, the way UEM would deliver it.
@@ -106,6 +114,7 @@ function Invoke-DriverScriptUnderStubs {
             Name                   = [string]$d.Name
             DeviceID               = [string]$d.DeviceID
             ConfigManagerErrorCode = [int]$d.ConfigManagerErrorCode
+            PNPClass               = [string]$d.PNPClass
         }
     }
     # The fleet is wrapped in an outer object on purpose: in PowerShell 5.1 ConvertFrom-Json
@@ -132,9 +141,11 @@ function Invoke-DriverScriptUnderStubs {
 `$global:DexStubCalls = '$escapedCalls'
 `$global:DexStubFixOn = '$FixOn'
 `$global:DexStubOemCount = $OemDriverCount
+`$env:DEX_STUB_STATE = `$global:DexStubState
+`$env:DEX_STUB_CALLS = `$global:DexStubCalls
+`$env:DEX_STUB_FIXON = `$global:DexStubFixOn
 
-function global:Get-WmiObject {
-    param([string]`$Class, `$ErrorAction, `$Filter, `$Namespace, `$ComputerName)
+function global:Get-DexStubFleet {
     `$raw = Get-Content -LiteralPath `$global:DexStubState -Raw
     if ([string]::IsNullOrWhiteSpace(`$raw)) { return }
     foreach (`$d in @((ConvertFrom-Json -InputObject `$raw).Devices)) {
@@ -142,9 +153,44 @@ function global:Get-WmiObject {
             Name                   = `$d.Name
             DeviceID               = `$d.DeviceID
             ConfigManagerErrorCode = [int]`$d.ConfigManagerErrorCode
+            PNPClass               = [string]`$d.PNPClass
+            Present                = `$true
         }
     }
 }
+
+function global:Get-CimInstance {
+    param([string]`$ClassName, `$ErrorAction, `$Filter, `$Namespace, `$ComputerName, `$Property, `$CimSession, `$OperationTimeoutSec)
+    Get-DexStubFleet
+}
+
+function global:Get-WmiObject {
+    param([string]`$Class, `$ErrorAction, `$Filter, `$Namespace, `$ComputerName)
+    Get-DexStubFleet
+}
+
+# Fake of the scripts' DiRollbackDriver wrapper. Registered before the script runs, so the
+# script's own 'DexDriverRollback' -as [type] check finds it and never compiles the real one.
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text.RegularExpressions;
+public static class DexDriverRollback {
+    public static bool NeedReboot;
+    public static int Rollback(string instanceId) {
+        string calls = Environment.GetEnvironmentVariable("DEX_STUB_CALLS");
+        string state = Environment.GetEnvironmentVariable("DEX_STUB_STATE");
+        string fixOn = Environment.GetEnvironmentVariable("DEX_STUB_FIXON");
+        File.AppendAllText(calls, "/rollback-driver " + instanceId + Environment.NewLine);
+        if (fixOn != "rollback-driver") return 259;
+        string json = File.ReadAllText(state);
+        string id = Regex.Escape(instanceId.Replace("\\", "\\\\"));
+        json = Regex.Replace(json, "(\"DeviceID\":\\s*\"" + id + "\",\\s*\"ConfigManagerErrorCode\":\\s*)\\d+", "`${1}0");
+        File.WriteAllText(state, json);
+        return 0;
+    }
+}
+'@
 
 function global:pnputil {
     `$line = (`$args | ForEach-Object { [string]`$_ }) -join ' '

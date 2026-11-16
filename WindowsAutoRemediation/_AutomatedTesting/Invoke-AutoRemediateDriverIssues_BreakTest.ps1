@@ -23,7 +23,7 @@
 
     ESCALATION BOUNDARY -- WHY THE DEFAULT ACTIONS ARE NOT THE SCRIPT'S DEFAULT
     A disabled device carries CONFIGFLAG_DISABLED in its Enum key. Neither
-    pnputil /scan-devices nor /restart-device nor /rollback-driver clears that flag --
+    pnputil /scan-devices nor /restart-device nor a driver rollback (DiRollbackDriver since 3.1.0; before that the stage called a pnputil verb that does not exist) clears that flag --
     only removing the device node and re-enumerating does. Both breaks below therefore
     need the Reinstall stage, which is NOT in the target script's own default
     -AllowedActions (Scan, Restart, Rollback). -RemediationAllowedActions consequently

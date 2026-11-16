@@ -145,7 +145,7 @@ Describe 'Invoke-AutoRemediateAllDriverIssues -- DriverFilter via environment va
     It 'skips errored devices outside the filter and does not remediate them' {
         $run = Invoke-DriverScriptUnderStubs -ScriptPath $ScriptUnderTest -Devices (New-FleetWithErroredAudio) -DriverFilter 'Intel'
         Assert-OutputContains -Run $run -Pattern "No Audio devices match filter 'Intel' -- step skipped"
-        Assert-OutputContains -Run $run -Pattern 'Uncovered Device Errors: No uncovered device driver errors detected'
+        Assert-OutputContains -Run $run -Pattern 'Other Device Errors: No driver errors outside the named classes'
         Assert-PnpNotCalled -Run $run -Pattern '^/(scan-devices|restart-device|rollback-driver)'
         Assert-Equal 0 $run.ExitCode 'exit code'
     }
@@ -157,21 +157,66 @@ Describe 'Invoke-AutoRemediateAllDriverIssues -- DriverFilter via environment va
     }
 }
 
-Describe 'Invoke-AutoRemediateAllDriverIssues -- uncovered devices' {
+Describe 'Invoke-AutoRemediateAllDriverIssues -- other device errors (every PnP class is covered)' {
 
     $fleet = New-HealthyFleet
-    $fleet += New-FakeDevice -Name 'Base System Device' -DeviceID 'PCI\FAKE\UNKNOWN1' -ErrorCode 28
+    $fleet += New-FakeDevice -Name 'PCI Data Acquisition and Signal Processing Controller' -DeviceID 'PCI\FAKE\UNKNOWN1' -ErrorCode 10
     $run = Invoke-DriverScriptUnderStubs -ScriptPath $ScriptUnderTest -Devices $fleet
 
-    It 'flags an errored device outside every class as a Warning' {
-        Assert-OutputContains -Run $run -Pattern '\[Warning\] Uncovered Device Errors: Errored device\(s\) outside covered classes: Base System Device \[code 28\]'
+    It 'reports an errored device outside every named class as Failed, with its PnP class' {
+        Assert-OutputContains -Run $run -Pattern '\[Failed \] Other Device Errors: Driver error on: PCI Data Acquisition and Signal Processing Controller \[Unknown, code 10\]\s+-> Remediation ran'
     }
 
-    It 'does not attempt remediation on an unclassified device' {
-        Assert-PnpNotCalled -Run $run -Pattern '^/(scan-devices|restart-device|rollback-driver|remove-device)'
+    It 'reports a device with no driver at all (code 28) as a Warning and does not escalate it' {
+        $ghost = New-HealthyFleet
+        $ghost += New-FakeDevice -Name 'Base System Device' -DeviceID 'PCI\FAKE\GHOST1' -ErrorCode 28
+        $g = Invoke-DriverScriptUnderStubs -ScriptPath $ScriptUnderTest -Devices $ghost
+        Assert-OutputContains -Run $g -Pattern '\[Warning\] Other Device Errors: No driver installed \(needs a driver package, not a remediation\): Base System Device \[Unknown, code 28\]'
+        Assert-PnpNotCalled -Run $g -Pattern '^/(scan-devices|restart-device|rollback-driver|remove-device)'
+        Assert-Equal 0 $g.ExitCode 'exit code'
     }
 
-    It 'exits 0 because a Warning is not a failure' { Assert-Equal 0 $run.ExitCode 'exit code' }
+    It 'runs the escalation chain on it' {
+        Assert-PnpOrder -Run $run -Verbs @('scan-devices', 'restart-device PCI\FAKE\UNKNOWN1', 'rollback-driver PCI\FAKE\UNKNOWN1')
+        Assert-PnpNotCalled -Run $run -Pattern '^/remove-device'
+    }
+
+    It 'exits 2 and lists it with the rollback reason when nothing clears the error' {
+        Assert-Equal 2 $run.ExitCode 'exit code'
+        Assert-OutputContains -Run $run -Pattern 'PCI\\FAKE\\UNKNOWN1\s+\(no previous driver to roll back to\)'
+    }
+
+    It 'heals it when a stage clears the error' {
+        $healed = Invoke-DriverScriptUnderStubs -ScriptPath $ScriptUnderTest -Devices $fleet -FixOn 'rollback-driver'
+        Assert-OutputLacks -Run $healed -Pattern 'could not be resolved'
+        Assert-Equal 1 $healed.ExitCode 'exit code (Failed step detected, then fixed)'
+    }
+
+    It 'only flags a device in a never-remediate class and leaves it alone' {
+        $safe = New-HealthyFleet
+        $safe += New-FakeDevice -Name 'Trusted Platform Module 2.0' -DeviceID 'ROOT\FAKE\TPM1' -ErrorCode 10 -PnpClass 'SecurityDevices'
+        $flagged = Invoke-DriverScriptUnderStubs -ScriptPath $ScriptUnderTest -Devices $safe
+        Assert-OutputContains -Run $flagged -Pattern '\[Warning\] Other Device Errors: Flagged only \(class never remediated unattended\): Trusted Platform Module 2\.0 \[SecurityDevices, code 10\]'
+        Assert-PnpNotCalled -Run $flagged -Pattern '^/(scan-devices|restart-device|rollback-driver|remove-device)'
+        Assert-Equal 0 $flagged.ExitCode 'exit code'
+    }
+
+    It 'names a class it does remediate when the device carries one' {
+        $classed = New-HealthyFleet
+        $classed += New-FakeDevice -Name 'Goodix Fingerprint Sensor' -DeviceID 'USB\FAKE\FPR1' -ErrorCode 43 -PnpClass 'Biometric'
+        $r = Invoke-DriverScriptUnderStubs -ScriptPath $ScriptUnderTest -Devices $classed -FixOn 'restart-device'
+        Assert-OutputContains -Run $r -Pattern 'Driver error on: Goodix Fingerprint Sensor \[Biometric, code 43\]'
+        Assert-PnpCalled -Run $r -Pattern '^/restart-device USB\\FAKE\\FPR1'
+        Assert-OutputLacks -Run $r -Pattern 'could not be resolved'
+    }
+}
+
+Describe 'Invoke-AutoRemediateAllDriverIssues -- rollback reason in the summary' {
+
+    It 'prints why the rollback stage could not help' {
+        $run = Invoke-DriverScriptUnderStubs -ScriptPath $ScriptUnderTest -Devices (New-FleetWithErroredAudio)
+        Assert-OutputContains -Run $run -Pattern 'HDAUDIO\\FAKE\\AUDIO1\s+\(no previous driver to roll back to\)'
+    }
 }
 
 Describe 'Invoke-AutoRemediateAllDriverIssues -- summary counts (PS 5.1 single-object .Count regression)' {

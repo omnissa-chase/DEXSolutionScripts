@@ -6,7 +6,10 @@
     Scans all defined PnP device classes for driver error codes and applies an
     escalating remediation sequence controlled by -AllowedActions. Device classes
     are defined in the $DriverClasses table; adding or removing a class requires
-    only a single table entry -- no step blocks need to be touched.
+    only a single table entry -- no step blocks need to be touched. Every errored
+    device that fits none of the named classes is still remediated, grouped by its
+    PnP class (step 11), except the classes listed in $NeverRemediateClasses, which
+    are flagged only.
 
     Use -DriverFilter to optionally narrow which devices are evaluated within
     each class. To target a single specific device by regex, use
@@ -25,12 +28,13 @@
     |  8   | Touchpad / HID Health     | Failed                           |
     |  9   | Webcam / Camera Health    | Failed                           |
     | 10   | USB / Dock Health         | Failed                           |
-    | 11   | Uncovered Device Errors   | -- (flag only)                   |
+    | 11   | Other Device Errors       | Failed (any other PnP class)     |
     | 12   | Pending Driver Reboot     | -- (informational only)          |
     +------+---------------------------+----------------------------------+
 
     Steps 2-10 are generated from $DriverClasses at runtime. Step 11's
-    exclusion pattern is auto-built from all enabled class entries.
+    exclusion pattern is auto-built from all enabled class entries, so it
+    covers exactly the devices the table does not.
 
 .PARAMETER DriverFilter
     Optional. Regex pattern that further narrows which devices within each class
@@ -42,7 +46,8 @@
     fixed order below, stopping as soon as the device's error clears:
         Scan      -- pnputil /scan-devices         (zero interruption)
         Restart   -- pnputil /restart-device       (~1-2 s device gap)
-        Rollback  -- pnputil /rollback-driver      (previous version from driver store)
+        Rollback  -- DiRollbackDriver (newdev.dll)  (Device Manager's "Roll Back Driver":
+                     previous package from the driver store; pnputil has no such verb)
         Reinstall -- remove device + scan-devices  (Windows picks best available driver)
         Uninstall -- remove device, no re-enum     (strips the driver; crash-causing drivers)
     Default: Scan, Restart, Rollback
@@ -50,11 +55,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateAllDriverIssues.ps1
-    Version      : 3.0.1
+    Version      : 3.1.0
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-11-16
     Timeout      : 120 seconds
 
 .DISCLAIMER
@@ -82,6 +87,54 @@ function Test-DriverMatch {
     return $Name -match $DriverFilter
 }
 
+# Invoke-DriverRollback: Device Manager's "Roll Back Driver" for one device instance,
+# through DiRollbackDriver in newdev.dll (pnputil has no rollback verb; the old
+# /rollback-driver call printed the usage text and changed nothing). Returns 0 when
+# the previous driver package was reinstalled, 259 (ERROR_NO_MORE_ITEMS) when there
+# is no previous package, any other Win32 error code otherwise, -1 when the API could
+# not be reached. The type is compiled once per session; a DexDriverRollback type that
+# already exists (the unit-test kit registers a fake) is used as is.
+function Invoke-DriverRollback {
+    param([string]$InstanceId)
+    try {
+        if (-not ('DexDriverRollback' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class DexDriverRollback {
+    [StructLayout(LayoutKind.Sequential)]
+    struct SP_DEVINFO_DATA { public int cbSize; public Guid ClassGuid; public int DevInst; public IntPtr Reserved; }
+    [DllImport("setupapi.dll", SetLastError = true)]
+    static extern IntPtr SetupDiCreateDeviceInfoList(IntPtr classGuid, IntPtr hwndParent);
+    [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool SetupDiOpenDeviceInfo(IntPtr set, string instanceId, IntPtr hwndParent, int flags, ref SP_DEVINFO_DATA data);
+    [DllImport("setupapi.dll", SetLastError = true)]
+    static extern bool SetupDiDestroyDeviceInfoList(IntPtr set);
+    [DllImport("newdev.dll", SetLastError = true)]
+    static extern bool DiRollbackDriver(IntPtr set, ref SP_DEVINFO_DATA data, IntPtr hwndParent, int flags, out bool needReboot);
+    public static bool NeedReboot;
+    public static int Rollback(string instanceId) {
+        IntPtr set = SetupDiCreateDeviceInfoList(IntPtr.Zero, IntPtr.Zero);
+        if (set == IntPtr.Zero || set == new IntPtr(-1)) return Marshal.GetLastWin32Error();
+        try {
+            SP_DEVINFO_DATA d = new SP_DEVINFO_DATA();
+            d.cbSize = Marshal.SizeOf(typeof(SP_DEVINFO_DATA));
+            if (!SetupDiOpenDeviceInfo(set, instanceId, IntPtr.Zero, 0, ref d)) return Marshal.GetLastWin32Error();
+            bool reboot;
+            if (!DiRollbackDriver(set, ref d, IntPtr.Zero, 1, out reboot)) return Marshal.GetLastWin32Error();   // 1 = ROLLBACK_FLAG_NO_UI
+            NeedReboot = reboot;
+            return 0;
+        } finally { SetupDiDestroyDeviceInfoList(set); }
+    }
+}
+'@ -ErrorAction Stop
+        }
+        return [int][DexDriverRollback]::Rollback($InstanceId)
+    } catch {
+        return -1
+    }
+}
+
 function Invoke-DriverEscalation {
     param(
         [string[]]$InstanceIds,
@@ -90,6 +143,7 @@ function Invoke-DriverEscalation {
 
     $fixed   = @()
     $unfixed = @()
+    $notes   = @{}
 
     foreach ($id in $InstanceIds) {
 
@@ -98,7 +152,7 @@ function Invoke-DriverEscalation {
         if ('Scan' -in $AllowedActions) {
             pnputil /scan-devices 2>&1 | Out-Null
             Start-Sleep -Seconds 3
-            $dev = Get-WmiObject -Class Win32_PnPEntity -ErrorAction SilentlyContinue |
+            $dev = Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction SilentlyContinue |
                    Where-Object { $_.DeviceID -eq $id }
             if ($dev -and $dev.ConfigManagerErrorCode -eq 0) { $fixed += $id; continue }
         }
@@ -108,20 +162,25 @@ function Invoke-DriverEscalation {
         if ('Restart' -in $AllowedActions) {
             pnputil /restart-device "$id" 2>&1 | Out-Null
             Start-Sleep -Seconds 3
-            $dev = Get-WmiObject -Class Win32_PnPEntity -ErrorAction SilentlyContinue |
+            $dev = Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction SilentlyContinue |
                    Where-Object { $_.DeviceID -eq $id }
             if ($dev -and $dev.ConfigManagerErrorCode -eq 0) { $fixed += $id; continue }
         }
 
-        # Stage: Rollback -- revert to the previously installed driver version stored
-        # in the local driver store. Requires Windows 10 2004+. Exits non-zero if no
-        # previous version exists; safe to call regardless.
+        # Stage: Rollback -- reinstall the previously installed driver package from the
+        # driver store (DiRollbackDriver, the same call Device Manager makes). Does
+        # nothing when no previous package exists; the reason is carried to the summary.
         if ('Rollback' -in $AllowedActions) {
-            pnputil /rollback-driver "$id" 2>&1 | Out-Null
-            Start-Sleep -Seconds 5
-            $dev = Get-WmiObject -Class Win32_PnPEntity -ErrorAction SilentlyContinue |
-                   Where-Object { $_.DeviceID -eq $id }
-            if ($dev -and $dev.ConfigManagerErrorCode -eq 0) { $fixed += $id; continue }
+            $rc = Invoke-DriverRollback -InstanceId $id
+            if ($rc -eq 0) {
+                Start-Sleep -Seconds 5
+                $dev = Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction SilentlyContinue |
+                       Where-Object { $_.DeviceID -eq $id }
+                if ($dev -and $dev.ConfigManagerErrorCode -eq 0) { $fixed += $id; continue }
+                $notes[$id] = 'rolled back, error persists'
+            } elseif ($rc -eq 259) { $notes[$id] = 'no previous driver to roll back to' }
+            elseif ($rc -eq -1)    { $notes[$id] = 'driver rollback API unavailable' }
+            else                   { $notes[$id] = "rollback failed, Win32 error $rc" }
         }
 
         # Stage: Reinstall -- remove the device from the PnP tree then trigger Windows
@@ -132,7 +191,7 @@ function Invoke-DriverEscalation {
             Start-Sleep -Seconds 3
             pnputil /scan-devices 2>&1 | Out-Null
             Start-Sleep -Seconds 5
-            $dev = Get-WmiObject -Class Win32_PnPEntity -ErrorAction SilentlyContinue |
+            $dev = Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction SilentlyContinue |
                    Where-Object { $_.DeviceID -eq $id }
             if ($dev -and $dev.ConfigManagerErrorCode -eq 0) { $fixed += $id; continue }
         }
@@ -149,7 +208,24 @@ function Invoke-DriverEscalation {
         $unfixed += $id
     }
 
-    return @{ Fixed = $fixed; Unfixed = $unfixed }
+    return @{ Fixed = $fixed; Unfixed = $unfixed; Notes = $notes }
+}
+
+# Get-OtherErroredDevices: every present device with a PnP error whose name matches
+# none of the $DriverClasses patterns, with its PnP class (Unknown when Windows has
+# none for it, the "Other devices" branch of Device Manager).
+function Get-OtherErroredDevices {
+    Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction SilentlyContinue |
+        Where-Object { $_.ConfigManagerErrorCode -ne 0 -and $_.Name -notmatch $coveredPattern -and $_.Present -ne $false } |
+        Where-Object { Test-DriverMatch $_.Name } |
+        ForEach-Object {
+            [pscustomobject]@{
+                Name                   = $_.Name
+                DeviceID               = $_.DeviceID
+                ConfigManagerErrorCode = $_.ConfigManagerErrorCode
+                PnpClass               = $(if ($_.PNPClass) { [string]$_.PNPClass } else { 'Unknown' })
+            }
+        }
 }
 
 # -- Driver Class Definitions --------------------------------------------------
@@ -289,7 +365,7 @@ foreach ($class in $DriverClasses | Where-Object { $_.Enabled }) {
         Class            = $class
         DetectionScript  = {
             param([hashtable]$c)
-            $all = Get-WmiObject -Class Win32_PnPEntity -ErrorAction SilentlyContinue |
+            $all = Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction SilentlyContinue |
                    Where-Object { $_.Name -match $c.Pattern }
             if ($c.ExcludePattern) { $all = $all | Where-Object { $_.Name -notmatch $c.ExcludePattern } }
             $devices = $all | Where-Object { Test-DriverMatch $_.Name }
@@ -309,13 +385,14 @@ foreach ($class in $DriverClasses | Where-Object { $_.Enabled }) {
         ResolutionScript = if ($class.Remediate) {
             {
                 param([hashtable]$c)
-                $errored = Get-WmiObject -Class Win32_PnPEntity -ErrorAction SilentlyContinue |
+                $errored = Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction SilentlyContinue |
                            Where-Object { $_.Name -match $c.Pattern -and $_.ConfigManagerErrorCode -ne 0 }
                 if ($c.ExcludePattern) { $errored = $errored | Where-Object { $_.Name -notmatch $c.ExcludePattern } }
                 $errored = $errored | Where-Object { Test-DriverMatch $_.Name }
                 if ($errored) {
                     $r = Invoke-DriverEscalation -InstanceIds ($errored.DeviceID) -AllowedActions $AllowedActions
                     if ($r.Unfixed) { $UnfixedDevices.AddRange([string[]]$r.Unfixed) }
+                    foreach ($k in $r.Notes.Keys) { $UnfixedNotes[$k] = $r.Notes[$k] }
                 }
             }
         } else { $null }
@@ -323,26 +400,45 @@ foreach ($class in $DriverClasses | Where-Object { $_.Enabled }) {
     $classOrder++
 }
 
-# Step N+1: Uncovered Device Errors (dynamic catch-all) -----------------------
-# Exclusion pattern is auto-built from all enabled $DriverClasses entries so it
-# always covers exactly what the class table does not.
+# Step N+1: Other Device Errors (every remaining PnP class) --------------------
+# The exclusion pattern is auto-built from all enabled $DriverClasses entries, so
+# this step covers exactly what the class table does not. Errored devices here get
+# the same escalation as the named classes, grouped by their PnP class, so a fault
+# is never left alone just because the device fits no category. Classes matching
+# $NeverRemediateClasses are flagged only: restarting or rolling back the system,
+# processor, volume, firmware or security (TPM) devices is not a safe unattended
+# action, and a software component carries no driver worth touching.
 $coveredPattern = ($DriverClasses | Where-Object { $_.Enabled } | ForEach-Object { $_.Pattern }) -join '|'
+$NeverRemediateClasses = '^(System|Processor|Computer|Volume|VolumeSnapshot|SecurityDevices|Firmware|SoftwareComponent|SoftwareDevice|DiskDrive)$'
 $Steps.Add(@{
-    Name             = 'Uncovered Device Errors'
+    Name             = 'Other Device Errors'
     Order            = $classOrder
     Enabled          = $true
     ResolveOnWarning = $false
     DetectionScript  = {
-        $uncovered = Get-WmiObject -Class Win32_PnPEntity -ErrorAction SilentlyContinue |
-            Where-Object { $_.ConfigManagerErrorCode -ne 0 -and $_.Name -notmatch $coveredPattern } |
-            Where-Object { Test-DriverMatch $_.Name }
-        if ($uncovered) {
-            $names = ($uncovered | ForEach-Object { "$($_.Name) [code $($_.ConfigManagerErrorCode)]" }) -join '; '
-            return @{ Status = 'Warning'; Message = "Errored device(s) outside covered classes: $names" }
-        }
-        return @{ Status = 'Passed'; Message = 'No uncovered device driver errors detected' }
+        $other = @(Get-OtherErroredDevices)
+        if (-not $other) { return @{ Status = 'Passed'; Message = 'No driver errors outside the named classes' } }
+        # Code 28 is "no driver installed": nothing to scan, restart or roll back, so it is
+        # reported, not escalated (a VMware guest typically shows two such ghost devices).
+        $noDrv = @($other | Where-Object { $_.ConfigManagerErrorCode -eq 28 })
+        $rest  = @($other | Where-Object { $_.ConfigManagerErrorCode -ne 28 })
+        $act   = @($rest | Where-Object { $_.PnpClass -notmatch $NeverRemediateClasses })
+        $flag  = @($rest | Where-Object { $_.PnpClass -match $NeverRemediateClasses })
+        $desc  = { param($d) "$($d.Name) [$($d.PnpClass), code $($d.ConfigManagerErrorCode)]" }
+        $parts = @()
+        if ($act)   { $parts += "Driver error on: $(($act | ForEach-Object { & $desc $_ }) -join '; ')" }
+        if ($flag)  { $parts += "Flagged only (class never remediated unattended): $(($flag | ForEach-Object { & $desc $_ }) -join '; ')" }
+        if ($noDrv) { $parts += "No driver installed (needs a driver package, not a remediation): $(($noDrv | ForEach-Object { & $desc $_ }) -join '; ')" }
+        return @{ Status = $(if ($act) { 'Failed' } else { 'Warning' }); Message = ($parts -join '. ') }
     }
-    ResolutionScript = $null   # Flag only -- class is unknown so escalation is not safe
+    ResolutionScript = {
+        $act = @(Get-OtherErroredDevices | Where-Object { $_.ConfigManagerErrorCode -ne 28 -and $_.PnpClass -notmatch $NeverRemediateClasses })
+        if ($act) {
+            $r = Invoke-DriverEscalation -InstanceIds ($act.DeviceID) -AllowedActions $AllowedActions
+            if ($r.Unfixed) { $UnfixedDevices.AddRange([string[]]$r.Unfixed) }
+            foreach ($k in $r.Notes.Keys) { $UnfixedNotes[$k] = $r.Notes[$k] }
+        }
+    }
 })
 $classOrder++
 
@@ -374,6 +470,7 @@ $activeSteps = $Steps |
     Sort-Object   { [int]$_.Order }
 
 $UnfixedDevices = [System.Collections.Generic.List[string]]::new()
+$UnfixedNotes   = @{}   # instance id -> why the Rollback stage could not help (printed under the NOTICE)
 $results = New-Object 'System.Collections.Generic.List[PSCustomObject]'
 
 $scopeLine   = if ($DriverFilter) { "Within-class filter: $DriverFilter" } else { 'All devices' }
@@ -415,12 +512,6 @@ foreach ($step in $activeSteps) {
     }
 
     # -- Output ---------------------------------------------------------------
-    $color = switch ($status) {
-        'Passed'  { 'Green'  }
-        'Warning' { 'Yellow' }
-        'Failed'  { 'Red'    }
-        default   { 'White'  }
-    }
     $remNote = if ($remediated)   { '  -> Remediation ran' }
                elseif ($remError) { "  -> Remediation ERROR: $remError" }
                else               { '' }
@@ -452,7 +543,10 @@ $allUnfixed = $UnfixedDevices | Where-Object { $_ }
 
 if ($allUnfixed) {
     Write-Output "`r`n  [NOTICE] The following device(s) could not be resolved without a reboot:"
-    $allUnfixed | ForEach-Object { Write-Output "           $_" }
+    $allUnfixed | ForEach-Object {
+        $why = if ($UnfixedNotes[$_]) { "  ($($UnfixedNotes[$_]))" } else { '' }
+        Write-Output "           $_$why"
+    }
     Write-Output '----------------------------------------------------------------'
     Write-Output ''
     exit 2   # Distinct exit code: partial remediation, reboot recommended
