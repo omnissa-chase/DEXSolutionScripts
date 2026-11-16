@@ -619,6 +619,11 @@ foreach ($step in ($Steps | Where-Object { $_.Enabled } | Sort-Object { [int]$_.
         } catch { $remError = $_.Exception.Message }
     }
 }
+
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
+if ($failed -gt 0) { exit 1 }
+exit 0
 ```
 
 ### Step Statuses

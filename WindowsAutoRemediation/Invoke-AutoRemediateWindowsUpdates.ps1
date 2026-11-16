@@ -46,11 +46,13 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateWindowsUpdates.ps1
-    Version      : 1.1.2
+    Version      : 1.1.3
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-16 (1.1.2: step 3 treats a Disabled CryptSvc as Failed and
+    Last Modified: 2026-11-16 (1.1.3: a Failed step whose remediation ran no longer
+                   counts as a failure, so a run that repaired BITS exits 0 instead of 1;
+                   1.1.2: step 3 treats a Disabled CryptSvc as Failed and
                    sets it back to Automatic before starting it, as steps 1 and 2 do for
                    their services; 1.1.1: step 7 reports Pending while Windows Disk Cleanup
                    runs in the background instead of Failed-then-remediated; the summary
@@ -515,7 +517,9 @@ foreach ($step in $activeSteps) {
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
 $pending  = @($results | Where-Object { $_.Status -eq 'Pending' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+# A failure that was repaired in this run is not a failure; a remediation that threw is
+# (the same rule as the other step engines, runbook section 7).
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"
