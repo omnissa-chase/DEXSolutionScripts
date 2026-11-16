@@ -27,14 +27,10 @@
     NoSync is often a VM that is deliberately taking time from its hypervisor; set
     ConfigureWorkgroupNtp=true to have the script configure an NTP peer instead.
 
-    Step 4: W32Time refuses to correct an offset larger than MaxPos/NegPhaseCorrection
-    (15 or 48 hours depending on build). When the clock is that far out the script
-    temporarily lifts the limit, resyncs, and puts the original limits back. That is
-    a large clock jump on a device whose clock is already unusable; disable it with
-    AllowLargeCorrection=false if you would rather have it reported.
-
-    Step 5 has no remediation. A VM that takes time from both the hypervisor and the
-    domain fights itself; which source to turn off is a platform decision.
+    Step 4: W32Time refuses offsets beyond MaxPos/NegPhaseCorrection (15 or 48 h by
+    build); the script lifts the limit, resyncs and restores it. AllowLargeCorrection=false
+    reports instead. Step 5 only reports: a VM fed by both the hypervisor and the domain
+    fights itself, and which source to drop is a platform decision.
 
     Domain controllers are skipped entirely: a DC's time configuration is deliberate.
 
@@ -76,14 +72,13 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateTimeSync.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-03 (1.0.1: two-stage resync with a 20 s default wait after
-                   a freshly restarted service reported 'Local CMOS Clock' for longer
-                   than the 10 s budget; the offset step no longer reports a 0 s
-                   offset against the local clock as Passed)
+    Last Modified: 2026-11-16 (1.0.2: VMware Tools found under either Program Files
+                   folder, or through vmtoolsd when the install has no toolbox;
+                   1.0.1: two-stage resync, 20 s default wait, no false 0 s offset)
     Timeout      : 60 seconds (worst case: two bounded resync waits of ResyncWaitSeconds)
 
     Environment variables: WhatIf=true (dry run; absent or unparseable means live) and
@@ -286,11 +281,20 @@ function Get-HypervisorTimeSync {
     $hv = Get-Service -Name 'vmictimesync' -ErrorAction SilentlyContinue
     if ($hv -and $hv.Status -eq 'Running') { $sources += 'Hyper-V Time Synchronization service' }
 
-    $toolbox = Join-Path $env:ProgramFiles 'VMware\VMware Tools\VMwareToolboxCmd.exe'
-    if (Test-Path -LiteralPath $toolbox) {
+    # VMware Tools: toolbox when present; a minimal install (no toolbox) answers vmtoolsd's
+    # set_option with an empty line when the old value matches, so 1 -> 1 silent = on.
+    foreach ($dir in @("$env:ProgramFiles\VMware\VMware Tools", "${env:ProgramFiles(x86)}\VMware\VMware Tools")) {
+        $toolbox = Join-Path $dir 'VMwareToolboxCmd.exe'
+        $daemon  = Join-Path $dir 'vmtoolsd.exe'
         try {
-            $state = (& $toolbox timesync status 2>&1 | Out-String).Trim()
-            if ($state -match '^Enabled') { $sources += 'VMware Tools periodic time sync' }
+            if (Test-Path -LiteralPath $toolbox) {
+                if ((& $toolbox timesync status 2>&1 | Out-String).Trim() -match '^Enabled') { $sources += 'VMware Tools periodic time sync' }
+                break
+            }
+            if (Test-Path -LiteralPath $daemon) {
+                if (-not (& $daemon --cmd 'vmx.set_option synctime 1 1' 2>&1 | Out-String).Trim()) { $sources += 'VMware Tools periodic time sync' }
+                break
+            }
         } catch { }
     }
     return $sources
@@ -475,8 +479,6 @@ $Steps = @(
     },
 
     @{
-        # Report only. A guest that takes time from the hypervisor and from the domain
-        # has two masters. Turning one off is a platform decision, not an endpoint fix.
         Name             = 'Hypervisor Time Sync Conflict'
         Order            = 5
         Enabled          = $true

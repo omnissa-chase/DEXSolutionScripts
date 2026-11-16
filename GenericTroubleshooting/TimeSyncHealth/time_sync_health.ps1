@@ -2,11 +2,11 @@
 .NOTES
     Script Name  : time_sync_health.ps1
     Data Type    : String (JSON)
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-07
+    Last Modified: 2026-11-16
     Timeout      : < 5 seconds
 
     Reports W32Time service and clock-sync health. Uses "Time since Last Good
@@ -45,9 +45,11 @@ try {
     try { $statusText = & w32tm /query /status /verbose 2>&1 } catch {}
 
     function Get-W32tmValue {
+        # Anchored to the start of the line: an unanchored 'Source' used to pick the
+        # ReferenceId line ("... (source IP: ...)") first and report Unknown.
         param([string[]]$Lines, [string]$LabelRegex)
-        $line = $Lines | Where-Object { $_ -match $LabelRegex } | Select-Object -First 1
-        if ($line -and $line -match "$LabelRegex\s*:\s*(.+)$") { return $Matches[1].Trim() }
+        $line = $Lines | Where-Object { $_ -match "^\s*$LabelRegex\s*:" } | Select-Object -First 1
+        if ($line -and $line -match "^\s*$LabelRegex\s*:\s*(.+)$") { return $Matches[1].Trim() }
         return $null
     }
 
