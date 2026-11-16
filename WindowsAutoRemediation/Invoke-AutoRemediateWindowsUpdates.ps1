@@ -46,11 +46,13 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateWindowsUpdates.ps1
-    Version      : 1.1.1
+    Version      : 1.1.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-16 (1.1.1: step 7 reports Pending while Windows Disk Cleanup
+    Last Modified: 2026-11-16 (1.1.2: step 3 treats a Disabled CryptSvc as Failed and
+                   sets it back to Automatic before starting it, as steps 1 and 2 do for
+                   their services; 1.1.1: step 7 reports Pending while Windows Disk Cleanup
                    runs in the background instead of Failed-then-remediated; the summary
                    carries a Pending column)
     Timeout      : 60 seconds (step 7 holds itself to 40 of them)
@@ -285,12 +287,17 @@ $Steps = @(
             if (-not $svc) {
                 return @{ Status = 'Failed'; Message = 'Cryptographic Services (CryptSvc) not found' }
             }
+            if ($svc.StartType -eq 'Disabled') {
+                return @{ Status = 'Failed'; Message = 'CryptSvc is Disabled -- update verification will fail' }
+            }
             if ($svc.Status -eq 'Running') {
                 return @{ Status = 'Passed'; Message = 'CryptSvc is running' }
             }
             return @{ Status = 'Failed'; Message = "CryptSvc is $($svc.Status) -- update verification will fail" }
         }
         ResolutionScript = {
+            # Automatic is the Windows default for CryptSvc (wuauserv and BITS are Manual).
+            Set-Service   -Name CryptSvc -StartupType Automatic -ErrorAction SilentlyContinue
             Start-Service -Name CryptSvc -ErrorAction SilentlyContinue
         }
     },

@@ -92,11 +92,12 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateWindowsUpdates_BreakTest.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : Administrator (elevated)
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-10-28
+    Last Modified: 2026-11-16 (1.0.2: CryptSvcStopped disables the service before stopping
+                   it, since the RPC trigger restarted it before Verify; 1.0.1: 2026-10-28)
     Reporting    : C:\Temp\FixReport\Invoke-AutoRemediateWindowsUpdates\
 
 .DISCLAIMER
@@ -227,8 +228,15 @@ $BreakCatalog = @(
         RequiresReboot  = $false
         Methods         = @(
             @{
-                Name  = 'StopService'
-                Apply = { Stop-Service -Name CryptSvc -Force -ErrorAction Stop }
+                # CryptSvc is trigger-started on its RPC interface, so a plain stop is undone
+                # within seconds by the next Authenticode or catalog call (the harness's own
+                # Get-Service calls were enough on 2026-11-16, run d0bda6076eeb). Disabling it
+                # first keeps the break in place until the script re-enables and starts it.
+                Name  = 'DisableAndStopService'
+                Apply = {
+                    Set-Service  -Name CryptSvc -StartupType Disabled -ErrorAction Stop
+                    Stop-Service -Name CryptSvc -Force -ErrorAction Stop
+                }
             }
         )
         Capture  = {
@@ -236,11 +244,12 @@ $BreakCatalog = @(
             @{ StartType = "$($svc.StartType)"; Status = "$($svc.Status)" }
         }
         Verify   = {
-            (Get-DexService -Name CryptSvc).Status -ne 'Running'
+            $svc = Get-DexService -Name CryptSvc
+            ($svc.StartType -eq 'Disabled') -and ($svc.Status -ne 'Running')
         }
         Validate = {
             $svc = Get-DexService -Name CryptSvc
-            @{ Passed = ($svc.Status -eq 'Running'); Detail = "Status=$($svc.Status)" }
+            @{ Passed = ($svc.Status -eq 'Running' -and $svc.StartType -ne 'Disabled'); Detail = "Status=$($svc.Status) StartType=$($svc.StartType)" }
         }
         Restore  = {
             param($Original)

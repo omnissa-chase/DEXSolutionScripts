@@ -40,7 +40,8 @@
                                   override is written at Machine scope (so a SYSTEM
                                   resume task inherits it) and in this process (so the
                                   child powershell.exe inherits it). Validate: automatic
-                                  management restored, DEXRecords Status = 'Remediated'.
+                                  management restored, DEXRecords Status = 'Pending'
+                                  (script 1.0.2: the reset lands at the next reboot).
     The two breaks cannot share a run: the lowered threshold would turn the advisory
     case into a repair. When both are selected the one drawn first is kept.
 
@@ -89,11 +90,12 @@
 
 .NOTES
     Script Name  : Invoke-RemediatePageFile_BreakTest.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : Administrator (elevated)
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-02
+    Last Modified: 2026-11-16 (1.0.1: ExpectFixed validates DEXRecords Status 'Pending',
+                   the script's 1.0.2 status for a reset that lands at the next reboot)
     Reporting    : C:\Temp\FixReport\Invoke-RemediatePageFile\
 
 .DISCLAIMER
@@ -343,9 +345,9 @@ function Get-DexRecordValue {
 
 function Test-DexRecordStatus {
     <#
-        The script writes a single 'Status' value per run: Passed, Warning, Failed or
-        Remediated. ExpectReportedOnly demands 'Warning'; ExpectFixed demands
-        'Remediated'.
+        The script writes a single 'Status' value per run: Passed, Warning, Pending or
+        Failed (Remediated before 1.0.2). ExpectReportedOnly demands 'Warning';
+        ExpectFixed demands 'Pending', because the reset lands at the next reboot.
     #>
     param([Parameter(Mandatory = $true)][string]$Expected)
 
@@ -421,7 +423,8 @@ $BreakCatalog = @(
             ([Environment]::GetEnvironmentVariable($ThresholdEnvName, 'Process') -eq '0') -and
             ((Get-PageFilePeakUsagePercent) -ge 0)
         }
-        Validate = { (Get-PageFileAutomatic) -and (Test-DexRecordStatus -Expected 'Remediated') }
+        # Since script 1.0.2 the reset reports Pending (it lands at the next reboot), not Remediated.
+        Validate = { (Get-PageFileAutomatic) -and (Test-DexRecordStatus -Expected 'Pending') }
         Restore  = {
             param($Original)
             # Null restores remove the variable; SetEnvironmentVariable(name, $null) deletes.
