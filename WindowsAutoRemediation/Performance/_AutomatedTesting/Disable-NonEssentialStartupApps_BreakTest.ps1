@@ -96,11 +96,11 @@
 
 .NOTES
     Script Name  : Disable-NonEssentialStartupApps_BreakTest.ps1
-    Version      : 1.0.3
+    Version      : 1.0.4
     Architecture : Any (x86/x64/ARM64)
     Context      : Administrator (elevated), run as the interactive user
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-16 (1.0.3: ExpectFixed runs also assert that the script exited 0). Was: 2026-11-10
+    Last Modified: 2026-11-16 (1.0.4: MicrosoftSignedLeft verifies that the sensor counted at least one more entry; 1.0.3 expected exactly one more and failed whenever another Run-value break was planted after it, run 03681427ac63. 1.0.3: ExpectFixed runs also assert that the script exited 0). Was: 2026-11-10
     Reporting    : C:\Temp\FixReport\Disable-NonEssentialStartupApps\
 
     1.0.2  Run acf46320121b (2026-11-10, BreakFailed, restored cleanly): sleeping before the
@@ -461,9 +461,13 @@ $BreakCatalog = @(
             param($Original)
             $ok = "$(Get-RunValue 'DEXTestSigned')" -like '*notepad.exe*'
             if (-not $ok) { Write-Host '           Run\DEXTestSigned not planted' }
+            # Capture runs just before this break's own Apply, and Verify runs after every drawn
+            # break has been applied, so breaks planted later (DanglingRunEntry, UserDisabled-
+            # DanglingLeft) add their own Run values and missing targets on top: at least one more
+            # entry, never exactly one (run 03681427ac63, 2026-11-16).
             $s = Get-SensorSnapshot
-            $counted = $s -and ([int]$s.Entries -eq ([int]$Original.Sensor.Entries + 1)) -and ([int]$s.Missing -eq [int]$Original.Sensor.Missing)
-            if (-not $counted) { Write-Host "           sensor Entries/Missing = $(if ($s) { "$($s.Entries)/$($s.Missing)" } else { 'n/a' }); expected $([int]$Original.Sensor.Entries + 1)/$($Original.Sensor.Missing)" }
+            $counted = $s -and ([int]$s.Entries -ge ([int]$Original.Sensor.Entries + 1)) -and ([int]$s.Missing -ge [int]$Original.Sensor.Missing)
+            if (-not $counted) { Write-Host "           sensor Entries/Missing = $(if ($s) { "$($s.Entries)/$($s.Missing)" } else { 'n/a' }); expected at least $([int]$Original.Sensor.Entries + 1)/$($Original.Sensor.Missing)" }
             return ($ok -and $counted)
         }
         Validate = {
