@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Invoke-DefenderServiceRemediation -- Ensures Microsoft Defender services are running and Real-Time Protection is enabled.
 

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Runs Windows Disk Cleanup targeting specific system cleanup categories.
 

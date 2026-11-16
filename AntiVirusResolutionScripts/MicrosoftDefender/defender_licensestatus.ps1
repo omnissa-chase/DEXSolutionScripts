@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     defender_licensestatus -- Detection sensor: reports Microsoft Defender for Endpoint license and onboarding state.
 

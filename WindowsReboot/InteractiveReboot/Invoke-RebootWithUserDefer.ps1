@@ -502,7 +502,7 @@ Function Invoke-MainThread{
 
 
     foreach ($UserRecord in @($activeUsers)) {
-        # Some hosts mark current user with a leading '>' — remove if present
+        # Some hosts mark current user with a leading '>' -- remove if present
         $user = $UserRecord.USERNAME -replace '^>',''
         try {
             $exe = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Invoke-DefenderUpdateSignatures -- Forces a Microsoft Defender signature update if definitions are out of date.
 

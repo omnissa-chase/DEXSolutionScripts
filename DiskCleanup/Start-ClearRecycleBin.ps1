@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Empties the Recycle Bin for every user on the device, from SYSTEM context.
 

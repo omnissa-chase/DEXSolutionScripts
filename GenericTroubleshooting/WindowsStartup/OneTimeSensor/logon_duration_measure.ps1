@@ -17,7 +17,7 @@
                    TEST-VALIDATION.md 13.2.v and 13.2.z)
     Timeout      : One-time / run-once sensor only. Self-enforced budget 25 s, hard
                    ceiling 30 s (UEM max). MUST NOT be scheduled as a recurring sensor.
-                   See GENERAL-SCRIPTS-SENSORS_RUNBOOK.md §10, "One-Time / Run-Once
+                   See GENERAL-SCRIPTS-SENSORS_RUNBOOK.md section 10, "One-Time / Run-Once
                    Sensors".
 
     Mines Windows event logs directly for the most recent interactive logon of the
@@ -53,7 +53,7 @@
     enabled first -- run Enable-LogonAuditLogs.ps1 once per device image.
 
     SELF-ENFORCED DEADLINE
-    Per RUNBOOK §10, a one-time sensor must never rely solely on the UEM ceiling to
+    Per RUNBOOK section 10, a one-time sensor must never rely solely on the UEM ceiling to
     cut work off. A Stopwatch started at first event-log access checks the budget
     before each remaining phase; once exceeded, unattempted phases report -4 (see
     sentinels below) instead of running further queries, and "TimedOut" is set true.

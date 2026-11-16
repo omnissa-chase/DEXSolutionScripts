@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     OrphanedCcmSetupResolutionWizard -- Clear a stuck ccmsetup.exe retry loop.
 

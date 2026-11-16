@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Restarts Windows Update and related services to resolve stalled or broken
     update states.  NOTE:  THIS IS ALREADY HANDLED BY THE INVOKE-AUTOREMEDIATEWINDOWSUPDATE SCRIPT.
@@ -29,7 +29,7 @@
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# -- Configuration -------------------------------------------------------------
 
 $SCRIPT_VERSION = "1.6.2.0"
 
@@ -42,17 +42,17 @@ $WhatIfPreference = $false
 
 # Services to remediate. Add additional service names to this list as needed.
 # Common Windows Update related services:
-#   wuauserv    — Windows Update Agent (core update service)
-#   bits        — Background Intelligent Transfer Service (download engine)
-#   cryptsvc    — Cryptographic Services (certificate validation for updates)
-#   msiserver   — Windows Installer (required for update package installation)
+#   wuauserv    -- Windows Update Agent (core update service)
+#   bits        -- Background Intelligent Transfer Service (download engine)
+#   cryptsvc    -- Cryptographic Services (certificate validation for updates)
+#   msiserver   -- Windows Installer (required for update package installation)
 $services = @("wuauserv","bits","cryptsvc","msiserver")
 
 # Windows default start type per service, applied when one has been Disabled (an update
 # blocker's usual lever). Anything not listed is set to Manual.
 $DefaultStartType = @{ "wuauserv" = "Manual"; "bits" = "Manual"; "cryptsvc" = "Automatic"; "msiserver" = "Manual" }
 
-# ── Execution ─────────────────────────────────────────────────────────────────
+# -- Execution -----------------------------------------------------------------
 
 # Generate a random 4-digit ID to correlate all log lines from this run
 $RunEventId = ([Random]::new()).Next(1000, 9999)
@@ -88,7 +88,7 @@ ForEach ($service in $services) {
         }
 
         If ($svc.Status -ne 'Running' -or $ForceRestart) {
-            # Service is either not running or ForceRestart is enabled — cycle it.
+            # Service is either not running or ForceRestart is enabled -- cycle it.
             # Stop-Service -Force takes running dependents down too (cryptsvc carries
             # AppIDSvc and applockerfltr, the AppLocker pair); start them again afterwards.
             $dependents = @($svc.DependentServices | Where-Object { $_.Status -eq 'Running' } | ForEach-Object { $_.Name })
@@ -117,8 +117,8 @@ ForEach ($service in $services) {
                 }
             }
         } Else {
-            # Service is running and ForceRestart is disabled — leave it in place
-            Write-Output "$HEAD $service is already running — skipping restart."
+            # Service is running and ForceRestart is disabled -- leave it in place
+            Write-Output "$HEAD $service is already running -- skipping restart."
         }
 
         # Re-query status after the stop/start attempt (a WhatIf run counts the current state)
@@ -132,7 +132,7 @@ ForEach ($service in $services) {
     }
 }
 
-# ── Result ────────────────────────────────────────────────────────────────────
+# -- Result --------------------------------------------------------------------
 
 if ($ServiceStarted -lt $ServiceTotal) {
     Write-Error "$HEAD FAILED. Only $ServiceStarted of $ServiceTotal service(s) are running after remediation."

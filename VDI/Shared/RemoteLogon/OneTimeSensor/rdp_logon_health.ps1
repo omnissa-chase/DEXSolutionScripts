@@ -112,8 +112,8 @@ try {
             # HealthCheckResult: 1 = passed, 8 = not applicable (seen on a healthy host); anything else is reported.
             $o.AvdChk = @($rep.PSObject.Properties | Where-Object { @(1, 8) -notcontains [int]$_.Value.HealthCheckResult } | ForEach-Object { ($_.Name -replace 'HealthCheck$|Check$', '') + ':' + [int]$_.Value.HealthCheckResult } | Select-Object -First 5)
             # The agent writes this stamp in UTC as "M/d/yyyy h:mm:ss tt"; normalise it to ISO 8601.
-            $ts = [string]$hp.AgentHealthCheckTimestamp; $dt = [datetime]::MinValue
-            if ([datetime]::TryParse($ts, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$dt)) { $o.AvdChkAt = $dt.ToString('yyyy-MM-ddTHH:mm:ss') + 'Z' } else { $o.AvdChkAt = Cut $ts 22 }
+            $stamp = [string]$hp.AgentHealthCheckTimestamp; $dt = [datetime]::MinValue
+            if ([datetime]::TryParse($stamp, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$dt)) { $o.AvdChkAt = $dt.ToString('yyyy-MM-ddTHH:mm:ss') + 'Z' } else { $o.AvdChkAt = Cut $stamp 22 }
         }
     }
     $cd = -1

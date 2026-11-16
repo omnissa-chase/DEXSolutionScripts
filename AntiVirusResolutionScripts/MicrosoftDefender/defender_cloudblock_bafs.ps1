@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     defender_cloudblock_bafs -- Detection sensor: reports the Microsoft Defender Block-at-First-Sight (BAFS) and cloud protection state.
 

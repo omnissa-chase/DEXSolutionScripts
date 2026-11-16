@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     defender_signatureoutofdate -- Detection sensor: reports whether Microsoft Defender virus definition signatures are out of date.
 

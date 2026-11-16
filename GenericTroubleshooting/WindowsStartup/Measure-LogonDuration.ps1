@@ -31,7 +31,7 @@
                           subsequent captures without consuming WSO agent time.
       ConfigureLogging    Enable the optional Windows event logs required for full metric
                           coverage (PrintService/Operational, TaskScheduler/Operational).
-                          Safe to re-run — skips already-enabled logs.
+                          Safe to re-run -- skips already-enabled logs.
 
     An unrecognised $env:DeployMode falls back to RunNow with a warning, so a typo in the
     UEM console degrades to a measurement instead of failing the deployment. An
@@ -53,7 +53,7 @@
     Defaults to $true when $env:ConfigureLoggingFirst is true / 1 / yes / y, otherwise
     $false. Enables the optional event logs before running the requested DeployMode, so
     one deployment configures logging and starts measuring in a single pass. Anything
-    unrecognised is false — this shells out to wevtutil, so it fails closed.
+    unrecognised is false -- this shells out to wevtutil, so it fails closed.
 
     Idempotent: a registry marker records success and later runs skip the work rather
     than calling wevtutil at every logon. DeployMode ConfigureLogging ignores the marker,
@@ -321,7 +321,7 @@ if ([string]::IsNullOrEmpty($loggedOnUser)) {
 
 $username = $loggedOnUser.Split('\')[-1]
 
-# Resolve user SID — used for accurate User Profile Service event correlation
+# Resolve user SID -- used for accurate User Profile Service event correlation
 $userSID = $null
 try {
     $userSID = ([System.Security.Principal.NTAccount]$loggedOnUser).Translate(
@@ -332,7 +332,7 @@ try {
 
 #region --- Logon timestamp and Session ID (TerminalServices-LocalSessionManager EID 21) ---
 # EID 21  = user logon;  Properties[0] = DOMAIN\user,  Properties[1] = SessionID
-# EID 25  = session reconnect — we check both so a reconnect-triggered run still captures data
+# EID 25  = session reconnect -- we check both so a reconnect-triggered run still captures data
 $tsEvent = Get-DexEvent -LogName 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational' `
     -Id 21, 25 -MaxEvents 100 |
     Where-Object { $_.Properties[0].Value -like "*\$username" } |
@@ -384,7 +384,7 @@ if ($logonTime) {
 #endregion
 
 #region --- Group Policy total duration (EID 4001 start -> EID 8001 finish) ---
-# EID 8001 = "Completed user logon policy processing" — the true end of all GP,
+# EID 8001 = "Completed user logon policy processing" -- the true end of all GP,
 # not just individual CSE completions (EID 5016 which we used before).
 $gpDurationSec  = $null
 $gpStartTime    = $null
@@ -561,8 +561,8 @@ if ($logonTime -and $userSID) {
 
 #region --- AppX / UWP package load duration (AppReadiness EID 209) ---
 # EID 209 fires twice per logon for UWP state transitions:
-#   Start: Properties[1]=2, Properties[2]=0  (From=2 To=0 — packages begin loading)
-#   End:   Properties[1]=1, Properties[2]=2  (From=1 To=2 — packages ready)
+#   Start: Properties[1]=2, Properties[2]=0  (From=2 To=0 -- packages begin loading)
+#   End:   Properties[1]=1, Properties[2]=2  (From=1 To=2 -- packages ready)
 # Properties[0] = User (SID or username). Returns 'N/A' if AppReadiness is absent.
 $appxDurSec = 'N/A'
 
@@ -588,7 +588,7 @@ if ($logonTime -and $userSID) {
 #endregion
 
 #region --- Printer mapping duration (PrintService/Operational EID 300 -> EID 306) ---
-# PrintService/Operational is disabled by default — reports 'LogDisabled' if so.
+# PrintService/Operational is disabled by default -- reports 'LogDisabled' if so.
 # EID 300 = printer connection started, EID 306 = printer connection completed.
 # Records count of connections and total span from first 300 to last 306.
 $printerCount  = 'N/A'
@@ -788,7 +788,7 @@ function Enable-DEXAuditLogs {
     <#
     .SYNOPSIS
         Enables the optional Windows event logs used by Measure-LogonDuration.
-        Safe to run multiple times — already-enabled logs are reported and skipped.
+        Safe to run multiple times -- already-enabled logs are reported and skipped.
     .PARAMETER Force
         Runs even when the completion marker is already set. Used by DeployMode
         ConfigureLogging, where the admin has explicitly asked for the work.

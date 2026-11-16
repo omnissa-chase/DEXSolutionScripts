@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Turns Windows Update back ON and makes the device update now.
 

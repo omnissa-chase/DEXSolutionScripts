@@ -1,4 +1,4 @@
-﻿# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Resolve the currently logged-on interactive user's SID.
 # Win32_ComputerSystem.UserName returns DOMAIN\username (or COMPUTER\username
 # for local accounts) even when this script runs under SYSTEM context.

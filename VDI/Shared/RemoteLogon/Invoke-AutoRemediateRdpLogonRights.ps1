@@ -29,7 +29,7 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateRdpLogonRights.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
@@ -50,7 +50,7 @@ function Invoke-AutoRemediateRdpLogonRights {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param()
 
-$SCRIPT_VERSION = '1.0.0'
+$SCRIPT_VERSION = '1.0.1'
 $RegPath = 'HKLM:\Software\AirWatch\Extensions\VDI\Shared\RemoteLogon\Remediation'
 $LogPath = "$env:SystemRoot\Temp\UEM_AutoRemediateRdpLogonRights.log"
 
@@ -148,7 +148,7 @@ if ($deny -eq 1 -and -not $isHost) {
 }
 
 # -- Discovery: refused remote logons (Security 4625, logon type 10), read once for all steps --
-$Script:Refused = @{}; $Script:RefusedUsers = @{}; $Script:RefusedRead = $false; $Script:Last15B = $null
+$Script:Refused = @{}; $Script:RefusedUsers = @{}; $Script:RefusedLast = @{}; $Script:RefusedRead = $false; $Script:Last15B = $null
 try {
     $since = (Get-Date).AddHours(-$EventLookbackHours).ToUniversalTime().ToString('o')
     $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery('Security', [System.Diagnostics.Eventing.Reader.PathType]::LogName,
@@ -162,13 +162,34 @@ try {
         $st = '0x{0:X8}' -f [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$p[7]), 0)
         $Script:Refused[$st] = 1 + [int]$Script:Refused[$st]
         if ($st -eq '0xC000015B') {
-            $u = [string]$p[5]; if ($u) { $Script:RefusedUsers[$u] = 1 + [int]$Script:RefusedUsers[$u] }
+            $u = [string]$p[5]
+            if ($u) { $Script:RefusedUsers[$u] = 1 + [int]$Script:RefusedUsers[$u]; if (-not $Script:RefusedLast.ContainsKey($u)) { $Script:RefusedLast[$u] = $e.TimeCreated } }
             if (-not $Script:Last15B) { $Script:Last15B = $e.TimeCreated }
         }
     }
     $reader.Dispose(); $Script:RefusedRead = $true
 } catch { Write-Log "Security log not readable: $($_.Exception.Message)" 'WARN' }
 $Script:Count15B = [int]$Script:Refused['0xC000015B']
+
+# -- Discovery: successful remote logons (4624, logon type 10). A user whose refusal was followed
+#    by a successful remote logon is no longer locked out and is not reported as a live problem. --
+$Script:Recovered = @{}
+if ($Script:RefusedLast.Count -gt 0) {
+    try {
+        $q = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery('Security', [System.Diagnostics.Eventing.Reader.PathType]::LogName,
+                "*[System[EventID=4624 and TimeCreated[@SystemTime>='$since']] and EventData[Data[@Name='LogonType']='10']]")
+        $q.ReverseDirection = $true
+        $reader = New-Object System.Diagnostics.Eventing.Reader.EventLogReader($q)
+        $n = 0
+        while ($n -lt 100 -and ($null -ne ($e = $reader.ReadEvent()))) {
+            $n++
+            $u = [string](@($e.Properties | ForEach-Object { $_.Value })[5])
+            if ($u -and $Script:RefusedLast.ContainsKey($u) -and $e.TimeCreated -gt $Script:RefusedLast[$u]) { $Script:Recovered[$u] = 1 }
+        }
+        $reader.Dispose()
+    } catch { Write-Log "Successful remote logons not readable: $($_.Exception.Message)" 'WARN' }
+}
+$Script:StillRefused = @($Script:RefusedUsers.Keys | Where-Object { -not $Script:Recovered.ContainsKey($_) })
 
 # -- Discovery: prior fixes by this script (for the cool-down and the reapply check) --
 $prior = Get-ItemProperty -Path $RegPath -ErrorAction SilentlyContinue
@@ -242,7 +263,9 @@ $Steps = @(
             if ($total -eq 0) { return Res Passed "No refused remote logons in the last $EventLookbackHours h" }
             $parts = @($Script:Refused.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 4 | ForEach-Object {
                 $m = if ($StatusMeaning.ContainsKey($_.Key)) { $StatusMeaning[$_.Key] } else { 'see NTSTATUS' }; "$($_.Value) x $($_.Key) ($m)" })
-            $users = if ($Script:RefusedUsers.Count) { '; refused for rights: ' + (@($Script:RefusedUsers.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 3 | ForEach-Object { "$($_.Key) ($($_.Value))" }) -join ', ') } else { '' }
+            $users = if ($Script:RefusedUsers.Count) { '; refused for rights: ' + (@($Script:RefusedUsers.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 3 | ForEach-Object { "$($_.Key) ($($_.Value)$(if ($Script:Recovered.ContainsKey($_.Key)) { ', has logged on since' }))" }) -join ', ') } else { '' }
+            # Refusals that were all for rights, and whose users have all logged on since, are history, not a live fault.
+            if ($total -eq $Script:Count15B -and $Script:StillRefused.Count -eq 0) { return Res Passed "$total refused remote logon(s) in the last $EventLookbackHours h, all resolved: $($parts -join '; ')$users" }
             return Res Warning "$total refused remote logon(s) in the last $EventLookbackHours h: $($parts -join '; ')$users"
         }
     },
@@ -254,8 +277,9 @@ $Steps = @(
             try { $g = [ADSI]'WinNT://./Remote Desktop Users,group'; $members = @($g.psbase.Invoke('Members') | ForEach-Object { $_.GetType().InvokeMember('Name', 'GetProperty', $null, $_, $null) }) } catch { }
             $list = if ($members.Count) { ($members | Select-Object -First 6) -join ', ' } else { '(empty)' }
             $rightsClean = ($Script:Rights -and @($Script:Rights.Deny | Where-Object { Test-Blocking $_.Sid }).Count -eq 0 -and $Script:MissingAllow.Count -eq 0)
-            if ($Script:Count15B -gt 0 -and $rightsClean -and -not $Script:DenyFixed) {
-                return Res Warning "Logon rights are in order but $($Script:Count15B) remote logon(s) were refused for rights -- the refused user is not in an allowed group. Remote Desktop Users: $list. On an Entra-joined host, grant the Virtual Machine User Login role instead"
+            if ($Script:StillRefused.Count -gt 0 -and $rightsClean -and -not $Script:DenyFixed) {
+                $who = (@($Script:StillRefused | Select-Object -First 3) -join ', ')
+                return Res Warning "Logon rights are in order but $who was refused for rights and has not logged on since -- the user is not in an allowed group. Remote Desktop Users: $list. On an Entra-joined host, grant the Virtual Machine User Login role instead"
             }
             return Res Passed "Remote Desktop Users: $list"
         }

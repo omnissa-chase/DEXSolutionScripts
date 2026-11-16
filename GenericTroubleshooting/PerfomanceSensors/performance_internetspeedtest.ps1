@@ -9,7 +9,7 @@
     Last Modified: 2026-08-11
     Timeout      : One-time / run-once sensor only. Target < 15 s, hard ceiling 30 s (UEM max).
                    MUST NOT be scheduled as a recurring sensor. See
-                   GENERAL-SCRIPTS-SENSORS_RUNBOOK.md §10, "One-Time / Run-Once Sensors".
+                   GENERAL-SCRIPTS-SENSORS_RUNBOOK.md section 10, "One-Time / Run-Once Sensors".
 
     Measures real download/upload throughput against Cloudflare's public speed-test
     endpoints and reports both figures as a single compact JSON string.

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     defender_computerstate_summary -- Detection sensor: reports a summary of Microsoft Defender computer protection state.
 

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Remediates CrowdStrike Falcon sensor services by ensuring they are running and set to Automatic startup.
 

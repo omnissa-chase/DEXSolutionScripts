@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Remediates Trend Micro services by ensuring they are running and that real-time protection is enabled.
 

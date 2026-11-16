@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Signs off user sessions on a managed device. Defaults to all sessions;
     use -CurrentUser to target only the active console user.
@@ -10,7 +10,7 @@
     'query session'.
 
 .EXAMPLE
-    # Sign off ALL active user sessions (default — no switch required)
+    # Sign off ALL active user sessions (default -- no switch required)
     Invoke-Command $SignoffDevice
 
 .EXAMPLE
@@ -33,7 +33,7 @@
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
 
-# ── Main script block ─────────────────────────────────────────────────────────
+# -- Main script block ---------------------------------------------------------
 # Defined as a script block so it can be invoked via Invoke-Command, which
 # surfaces terminating errors cleanly back to the Try/Catch handler below.
 $SignoffDevice = {
@@ -47,7 +47,7 @@ $SignoffDevice = {
         $allSessions = query session 2>&1 |
             Select-String '^\s*(Active|Disc|\S+\s+\S+\s+\d+\s+(Active|Disc))' |
             ForEach-Object {
-                # Normalise variable-width columns → split on 2+ spaces
+                # Normalise variable-width columns -> split on 2+ spaces
                 ($_.ToString().Trim() -replace '\s{2,}', "`t").Split("`t")
             } |
             Where-Object { $_ -match '^\d+$' }   # keep only the ID tokens
@@ -83,7 +83,7 @@ $SignoffDevice = {
 
             foreach ($id in $sorted) {
                 if (-not $WhatIfPreference) {
-                    $label = if ($id -eq $consoleSessionId) { " (console user — last)" } else { "" }
+                    $label = if ($id -eq $consoleSessionId) { " (console user -- last)" } else { "" }
                     Write-Output "Logging off session ID: $id$label"
                     logoff $id
                 } else {
@@ -91,7 +91,7 @@ $SignoffDevice = {
                 }
             }
         }
-        return   # handled above — skip the single-session logoff at the bottom
+        return   # handled above -- skip the single-session logoff at the bottom
     }
     elseif($CurrentUser.IsPresent){
         # Retrieve the username of the user currently at the physical console
@@ -126,7 +126,7 @@ $SignoffDevice = {
 
     # Single-session logoff for the -CurrentUser path
     if (-not $WhatIfPreference) {
-        # Terminate the session — equivalent to "Sign out" in the Start menu
+        # Terminate the session -- equivalent to "Sign out" in the Start menu
         Write-Output "Executing command, 'logoff $SessionPref'"
         logoff $SessionPref
     }
@@ -136,16 +136,16 @@ $SignoffDevice = {
     
 }
 
-# ── Execution & exit-code handling ────────────────────────────────────────────
+# -- Execution & exit-code handling --------------------------------------------
 Try {
     # Invoke the script block and capture any output as a string for logging
     $rslt = Invoke-Command $SignoffDevice | Out-String
     Write-Output $rslt
-    Exit 0  # Success — Workspace ONE marks the command as completed
+    Exit 0  # Success -- Workspace ONE marks the command as completed
 }
 Catch {
     # Surface the exception message for Workspace ONE script output logging
     $rslt = "An error has occured $($_.Exception.Message)"
     Write-Output $rslt
 }
-Exit 1  # Failure — Workspace ONE marks the command as failed
+Exit 1  # Failure -- Workspace ONE marks the command as failed

@@ -22,12 +22,12 @@
     See LICENSE at https://github.com/omnissa-chase/DEXSolutionScripts/blob/main/LICENSE
 #>
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# -- Configuration -------------------------------------------------------------
 
 # Seconds of warning given to a logged-on user before the reboot fires
 $CountdownSeconds = 300   # 5 minutes
 
-# ── Detect logged-on console user ─────────────────────────────────────────────
+# -- Detect logged-on console user ---------------------------------------------
 
 $consoleUser = (Get-WmiObject -Class Win32_ComputerSystem -ErrorAction SilentlyContinue).UserName
 

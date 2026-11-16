@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     CcmCacheResolutionWizard -- Reclaim space from the Configuration Manager client cache.
 

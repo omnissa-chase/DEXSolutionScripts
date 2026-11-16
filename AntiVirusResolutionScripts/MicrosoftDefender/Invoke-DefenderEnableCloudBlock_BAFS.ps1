@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Invoke-DefenderEnableCloudBlock_BAFS -- Enables Microsoft Defender cloud protection and Block-at-First-Sight.
 

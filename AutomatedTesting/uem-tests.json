@@ -404,6 +404,47 @@
     "match": "^\\{\"Schema\":1,\"At\":\"[^\"]*\",.*\"SafeMb\":-?\\d+,\"Safe\":\\{.*\\},\"Own\":\\{.*\\},\"Rep\":\\{.*\\},\"Top\":\"[A-Za-z]+\".*\"TO\":(true|false)\\}$",
     "note": "One-time JSON sensor (new 2026-11-13); 459 characters non-elevated on CBRADLEYSWIN11. Cached figures are -1 until the collector has run."
   },
+  "Clear-CrashDumps.ps1": {
+    "variables": { "WhatIf": "true" },
+    "timeoutMinutes": 6,
+    "note": "No input (new 2026-11-13, 1.0.0). Run with WhatIf: Completed proves the enumeration under Hub as SYSTEM and writes CrashDumpMb and LastCrashDumpWouldFreeMb to HKLM\\Software\\AirWatch\\Extensions\\DiskState. A live run would delete the lab devices' own dumps; the break test covers deletion."
+  },
+  "Clear-PreviousWindowsInstall.ps1": {
+    "variables": { "WhatIf": "true" },
+    "timeoutMinutes": 6,
+    "note": "No input (new 2026-11-13, 1.0.0). The lab devices have no Windows.old, so this proves the nothing-to-do path under Hub (PreviousWindowsMb 0 in the cache). WhatIf is set in case a device has taken a feature update since."
+  },
+  "disk_crashdump_mb.ps1": {
+    "match": "^-?\\d+$",
+    "note": "Integer; -1 until Invoke-DiskStateCollection.ps1 or Clear-CrashDumps.ps1 has run on the device."
+  },
+  "disk_previous_windows_mb.ps1": {
+    "match": "^-?\\d+$",
+    "note": "Integer; 0 when there is no previous installation; -1 until the collector or Clear-PreviousWindowsInstall.ps1 has run."
+  },
+  "Invoke-ComponentStoreAnalysis.ps1": {
+    "expect": "Completed",
+    "timeoutMinutes": 8,
+    "note": "No input (new 2026-11-13, 1.0.0). Starts a real DISM analysis detached and waits up to 100 s; Completed either way. Read only. Run it before disk_component_store_reclaimable_mb and leave ten minutes so the report is there."
+  },
+  "Start-ComponentStoreCleanup.ps1": {
+    "variables": { "WhatIf": "true" },
+    "timeoutMinutes": 6,
+    "note": "No input (new 2026-11-13, 1.0.0). WhatIf: proves the guards and the report read under Hub as SYSTEM without starting a 5 to 40 minute cleanup on the lab devices. The break test covers the real cleanup."
+  },
+  "Clear-ShadowCopies.ps1": {
+    "variables": { "WhatIf": "true" },
+    "timeoutMinutes": 6,
+    "note": "No input (new 2026-11-13, 1.0.0). WhatIf: lists the restore points it would delete and writes ShadowCopyMb. A live run would delete the lab devices' restore points; the break test covers deletion."
+  },
+  "disk_component_store_reclaimable_mb.ps1": {
+    "match": "^-?\\d+$",
+    "note": "Integer; -1 until a DISM analysis has finished on the device."
+  },
+  "disk_shadowcopy_mb.ps1": {
+    "match": "^-?\\d+$",
+    "note": "Integer; 0 when there are no shadow copies; -1 until the collector or Clear-ShadowCopies.ps1 has run."
+  },
   "app_cache_health.ps1": {
     "match": "^\\{\"Schema\":1,\"User\":\"[^\"]*\",.*\"TotalMb\":\\d+,\"Over\":\\[.*\\],\"Apps\":\\{.*\\},\"TO\":(true|false)\\}$",
     "note": "One-time JSON sensor across every Clear-<App>Cache product; under 1 KB by construction (168 to 700 bytes on CBRADLEYSWIN11, 2026-11-12)."

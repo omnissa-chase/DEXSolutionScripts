@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     SCOMClonedIdentityResolutionWizard -- Re-register an agent whose identity came from a golden image. DESTRUCTIVE.

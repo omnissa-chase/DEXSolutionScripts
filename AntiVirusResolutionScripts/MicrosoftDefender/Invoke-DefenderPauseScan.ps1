@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Invoke-DefenderPauseScan -- Cancels any active Microsoft Defender antivirus scan.
 

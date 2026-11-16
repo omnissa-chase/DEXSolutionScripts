@@ -1,4 +1,4 @@
-﻿# ScriptName: Defender_FullScan_1.0.3.3
+# ScriptName: Defender_FullScan_1.0.3.3
 # Context: System
 #
 # 1.0.3.2 (2026-10-28): $healthDetectionPath was only assigned in the "no monitoring task"

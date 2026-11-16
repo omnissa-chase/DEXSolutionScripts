@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
     SCOMHealthServiceCacheResolutionWizard -- Flush the Operations Manager agent state cache. DESTRUCTIVE.

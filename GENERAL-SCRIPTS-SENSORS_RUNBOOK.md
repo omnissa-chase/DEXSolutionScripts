@@ -431,6 +431,7 @@ Scripts are delivered and executed by Workspace ONE Hub or Freestyle Orchestrato
 13. Scripts MUST NOT **use `Get-ChildItem` to calculate disk space**. See [§18](#18-measuring-disk-space).
 14. Scripts SHOULD **hard-code tunables** rather than exposing UEM variables. See [§9](#9-script-variables--current-uem-limitations).
 15. Scripts and sensors intended to run on consoles **before UEM 2607** MUST **fit the 32,767-character script size limit**, and SHOULD stay under the 30,000-character planning ceiling. See [Script Size Limit (pre-2607 compatibility)](#script-size-limit-pre-2607-compatibility) below.
+16. Scripts and sensors MUST be saved as **UTF-8 without a byte-order mark and ASCII only**. A BOM that reaches Hub as text becomes U+FEFF before the first token, so `<#` or `#Requires` stops being a comment and the script fails to parse before line 1 runs, on 5.1 and 7 alike (ADEX-548; the UEM connector strips the BOM on upload, so a connector pass does not prove this). ASCII only, because a file without a BOM that holds non-ASCII text is read as ANSI by 5.1 when run from disk: write `--` for a dash, `-` for a rule line, `->` for an arrow. Check with `AutomatedTesting\Tools\Test-ScriptEncoding.ps1` before publishing; it exits 1 on either fault and `-Fix` strips a BOM.
 
 ### Script Size Limit (pre-2607 compatibility)
 
@@ -1447,6 +1448,7 @@ The agent MUST NOT generate these patterns.
 - [ ] Caches expensive results to registry for sensor consumption
 - [ ] AV exception documented if staging to `ProgramData\AirWatch\Extensions`
 - [ ] Measured under 30,000 characters (`(Get-Content -Raw).Length`) while pre-2607 compatibility applies; 32,767 is that hard limit, split by step order if over
+- [ ] No byte-order mark and ASCII only (`AutomatedTesting\Tools\Test-ScriptEncoding.ps1`, rule 16)
 
 ### Additionally, For Async Scripts
 
@@ -1475,6 +1477,7 @@ The agent MUST NOT generate these patterns.
 - [ ] Reads from a script-written cache when data is expensive
 - [ ] Considered an event trigger instead of interval polling
 - [ ] Measured under 30,000 characters while pre-2607 compatibility applies; the 32,767 limit covers sensors too (one-time JSON sensors run closest to it)
+- [ ] No byte-order mark and ASCII only (`AutomatedTesting\Tools\Test-ScriptEncoding.ps1`, rule 16)
 
 ---
 

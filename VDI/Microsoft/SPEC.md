@@ -1,6 +1,6 @@
 # AVD Session Host and Windows App Troubleshooter -- Build Contract
 
-**Spec revision:** 1 (2026-11-10). **Design:** `VDI/DESIGN.md` sections 1, 2, 5.
+**Spec revision:** 2 (2026-11-12). **Design:** `VDI/DESIGN.md` sections 1, 2, 5.
 **Scope:** the Azure Virtual Desktop session host (agent, boot loader, side-by-side stack,
 Geneva monitoring task, RDP transport) and the Microsoft endpoint client (Windows App,
 with the out-of-support Remote Desktop client `msrdc` detected as legacy). Windows 365
@@ -107,7 +107,7 @@ replaces the candidate list in the named variable only and records
 | KB-AVD-07 | Broker health endpoint and its success text | `<BrokerResourceIdURI>/api/health` and `<BrokerResourceIdURIGlobal>/api/health` return HTTP 200 with body containing `RD Broker is Healthy` | `$BrokerHealthPath`, `$BrokerHealthyText` | host collector, Part2 step 8, one-time sensor | troubleshoot-agent INVALID_FORM section | Public |
 | KB-AVD-08 | IMDS probe | `http://169.254.169.254/metadata/instance?api-version=2021-02-01`, header `Metadata: true`, no proxy, 2 s; parse `compute.azEnvironment`, `compute.vmSize`, `compute.name`, `compute.location` | `$ImdsUrl`, `$ImdsApiVersion` | host collector, Part2 step 9, one-time sensor, persistence (KB-AVD-14) | any Azure VM | Public (IMDS doc; the MetaDataServiceCheck remedy names 169.254.169.254) |
 | KB-AVD-09 | Agent event providers and the IDs with meaning | Application log, providers `WVD-Agent`, `WVD-Agent-Updater`, `RDAgentBootLoader`, `MsiInstaller` (errors only); ID map: `3277` install/update/registration failure (message tokens `INVALID_REGISTRATION_TOKEN`, `EXPIRED_MACHINE_TOKEN`, `INVALID_FORM`, `ENDPOINT_NOT_FOUND`, `NAME_ALREADY_REGISTERED`, `InstallMsiException`, `DownloadMsiException`, `InstallationHealthCheckFailedException`), `3019` web-socket transport URLs unreachable, `3703` gateway URL not accessible, `3389` update reverted (`MissingMethodException`, .NET below 4.7.2), `3701`/`3702` FQDN lists (informational); System log `7000`/`7011` for `RDAgentBootLoader` start timeouts | `$AgentEventProviders`, `$AgentEventIdMeanings`, `$RegistrationFailureTokens` | host collector, Part1 step 7, Part2 step 13, one-time sensor, runbook | troubleshoot-agent doc; a host with a known failure | Public for the IDs and tokens listed; the full provider event catalogue Unverified |
-| KB-AVD-10 | Health-check outcomes as the agent reports them locally | **not readable locally in the public build**: the agent reports `DomainJoinedCheck`, `DomainTrustCheck`, `SxSStackListenerCheck`, `UrlsAccessibleCheck`, `MonitoringAgentCheck`, `MetaDataServiceCheck`, `AppAttachHealthCheck`, `WebRTCRedirectorCheck`, `SupportedEncryptionCheck`, `FSLogixHealthCheck` to the broker; no documented registry or event carries the per-check result. The collector **re-derives** the first six itself (section 9.1) and leaves `HealthCheckSource = Derived` | `$HealthCheckSource`, `$HealthCheckEventIds` (empty) | host collector, one-time sensor | find a local artifact (registry under `RDInfraAgent`, or a WVD-Agent event) that lists the check names with pass/fail | Unverified |
+| KB-AVD-10 | Health-check outcomes as the agent reports them locally | **not readable locally in the public build**: the agent reports `DomainJoinedCheck`, `DomainTrustCheck`, `SxSStackListenerCheck`, `UrlsAccessibleCheck`, `MonitoringAgentCheck`, `MetaDataServiceCheck`, `AppAttachHealthCheck`, `WebRTCRedirectorCheck`, `SupportedEncryptionCheck`, `FSLogixHealthCheck` to the broker; no documented registry or event carries the per-check result. The collector **re-derives** the first six itself (section 9.1) and leaves `HealthCheckSource = Derived` | `$HealthCheckSource`, `$HealthCheckEventIds` (empty) | host collector, one-time sensor | find a local artifact (registry under `RDInfraAgent`, or a WVD-Agent event) that lists the check names with pass/fail | Public (lab host, 2026-11-12). **Superseded by section 3.2:** the results are in `RDInfraAgent\HealthCheckReport`; re-deriving is the fallback only |
 | KB-AVD-11 | RDP transport per session (Shortpath vs TCP) | `Microsoft-Windows-RemoteDesktopServices-RdpCoreCDV/Operational` event **135**, message `The multi-transport connection finished for tunnel: 1, its transport type set to UDP` (or `TCP`, with a reason such as `UDP Handshake Timeout`); newest per session in the last 24 h | `$TransportLogName`, `$TransportEventId` (135), `$TransportRegex` (`transport type set to (UDP\|TCP)`) | host collector, Part2 step 10, one-time sensor | configure-rdp-shortpath doc "Verify" tab | Public (documented); per-session correlation Unverified |
 | KB-AVD-12 | Transport policy values | `HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services\SelectTransport` (`1` = TCP only, `2` = UDP and TCP, absent = default UDP on); managed-network listener `fUseUdpPortRedirector = 1` with `UdpPortNumber` (default `3390`) under the same policy key; per-type Shortpath disables (NAT traversal / Relay) value names unknown | `$TransportPolicyKey`, `$SelectTransportValue`, `$ShortpathListenerValues`, `$ShortpathTypeValues` (empty) | host collector, Part2 step 10, one-time sensor | configure-rdp-shortpath doc confirms `SelectTransport`; the listener values come from the AVD ADMX and need a host with the policy applied | Public for `SelectTransport`; Unverified for the listener and per-type values |
 | KB-AVD-13 | Network quality counters | `\RemoteFX Network(<instance>)\Current UDP RTT`, `Current TCP RTT`, `Current UDP Bandwidth`, `Loss Rate`; `\User Input Delay per Session(<instance>)\Max Input Delay`; one instance per session suffixed with the session number, no `_Total`; `Max Input Delay` is enabled by default on Windows 10 1809+ / Server 2019+ | `$NetworkCounterSet`, `$NetworkCounterNames`, `$InputDelayCounter` | host collector, Part2 step 10, one-time sensor | `Get-Counter -ListSet 'RemoteFX Network','User Input Delay per Session'` | Public (Insights glossary, RemoteFX counter doc); instance naming Unverified on multi-session |
@@ -174,6 +174,55 @@ Second probe, same day (3 of 3 passed, `test-result-avd-kbprobe2.json`):
   `Marketplace`, and a `BrokerURI` value exists alongside the two `BrokerResourceIdURI*`
   values (regional host without the tenant GUID prefix).
 
+### 3.2 Lab findings, 2026-11-12 (`avdpersonal-1`, live outage and the probes run during it)
+
+**KB-AVD-10 is settled: the agent's per-check results are readable locally.** Status
+moves from `Unverified` to `Public` (lab host).
+
+- `HKLM:\SOFTWARE\Microsoft\RDInfraAgent\HealthCheckReport` holds two string values.
+  `AgentHealthCheckReport` is a JSON object with one property per check (names end in
+  `HealthCheck` or `Check`). Each property carries `HealthCheckResult` (`1` = passed,
+  `8` = not applicable on this host; any other value is a check that is not passing) and
+  `AdditionalFailureDetails` with `ErrorCode`, `Message` and `LastHealthCheckInUTC`.
+  `AgentHealthCheckTimestamp` is the UTC time of the report in `M/d/yyyy h:mm:ss tt`
+  form; emit it as ISO 8601 with a `Z` suffix.
+- The host collector MUST read this report first and set `HealthCheckSource = Agent`.
+  It falls back to re-deriving the six checks (section 9.1, `HealthCheckSource =
+  Derived`) only when the key or value is missing, the JSON does not parse, or the
+  timestamp is older than `HealthReportStaleMinutes` (60).
+- Result codes other than `1` and `8` are not catalogued yet. Treat every other value
+  as "not passing" and record the number; do not map it to a name.
+
+**A host can be Available with every check passing and still refuse every logon.** The
+outage on this host was not an agent fault:
+
+- Evidence chain: `TerminalServices-RemoteConnectionManager/Operational` event `1149`
+  ("User authentication succeeded"), then Security event `4625` with logon type `10` and
+  status `0xC000015B` (the user has not been granted the requested logon type).
+- Cause: the user right `SeDenyRemoteInteractiveLogonRight` contained `*S-1-5-113`
+  (Local account), written by a Workspace ONE security baseline. Baselines tattoo: the
+  entry stayed after the baseline was removed.
+- Logon rights are readable without launching a process. Each
+  `HKLM:\SECURITY\Policy\Accounts\<SID>\ActSysAc` default value is a 4-byte bitmask:
+  `0x400` allow remote interactive logon, `0x800` deny remote interactive logon. SYSTEM
+  can read the key (confirmed through UEM, run `f009a6`); administrators cannot.
+- The fix and the triage sensor are platform-neutral and live in
+  `VDI/Shared/RemoteLogon/` (`Invoke-AutoRemediateRdpLogonRights.ps1`,
+  `OneTimeSensor/rdp_logon_health.ps1`). The AVD scripts MUST NOT duplicate the fix.
+
+Contract changes that follow (applied in sections 5.1 and 7.3 at rev 2):
+
+- Host collector: read the deny and allow bitmasks, and count Security `4625` logon type
+  `10` events in the last 24 hours by status code. New cache values `LogonDenyEntries`
+  (String, comma-separated labels, `''` when clean), `RefusedLogons24h` (DWORD) and
+  `RefusedForRights24h` (DWORD, status `0xC000015B`).
+- New deduction row 26 `LogonDeniedByRight` and NextStep row pointing at the shared
+  remediation.
+- Other probe facts from the same day: events `3389` and `3019` appear on a healthy host
+  as routine informational entries and MUST be filtered by level, not counted by ID;
+  `ProductName` reads `Windows 10 Enterprise` on Windows 11, so SKU checks use
+  `EditionID`; `User Input Delay per Session` instances are session ids plus `Max`.
+
 ---
 
 ## 4. Registry contract
@@ -212,8 +261,10 @@ capped at `MaxSessionsCached` (50).
 | `ImdsReachable` | String | `1`/`0`/`-1` |
 | `ImdsVmSize`, `ImdsLocation`, `ImdsEnvironment` | String | |
 | `DerivedStatus` | String | `Available`, `NeedsAssistance`, `Unavailable`, `NotRegistered`, `Unknown` (section 5.3) |
-| `HealthCheckFailures` | String | `;`-joined derived check names, e.g. `UrlsAccessibleCheck;MonitoringAgentCheck` |
-| `HealthCheckSource` | String | `Derived` (KB-AVD-10) |
+| `HealthCheckFailures` | String | `;`-joined names of checks that are not passing, e.g. `UrlsAccessibleCheck;MonitoringAgentCheck`; with `HealthCheckSource = Agent` each name carries its result code (`UrlsAccessibleCheck:3`) |
+| `HealthCheckSource`, `HealthReportAt` | String | `Agent` when read from the agent report (section 3.2), `Derived` when re-derived; `HealthReportAt` is the report time in ISO 8601 UTC, `''` when derived |
+| `LogonDenyEntries` | String | population-wide entries in the deny-remote-logon right, comma-separated labels (`LocalAccount`, `Everyone`, ...), `''` when clean (section 3.2) |
+| `RefusedLogons24h`, `RefusedForRights24h` | DWORD | Security 4625 logon type 10 in the last 24 h: all statuses, and status `0xC000015B` |
 | `SelectTransportPolicy` | String | `-1` absent, else the value |
 | `ShortpathListenerEnabled`, `ShortpathListenerPort` | String | KB-AVD-12 |
 | `ShortpathFirewallRuleOk` | String | `1`/`0`/`-2` (not applicable when the listener is off) |
@@ -308,6 +359,7 @@ points; ties broken by table order. A metric that is `-1` never deducts.
 | 23 | `BootLoaderStartTimeouts` | 5 | `BootLoaderStartTimeouts24h > 0` | yes |
 | 24 | `DotNetBelow472` | 5 | `DotNetRelease < 461808` (agent updates revert) | yes |
 | 25 | `ShortpathRuleMissing` | 5 | `ShortpathListenerEnabled = 1` and `ShortpathFirewallRuleOk = 0` | yes |
+| 26 | `LogonDeniedByRight` | 40 | `LogonDenyEntries` non-empty: the deny-remote-logon right holds a population-wide entry (section 3.2). The agent reports the host Available throughout | yes |
 | | `Healthy` | 0 | no deductions | |
 | | `NotInstalled` | score `-1` | guard path | |
 | | `CollectionError` | score `-1` | unhandled exception; `LastRun` not advanced | |
@@ -315,7 +367,7 @@ points; ties broken by table order. A metric that is `-1` never deducts.
 `NotRegistered` and `RegistrationFailing` are mutually exclusive by condition.
 `BrokerUnreachable` and `RequiredUrlsUnreachable` may both fire (the broker host is
 excluded from the second). The internal build MUST keep every row and MAY add rows
-numbered 26+ once KB-AVD-10 settles (e.g. `AppAttachUnhealthy`, `FsLogixUnhealthy` from
+numbered 27+ now that KB-AVD-10 is settled (e.g. `AppAttachUnhealthy`, `FsLogixUnhealthy` from
 the agent's own check results).
 
 ### 5.2 Client deductions
@@ -480,6 +532,7 @@ to its first row; `LastSrv` to `''`; `Log` to `''`; `Detail` to `''`.
 | `TeamsRedirectorStopped` | `AUTO` | `Part2 step 11` |
 | `StaleDisconnectedSessions` | `AUTO` | `Part2 step 12 (opt-in)` |
 | `AgentErrorsElevated`, `BootLoaderStartTimeouts`, `LowDiskSpace`, `DotNetBelow472` | `ADMIN` | `Part2 step 13; Runbook phase 6` |
+| `LogonDeniedByRight` | `AUTO` | `VDI/Shared/RemoteLogon/Invoke-AutoRemediateRdpLogonRights.ps1 step 1 with ConfirmHighImpact; unassign the baseline or GPO first` |
 | `EndpointUnresolvable` | `AUTO` | `Invoke-AutoRemediateMicrosoftRdClient.ps1 step 1` |
 | `EndpointUnreachable443` | `ADMIN` | `proxy / firewall for *.wvd.microsoft.com and windows.cloud.microsoft; run Invoke-AutoRemediateNetworkStack.ps1 first` |
 | `RepeatedConnectFailures` | `USER` | `Runbook-AVD-Client.md phase 3` |
@@ -722,3 +775,9 @@ in the same change.
   levers are named outbound block rules, never hosts-file edits. Conventions inherited
   from the 2026-11-05 learnings: no `Get-WinEvent`, 5.1 floor, Schema 2 compact JSON
   under 1,000 bytes, size limit binding.
+- **Rev 2, 2026-11-12.** Section 3.2 added from the live outage on `avdpersonal-1`.
+  KB-AVD-10 settled: the collector reads the agent's own check results from
+  `RDInfraAgent\HealthCheckReport` and re-derives only as a fallback. Deduction row 26
+  `LogonDeniedByRight` and its NextStep row added; three cache values added for logon
+  rights and refused logons. The fix itself is the shared component
+  `VDI/Shared/RemoteLogon/` and is not duplicated in the AVD scripts.

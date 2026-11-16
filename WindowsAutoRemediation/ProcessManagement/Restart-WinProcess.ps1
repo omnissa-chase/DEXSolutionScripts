@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Force-stops every process whose file description contains the given text, and
     optionally relaunches it from its original executable path.

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     WMIRepositoryResolutionWizard -- Salvage a corrupt WMI repository. DESTRUCTIVE-ADJACENT.
 
