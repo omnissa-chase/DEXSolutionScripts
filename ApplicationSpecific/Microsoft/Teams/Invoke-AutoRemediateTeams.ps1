@@ -44,11 +44,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateTeams.ps1
-    Version      : 1.0.3
+    Version      : 1.0.4
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (1.0.3: step 6 returns Warning instead of Failed while
+    Last Modified: 2026-11-16 (1.0.4: a repaired step no longer counts in the Failed total, so the run that repairs something no longer reports it as a failure; runbook section 7). Was: 2026-11-05 (1.0.3: step 6 returns Warning instead of Failed while
                    AllowDestructiveActions is off, so a broken package no longer records
                    "[Remediated]" and exit 1 for a re-registration the script declined to
                    run; the gate is now ResolveOnWarning like the other gated steps.
@@ -411,7 +411,8 @@ foreach ($step in $activeSteps) {
 # lone Failed step would otherwise yield $null here and the script would exit 0.
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"

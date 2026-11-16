@@ -40,11 +40,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateFSLogixExclusions.ps1
-    Version      : 1.0.2
+    Version      : 1.0.3
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-02 (1.0.2: header and $SCRIPT_VERSION now agree; per-step
+    Last Modified: 2026-11-16 (1.0.3: a repaired step no longer counts in the Failed total, so the run that repairs something no longer reports it as a failure; runbook section 7). Was: 2026-11-02 (1.0.2: header and $SCRIPT_VERSION now agree; per-step
                    results are also written to the DEXRecords registry key like the
                    rest of the family, so a runbook can tell which step failed. The
                    summary counters under Extensions\FSLogix\Remediation are
@@ -67,7 +67,7 @@ function Invoke-AutoRemediateFSLogixExclusions {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param()
 
-$SCRIPT_VERSION = "1.0.2"
+$SCRIPT_VERSION = "1.0.3"
 $RegPath        = "HKLM:\Software\AirWatch\Extensions\FSLogix\Remediation"
 $DexRecordsPath = "HKLM:\Software\AirWatch\Extension\DEXRecords\WindowsLogon\FSLogixExclusions"
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateFSLogixExclusions.log"
@@ -283,7 +283,8 @@ foreach ($step in $activeSteps) {
 # lone Failed step would otherwise yield $null here and the script would exit 0.
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 $remErrs  = @($results | Where-Object { $_.RemError }).Count
 

@@ -1454,6 +1454,7 @@ The agent MUST NOT generate these patterns.
 | Staging to `ProgramData\AirWatch\Extensions` without documenting the AV exception | Payload quarantined; task "succeeds" doing nothing | State the exclusion requirement in the deliverable |
 | PowerShell 7 syntax in a PS5 script | Incompatible syntax or module failures | Target PS5 unless explicitly confirmed |
 | `Get-WinEvent` in a script or sensor | Throws "Cannot marshal 'parameter #8'" under Hub's embedded 7.2 engine; the step or sensor fails on every device | .NET `EventLogReader` with an explicit log name and XPath ([§2](#2-runtime-target)) |
+| `Import-Module CimCmdlets` by name | Under the Hub's PowerShell 7 engine the name resolves to the Windows PowerShell copy and loads it through the compatibility session; every CIM call then returns deserialized objects (arrays come back as `ArrayList`), and module code that trusts them breaks (`Get-BitLockerVolume` throws "Could not compare 0 to 38 38") | Never import CimCmdlets explicitly; it is built into both engines and auto-loads on first use |
 | `[Environment]::OSVersion` for an OS build gate | A host without a Windows 8.1/10 app manifest is told build 9200; the Hub engine on an AVD session host is one, so the script exits "unsupported OS" on every run there | `CurrentBuildNumber` under `HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion`, or `Win32_OperatingSystem.BuildNumber` |
 
 ---
@@ -1466,6 +1467,7 @@ The agent MUST NOT generate these patterns.
 - [ ] No third-party modules or packages
 - [ ] No `Get-WinEvent`; event logs read through the .NET `EventLogReader` ([§2](#2-runtime-target))
 - [ ] OS build read from the registry or `Win32_OperatingSystem`, never `[Environment]::OSVersion` (§19)
+- [ ] Summary counts a `Failed` step as a failure only when its remediation did not run or threw; a repaired step exits 0 (§7 Engine Contract)
 - [ ] Runs as SYSTEM (or specified context)
 - [ ] Completes within 30 s (60 s absolute ceiling) or dispatches asynchronously
 - [ ] `[CmdletBinding(SupportsShouldProcess=$true)]` with the `$env:WhatIf` bridge, defaulting to `$false`

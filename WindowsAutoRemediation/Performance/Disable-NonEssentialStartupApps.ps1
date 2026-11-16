@@ -36,11 +36,11 @@
 
 .NOTES
     Script Name  : Disable-NonEssentialStartupApps.ps1
-    Version      : 2.0.0
+    Version      : 2.0.1
     Architecture : Any (x86/x64/ARM64)
     Context      : System (works on the console user's hive) or User
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-06
+    Last Modified: 2026-11-16 (2.0.1: a repaired step no longer counts in the Failed total, so the run that repairs something no longer reports it as a failure; runbook section 7). Was: 2026-11-06
     Timeout      : 60 seconds
 
     Script variables (UEM environment variables), all optional:
@@ -66,7 +66,7 @@
 #>
 
 $ErrorActionPreference = 'Stop'
-$SCRIPT_VERSION  = '2.0.0'
+$SCRIPT_VERSION  = '2.0.1'
 $LookbackDays    = 14
 $SlowThresholdMs = 10000
 if ("$env:SlowThresholdMs" -match '^\d{3,6}$') { $SlowThresholdMs = [int]$env:SlowThresholdMs }
@@ -350,7 +350,8 @@ foreach ($step in ($Steps | Sort-Object { [int]$_.Order })) {
 
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 $changed  = @($userEntries | Where-Object { $_.Changed }).Count
 Write-Output "`r`n----------------------------------------------------------------"

@@ -68,14 +68,14 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateLogonTaskContention.ps1
-    Version      : 1.0.3 (2026-11-05: full ISO 8601 duration parser, days and fractions included, and an
+    Version      : 1.0.4 (2026-11-05: full ISO 8601 duration parser, days and fractions included, and an
                    unreadable delay is left alone instead of being read as 0 and shortened; disabled logon
                    triggers are neither counted nor rewritten; tasks under a stored-password principal are
                    reported instead of failing Set-ScheduledTask on every run)
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-02 (1.0.2: header and $SCRIPT_VERSION now agree; per-step
+    Last Modified: 2026-11-16 (1.0.4: a repaired step no longer counts in the Failed total, so the run that repairs something no longer reports it as a failure; runbook section 7). Was: 2026-11-02 (1.0.2: header and $SCRIPT_VERSION now agree; per-step
                    results are also written to the DEXRecords registry key like the
                    rest of the family, so a runbook can tell which step warned. The
                    summary counters under Extensions\LogonTaskContention\Remediation
@@ -120,7 +120,7 @@ param(
     )
 )
 
-$SCRIPT_VERSION = "1.0.3"
+$SCRIPT_VERSION = "1.0.4"
 $RegPath        = "HKLM:\Software\AirWatch\Extensions\LogonTaskContention\Remediation"
 $DexRecordsPath = "HKLM:\Software\AirWatch\Extension\DEXRecords\WindowsLogon\LogonTaskContention"
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateLogonTaskContention.log"
@@ -382,7 +382,8 @@ foreach ($step in $activeSteps) {
 # lone Failed step would otherwise yield $null here and the script would exit 0.
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 $remErrs  = @($results | Where-Object { $_.RemError }).Count
 

@@ -29,11 +29,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateRdpLogonRights.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-12
+    Last Modified: 2026-11-16 (1.0.2: a repaired step no longer counts in the Failed total, so the run that repairs something no longer reports it as a failure; runbook section 7). Was: 2026-11-12
     Timeout      : 30 seconds (deploy with a 60 second UEM timeout)
 
     Environment variables:
@@ -50,7 +50,7 @@ function Invoke-AutoRemediateRdpLogonRights {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param()
 
-$SCRIPT_VERSION = '1.0.1'
+$SCRIPT_VERSION = '1.0.2'
 $RegPath = 'HKLM:\Software\AirWatch\Extensions\VDI\Shared\RemoteLogon\Remediation'
 $LogPath = "$env:SystemRoot\Temp\UEM_AutoRemediateRdpLogonRights.log"
 
@@ -318,7 +318,8 @@ foreach ($step in $activeSteps) {
 
 $passed = @($results | Where-Object { $_.Status -eq 'Passed' }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed = @($results | Where-Object { $_.Status -eq 'Failed' }).Count
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 $remErrors = @($results | Where-Object { $_.RemError }).Count
 $unfixed = @($results | Where-Object { $_.Status -eq 'Failed' -and -not $_.Remediated }).Count

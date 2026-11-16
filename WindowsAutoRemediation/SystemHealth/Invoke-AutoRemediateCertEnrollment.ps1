@@ -53,11 +53,13 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateCertEnrollment.ps1
-    Version      : 1.0.1
+    Version      : 1.0.3
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-03 (1.0.1: scheduled tasks are read, enabled and started
+    Last Modified: 2026-11-16 (1.0.3: no explicit CimCmdlets import, which the PowerShell 7 Hub
+                   engine turned into a compatibility-session proxy, 13.2.mm; 1.0.2: a repaired
+                   step no longer counts in the Failed total, runbook section 7). Was: 2026-11-03 (1.0.1: scheduled tasks are read, enabled and started
                    through the Task Scheduler COM API; Get-ScheduledTask cost 5 s per
                    call on the lab host and pushed the run past its budget)
     Timeout      : 30 seconds
@@ -98,15 +100,15 @@ param(
     )
 )
 
-$SCRIPT_VERSION = "1.0.1"
+$SCRIPT_VERSION = "1.0.3"
 $RegPath        = "HKLM:\Software\AirWatch\Extensions\CertEnrollment\Remediation"
 $DexRecordsPath = "HKLM:\Software\AirWatch\Extension\DEXRecords\SystemHealth\CertEnrollment"
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateCertEnrollment.log"
 $AeTaskPath     = '\Microsoft\Windows\CertificateServicesClient\'
 
-# Modules are loaded before the WhatIf bridge: auto-loading them afterwards makes
-# PowerShell print a "What if: Set Alias" line for every alias they define.
-Import-Module CimCmdlets -ErrorAction SilentlyContinue
+# CimCmdlets is not imported by name: under the Hub's PowerShell 7 engine that loads the
+# Windows PowerShell copy through the compatibility session and CIM calls return
+# deserialized objects (13.2.mm). It auto-loads on first use in both engines.
 
 # -- WhatIf bridge -------------------------------------------------------------
 $WhatIfPreference = $false
@@ -403,7 +405,8 @@ foreach ($step in $activeSteps) {
 # -- Summary -----------------------------------------------------------------
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 $remErrs  = @($results | Where-Object { $_.RemError }).Count
 

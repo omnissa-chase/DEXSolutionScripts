@@ -31,11 +31,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateSCOMAgentPart3.ps1
-    Version      : 1.1.1 (2026-10-28: Get-Cached accepts the decimal metric strings Part 2 writes; previously they read as -1 and their deductions never applied)
+    Version      : 1.1.2 (2026-10-28: Get-Cached accepts the decimal metric strings Part 2 writes; previously they read as -1 and their deductions never applied)
     Architecture : x64
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-25
+    Last Modified: 2026-11-16 (1.1.2: a repaired step no longer counts in the Failed total, so the run that repairs something no longer reports it as a failure; runbook section 7). Was: 2026-08-25
     Timeout      : 20 seconds (deploy with a 60 second UEM timeout)
 
     Environment variables:
@@ -51,7 +51,7 @@ function Invoke-AutoRemediateSCOMAgentPart3 {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param()
 
-$SCRIPT_VERSION = '1.1.1'
+$SCRIPT_VERSION = '1.1.2'
 $RegPath        = 'HKLM:\Software\AirWatch\Extensions\SCOM'
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateSCOMAgentPart3.log"
 
@@ -388,7 +388,8 @@ foreach ($step in $activeSteps) {
 # -- Summary --
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"

@@ -73,11 +73,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateProfileBloat.ps1
-    Version      : 1.0.3
+    Version      : 1.0.4
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (1.0.3: step 8 sizes AppData\Roaming with an iterative
+    Last Modified: 2026-11-16 (1.0.4: a repaired step no longer counts in the Failed total, so the run that repairs something no longer reports it as a failure; runbook section 7). Was: 2026-11-05 (1.0.3: step 8 sizes AppData\Roaming with an iterative
                    .NET walk that stops as soon as the warn threshold is reached or a
                    90 s step budget runs out, instead of piping every file through
                    Get-ChildItem; a tree too large to size inside the budget is itself
@@ -137,7 +137,7 @@ param(
     )
 )
 
-$SCRIPT_VERSION = "1.0.3"
+$SCRIPT_VERSION = "1.0.4"
 $RegPath        = "HKLM:\Software\AirWatch\Extensions\ProfileBloat\Remediation"
 $DexRecordsPath = "HKLM:\Software\AirWatch\Extension\DEXRecords\WindowsLogon\ProfileBloat"
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateProfileBloat.log"
@@ -588,7 +588,8 @@ foreach ($step in $activeSteps) {
 # lone Failed step would otherwise yield $null here and the script would exit 0.
 $passed      = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings    = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed      = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed      = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount    = @($results | Where-Object { $_.Remediated }).Count
 $remErrs     = @($results | Where-Object { $_.RemError }).Count
 $reclaimedMB = [math]::Round($script:TotalBytesReclaimed / 1MB, 1)

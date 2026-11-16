@@ -48,18 +48,17 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateOutlook.ps1
-    Version      : 1.1.2
+    Version      : 1.1.3
     Architecture : Any (x86/x64/ARM64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (1.1.2: step 3 reads the Application log through the .NET
-                   EventLogReader; Get-WinEvent fails in every form under Hub's
-                   PowerShell 7.2 engine on ARM64, which left the step inert in
-                   production.)
-                   2026-11-03 (1.1.1: step 3 event filter server-side; unfiltered ran 100+ s.)
+    Last Modified: 2026-11-16 (1.1.3: a repaired step no longer counts in the Failed
+                   total, so a run that repairs something exits 0; runbook section 7)
+                   2026-11-05 (1.1.2: step 3 reads the Application log through the .NET
+                   EventLogReader; Get-WinEvent fails under Hub's PS 7.2 ARM64 engine)
+                   2026-11-03 (1.1.1: step 3 event filter server-side)
                    2026-11-02 (1.1.0: two-tier step 2, deferred close helper, five new
                    inputs. 1.0.2: step 4 UpdatesEnabled=False is a Warning.)
-                   2026-10-28 (1.0.1)
     Timeout      : 60 seconds
 
 .DISCLAIMER
@@ -506,7 +505,7 @@ foreach ($step in $activeSteps) {
 # -- Summary --
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"

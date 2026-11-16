@@ -92,11 +92,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateChrome_BreakTest.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : Administrator (elevated), run as the logged-on user with Chrome closed
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-02
+    Last Modified: 2026-11-16 (1.0.1: ExpectFixed runs also assert that the script exited 0). Was: 2026-11-02
     Reporting    : C:\Temp\FixReport\Invoke-AutoRemediateChrome\
 
 .DISCLAIMER
@@ -776,6 +776,19 @@ try {
             'FalsePass'
         } else {
             'Failed'
+        }
+        # A run whose every break expects a repair must also exit 0: the script's own verdict
+        # is what UEM and the DEX console show, so a repaired component with exit 1 is a failure.
+        $allFixed = (@($state.Breaks | Where-Object { $_.ExpectedOutcome -ne 'ExpectFixed' }).Count -eq 0)
+        if ($failedCount -eq 0 -and $allFixed -and $state.Remediation) {
+            $rcOut = [int]$state.Remediation.ExitCode
+            if ($rcOut -ne 0) {
+                Write-DexStep -Status 'Failed' -Name 'Validate exit code' -Message "script exited $rcOut after repairing every break; expected 0"
+                $state.Validation += @{ Name = 'ExitCode'; Expected = 'exit 0 after every break was repaired'; Actual = "exit $rcOut"; Result = 'Fail' }
+                $state.Overall = 'Failed'
+            } else {
+                Write-DexStep -Status 'Passed' -Name 'Validate exit code' -Message 'script exited 0 after repairing every break'
+            }
         }
 
         Save-DexTestState -State $state

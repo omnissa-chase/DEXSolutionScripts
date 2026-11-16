@@ -72,17 +72,17 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateTimeSync.ps1
-    Version      : 1.0.2
+    Version      : 1.0.4
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-16 (1.0.2: VMware Tools found under either Program Files
-                   folder, or through vmtoolsd when the install has no toolbox;
-                   1.0.1: two-stage resync, 20 s default wait, no false 0 s offset)
-    Timeout      : 60 seconds (worst case: two bounded resync waits of ResyncWaitSeconds)
+    Last Modified: 2026-11-16 (1.0.4: no explicit CimCmdlets import; 1.0.3: a repaired step
+                   is not a failure; 1.0.2: VMware Tools under either Program Files folder
+                   or via vmtoolsd; 1.0.1: two-stage resync, 20 s default wait)
+    Timeout      : 60 seconds (worst case: two bounded resync waits)
 
-    Environment variables: WhatIf=true (dry run; absent or unparseable means live) and
-    one per parameter above, same names. Explicit parameters win over the environment.
+    Environment variables: WhatIf=true (dry run) and one per parameter above, same
+    names. Explicit parameters win over the environment.
 
 .DISCLAIMER
     These scripts are provided "AS IS". It is the administrator's sole responsibility
@@ -124,16 +124,15 @@ param(
     )
 )
 
-$SCRIPT_VERSION = "1.0.1"
+$SCRIPT_VERSION = "1.0.4"
 $RegPath        = "HKLM:\Software\AirWatch\Extensions\TimeSync\Remediation"
 $DexRecordsPath = "HKLM:\Software\AirWatch\Extension\DEXRecords\SystemHealth\TimeSync"
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateTimeSync.log"
 $W32Params      = 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters'
 $W32Config      = 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Config'
 
-# Modules are loaded before the WhatIf bridge: auto-loading them afterwards makes
-# PowerShell print a "What if: Set Alias" line for every alias they define.
-Import-Module CimCmdlets -ErrorAction SilentlyContinue
+# No explicit CimCmdlets import: under PowerShell 7 it loads the Windows PowerShell copy
+# through the compatibility session (13.2.mm); the built-in module auto-loads.
 
 # -- WhatIf bridge -------------------------------------------------------------
 # UEM cannot set $WhatIfPreference directly. Bridge it from an environment
@@ -561,7 +560,7 @@ foreach ($step in $activeSteps) {
 # -- Summary -----------------------------------------------------------------
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 $remErrs  = @($results | Where-Object { $_.RemError }).Count
 

@@ -45,11 +45,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateAccess.ps1
-    Version      : 1.0.3
+    Version      : 1.0.4
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (1.0.3: the COM Add-in Conflict and Office-Disabled Items steps moved to
+    Last Modified: 2026-11-16 (1.0.4: a repaired step no longer counts in the Failed total, so the run that repairs something no longer reports it as a failure; runbook section 7). Was: 2026-11-05 (1.0.3: the COM Add-in Conflict and Office-Disabled Items steps moved to
                    ApplicationSpecific\Microsoft\Office\Invoke-AutoRemediateOfficeAddins.ps1, which covers
                    all six Office applications in one run; step numbering kept (3 and 4 are now gaps); the
                    ReenableDisabledItems input moved with them. 1.0.2: step 3 returns Warning, not Failed, when a crash names
@@ -391,7 +391,8 @@ foreach ($step in $activeSteps) {
 # -- Summary --
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"

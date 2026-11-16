@@ -53,11 +53,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateChrome.ps1
-    Version      : 1.0.3
+    Version      : 1.0.4
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (1.0.3: the per-user candidate in the install fallback was a
+    Last Modified: 2026-11-16 (1.0.4: a repaired step no longer counts in the Failed total, so the run that repairs something no longer reports it as a failure; runbook section 7). Was: 2026-11-05 (1.0.3: the per-user candidate in the install fallback was a
                    bare if inside parentheses, which PowerShell ran as a command named "if";
                    the error aborted the fallback foreach, so a Chrome without an HKLM App
                    Paths entry was reported as not installed. Same defect as Zoom 1.0.1.
@@ -450,7 +450,8 @@ foreach ($step in $activeSteps) {
 # lone Failed step would otherwise yield $null here and the script would exit 0.
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"

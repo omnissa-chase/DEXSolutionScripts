@@ -49,11 +49,16 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateBitLockerProtection.ps1
-    Version      : 1.0.0
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-03
+    Last Modified: 2026-11-16 (1.0.2: CimCmdlets no longer imported by name, which under the
+                   PowerShell 7 Hub engine loaded the Windows PowerShell copy through the
+                   compatibility session and broke Get-BitLockerVolume; when the bulk call
+                   still throws, each volume is queried on its own instead of exiting 1;
+                   1.0.1: a repaired step no longer counts in the Failed total, runbook
+                   section 7). Was: 2026-11-03
     Timeout      : 60 seconds
 
     Environment variables:
@@ -81,14 +86,18 @@ param(
     )
 )
 
-$SCRIPT_VERSION = "1.0.0"
+$SCRIPT_VERSION = "1.0.2"
 $RegPath        = "HKLM:\Software\AirWatch\Extensions\BitLockerProtection\Remediation"
 $DexRecordsPath = "HKLM:\Software\AirWatch\Extension\DEXRecords\SystemHealth\BitLockerProtection"
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateBitLockerProtection.log"
 
-# Modules are loaded before the WhatIf bridge: auto-loading them afterwards makes
-# PowerShell print a "What if: Set Alias" line for every alias they define.
-Import-Module CimCmdlets, BitLocker -DisableNameChecking -ErrorAction SilentlyContinue
+# The BitLocker module is loaded before the WhatIf bridge: auto-loading it afterwards makes
+# PowerShell print a "What if: Set Alias" line for every alias it defines. CimCmdlets is NOT
+# imported by name: under the Hub's PowerShell 7 engine that name resolves to the Windows
+# PowerShell copy and loads it through the compatibility session, after which every CIM call
+# returns deserialized objects and Get-BitLockerVolume throws "Could not compare 0 to 38 38"
+# (13.2.mm). The built-in CimCmdlets auto-loads on first use in both engines.
+Import-Module BitLocker -DisableNameChecking -ErrorAction SilentlyContinue
 
 # -- WhatIf bridge -------------------------------------------------------------
 $WhatIfPreference = $false
@@ -121,9 +130,20 @@ if (-not (Get-Command -Name Get-BitLockerVolume -ErrorAction SilentlyContinue)) 
 try {
     $AllVolumes = @(Get-BitLockerVolume -ErrorAction Stop)
 } catch {
-    Write-Output "$HEAD Could not query BitLocker volumes: $($_.Exception.Message). This script must run elevated (SYSTEM)."
-    Write-Log "Get-BitLockerVolume failed: $($_.Exception.Message)" 'ERROR'
-    exit 1
+    # The bulk query can throw inside the BitLocker module itself ("Could not compare 0 to
+    # 38 38", seen on a volume with two protectors, 13.2.mm) while the per-volume form still
+    # answers. Ask each lettered volume on its own and keep the ones that respond.
+    Write-Log "Get-BitLockerVolume (all volumes) failed: $($_.Exception.Message); querying each volume" 'WARN'
+    $AllVolumes = @()
+    foreach ($dl in @(Get-CimInstance -ClassName Win32_LogicalDisk -Filter 'DriveType = 3' -ErrorAction SilentlyContinue | ForEach-Object { $_.DeviceID })) {
+        try { $AllVolumes += @(Get-BitLockerVolume -MountPoint $dl -ErrorAction Stop) }
+        catch { Write-Log "Get-BitLockerVolume -MountPoint $dl failed: $($_.Exception.Message)" 'WARN' }
+    }
+    if ($AllVolumes.Count -eq 0) {
+        Write-Output "$HEAD Could not query BitLocker volumes: $($_.Exception.Message). This script must run elevated (SYSTEM)."
+        Write-Log 'Get-BitLockerVolume failed for every volume' 'ERROR'
+        exit 1
+    }
 }
 
 # Operating system and fixed data volumes only. Removable media is the user's.
@@ -370,7 +390,8 @@ foreach ($step in $activeSteps) {
 # -- Summary -----------------------------------------------------------------
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 $remErrs  = @($results | Where-Object { $_.RemError }).Count
 

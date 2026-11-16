@@ -26,11 +26,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateSCOMAgentPart2.ps1
-    Version      : 1.1.1
+    Version      : 1.1.2
     Architecture : x64
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-05 (1.1.1: Operations Manager and ESENT events read through the .NET EventLogReader; Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine; runtime version string now matches the header)
+    Last Modified: 2026-11-16 (1.1.2: a repaired step no longer counts in the Failed total, so the run that repairs something no longer reports it as a failure; runbook section 7). Was: 2026-11-05 (1.1.1: Operations Manager and ESENT events read through the .NET EventLogReader; Get-WinEvent fails in every form under Hub's ARM64 PowerShell 7.2 engine; runtime version string now matches the header)
     Timeout      : 25 seconds (deploy with a 90 second UEM timeout)
 
     Environment variables:
@@ -112,7 +112,7 @@ function Invoke-AutoRemediateSCOMAgentPart2 {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param()
 
-$SCRIPT_VERSION = '1.1.1'
+$SCRIPT_VERSION = '1.1.2'
 $RegPath        = 'HKLM:\Software\AirWatch\Extensions\SCOM'
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateSCOMAgentPart2.log"
 
@@ -530,7 +530,8 @@ foreach ($step in $activeSteps) {
 # -- Summary --
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 
 Write-Output "`r`n----------------------------------------------------------------"

@@ -50,11 +50,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateGenericVPN.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-08-04
+    Last Modified: 2026-11-16 (1.0.1: a repaired step no longer counts in the Failed total, so the run that repairs something no longer reports it as a failure; runbook section 7). Was: 2026-08-04
     Timeout      : 30 seconds (60 if step 6 is enabled)
 
     Environment variables:
@@ -70,7 +70,7 @@ function Invoke-AutoRemediateGenericVPN {
 [CmdletBinding(SupportsShouldProcess = $true)]
 param()
 
-$SCRIPT_VERSION = "1.0.0"
+$SCRIPT_VERSION = "1.0.1"
 $RegPath        = "HKLM:\Software\AirWatch\Extensions\VPN\Remediation"
 $LogPath        = "$env:SystemRoot\Temp\UEM_AutoRemediateGenericVPN.log"
 
@@ -454,7 +454,8 @@ foreach ($step in $activeSteps) {
 # -- Summary -------------------------------------------------------------------
 $passed   = @($results | Where-Object { $_.Status -eq 'Passed'  }).Count
 $warnings = @($results | Where-Object { $_.Status -eq 'Warning' }).Count
-$failed   = @($results | Where-Object { $_.Status -eq 'Failed'  }).Count
+# A Failed step whose remediation ran is not a failure; a remediation that threw is.
+$failed   = @($results | Where-Object { ($_.Status -eq 'Failed' -and -not $_.Remediated) -or $_.RemError }).Count
 $remCount = @($results | Where-Object { $_.Remediated }).Count
 $remErrs  = @($results | Where-Object { $_.RemError }).Count
 
