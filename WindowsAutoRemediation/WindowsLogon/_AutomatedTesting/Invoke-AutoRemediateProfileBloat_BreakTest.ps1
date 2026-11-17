@@ -82,11 +82,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateProfileBloat_BreakTest.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
-    Context      : Administrator (elevated)
+    Context      : Administrator (elevated), as the signed-in user, never SYSTEM
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-16 (1.0.1: ExpectFixed runs also assert that the script exited 0). Was: 2026-11-02
+    Last Modified: 2026-11-16 (1.0.2: stops up front when run as SYSTEM, 13.2.oo. 1.0.1: ExpectFixed runs also assert that the script exited 0). Was: 2026-11-02
     Reporting    : C:\Temp\FixReport\Invoke-AutoRemediateProfileBloat\
 
 .DISCLAIMER
@@ -807,6 +807,12 @@ if ($Resume) {
 $exitCode = 0
 
 try {
+    # The profile fixture loads the test user's profile with Start-Process -Credential, which a
+    # SYSTEM session cannot do (Access is denied, runs 459b358ee623 and 6343f98639c1 on 2026-11-16,
+    # 13.2.oo). Say so before creating the account.
+    if ($state.Phase -eq 'Init' -and [Security.Principal.WindowsIdentity]::GetCurrent().IsSystem) {
+        throw 'This harness is running as NT AUTHORITY\SYSTEM and cannot load the fixture profile from there. Run it from a window started with Run as administrator as the signed-in user.'
+    }
     # -- Phase: apply breaks ---------------------------------------------------
     if ($state.Phase -eq 'Init') {
 

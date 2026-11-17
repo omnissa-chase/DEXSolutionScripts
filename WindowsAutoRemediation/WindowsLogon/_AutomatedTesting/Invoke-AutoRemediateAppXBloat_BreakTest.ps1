@@ -83,11 +83,11 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateAppXBloat_BreakTest.ps1
-    Version      : 1.0.1
+    Version      : 1.0.2
     Architecture : Any (x86/x64)
-    Context      : Administrator (elevated)
+    Context      : Administrator (elevated), as the signed-in user, never SYSTEM
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-16 (1.0.1: ExpectFixed runs also assert that the script exited 0). Was: 2026-11-02
+    Last Modified: 2026-11-16 (1.0.2: stops up front when run as SYSTEM, 13.2.oo. 1.0.1: ExpectFixed runs also assert that the script exited 0). Was: 2026-11-02
     Reporting    : C:\Temp\FixReport\Invoke-AutoRemediateAppXBloat\
 
 .DISCLAIMER
@@ -405,6 +405,11 @@ if ($Resume) {
 $exitCode = 0
 
 try {
+    # Windows refuses Add-AppxPackage -Register for Local System (0x80073CF9, runs 471591353e76
+    # and e5f20792bd39 on 2026-11-16, 13.2.oo), so a SYSTEM window cannot run this fixture.
+    if ($state.Phase -eq 'Init' -and [Security.Principal.WindowsIdentity]::GetCurrent().IsSystem) {
+        throw 'This harness is running as NT AUTHORITY\SYSTEM and Windows refuses to register the fixture package for Local System. Run it from a window started with Run as administrator as the signed-in user.'
+    }
     # -- Phase: apply breaks ---------------------------------------------------
     if ($state.Phase -eq 'Init') {
 

@@ -48,17 +48,16 @@
 
 .NOTES
     Script Name  : Invoke-AutoRemediateOutlook.ps1
-    Version      : 1.1.3
+    Version      : 1.1.4
     Architecture : Any (x86/x64/ARM64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-16 (1.1.3: a repaired step no longer counts in the Failed
-                   total, so a run that repairs something exits 0; runbook section 7)
-                   2026-11-05 (1.1.2: step 3 reads the Application log through the .NET
-                   EventLogReader; Get-WinEvent fails under Hub's PS 7.2 ARM64 engine)
-                   2026-11-03 (1.1.1: step 3 event filter server-side)
-                   2026-11-02 (1.1.0: two-tier step 2, deferred close helper, five new
-                   inputs. 1.0.2: step 4 UpdatesEnabled=False is a Warning.)
+    Last Modified: 2026-11-16 (1.1.4: helper asks Outlook to Quit via COM before
+                   CloseMainWindow, which hits a titleless border window. 1.1.3: a
+                   repaired step is not a failure, runbook 7) 2026-11-05 (1.1.2: step 3
+                   on the .NET EventLogReader, 13.2.z) 2026-11-03 (1.1.1)
+                   2026-11-02 (1.1.0: two-tier step 2, deferred
+                   close helper, five new inputs. 1.0.2: UpdatesEnabled=False Warning)
     Timeout      : 60 seconds
 
 .DISCLAIMER
@@ -178,6 +177,8 @@ try {
     $exe = (Get-Process -Name OUTLOOK -ErrorAction SilentlyContinue | Select-Object -First 1).Path
     $deadline = (Get-Date).AddSeconds(60)
     do {
+        # CloseMainWindow can hit a titleless Office border window (13.2.oo): Quit first.
+        try { [Runtime.InteropServices.Marshal]::GetActiveObject('Outlook.Application').Quit() } catch { }
         Get-Process -Name OUTLOOK -ErrorAction SilentlyContinue | ForEach-Object { $null = $_.CloseMainWindow() }
         $tries++; $next = (Get-Date).AddSeconds(10)
         while ((Get-Process -Name OUTLOOK -ErrorAction SilentlyContinue) -and (Get-Date) -lt $next) { Start-Sleep -Seconds 2 }
