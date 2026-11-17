@@ -22,8 +22,8 @@
       NoAnalysisRefused      a copy with MinReclaimableMb = 1, no report -> "no analysis
                              to compare with", DISM not started
       RealAnalysis           no report -> Invoke-ComponentStoreAnalysis.ps1; waits up to
-                             15 minutes for DISM; the report parses and the sensor
-                             returns its figure           (1 to 5 minutes)
+                             30 minutes for DISM; the report parses and the sensor
+                             returns its figure           (13 minutes on the lab VM)
       RealCleanup            Start-ComponentStoreCleanup.ps1 live -> "started in the
                              background", Status Started; waits up to 60 minutes for
                              DISM; the cleanup log ends in success, a fresh report is
@@ -33,6 +33,9 @@
     RealCleanup performs a real component cleanup on this host. That is the supported
     operation Windows also runs by itself, and is not undone. Skip it with
     -BreakName when only the quick scenarios are wanted.
+
+    DISM keeps running when this harness is interrupted (the scripts start it detached).
+    A later run waits for it, up to 30 minutes, and never kills it.
 
     Not covered: the DISM-running, servicing-busy and restart-pending guards (a host in
     one of those states makes RealCleanup report it instead of starting), ResetBase.
@@ -137,11 +140,17 @@ function Test-DismRunning { return (@(Get-Process -Name 'dism' -ErrorAction Sile
 
 function Wait-Dism {
     # Waits for DISM to go and (optionally) for a file to appear. True when both happened in time.
+    # Prints a line a minute so a long wait does not look like a hang.
     param([int]$Minutes, [string]$File = '')
-    $deadline = (Get-Date).AddMinutes($Minutes)
+    $start = Get-Date; $deadline = $start.AddMinutes($Minutes); $lastNote = 0
     while ((Get-Date) -lt $deadline) {
         if (-not (Test-DismRunning) -and (-not $File -or (Test-Path -LiteralPath $File))) { return $true }
         Start-Sleep -Seconds 10
+        $elapsed = [int][math]::Floor(((Get-Date) - $start).TotalMinutes)
+        if ($elapsed -gt $lastNote) {
+            $lastNote = $elapsed
+            Write-DexNote -Name 'Waiting' -Message "DISM is still working: $elapsed of up to $Minutes minutes. This is expected; leave the window open."
+        }
     }
     return $false
 }
@@ -263,7 +272,7 @@ $BreakCatalog = @(
         Apply    = { Set-Report -Present $false }
         Verify   = { -not (Test-Path -LiteralPath $AnalyzeLog) }
         Validate = {
-            $inTime = Wait-Dism -Minutes 15 -File $AnalyzeLog
+            $inTime = Wait-Dism -Minutes 30 -File $AnalyzeLog
             $text = if (Test-Path -LiteralPath $AnalyzeLog) { [IO.File]::ReadAllText($AnalyzeLog) } else { '' }
             $ok = $text -match 'The operation completed successfully'
             $s1 = Invoke-Script -Path $SensorScript
@@ -329,6 +338,11 @@ try {
         if (-not (Test-Path -LiteralPath $s)) { throw "Script under test not found at $s" }
     }
     if (-not $hadCache) { New-Item -Path $CachePath -Force | Out-Null }
+    if (Test-DismRunning) {
+        # Usually the analysis an earlier, interrupted run of this harness left behind. Never killed: waited out.
+        Write-DexStep -Status 'Info' -Name 'DISM' -Message 'DISM is already running on this host; waiting up to 30 minutes for it to finish before the first scenario'
+        if (-not (Wait-Dism -Minutes 30)) { throw 'DISM was still running after 30 minutes; run this again when it has finished.' }
+    }
     Save-HostState
 
     $selected = if ($BreakName) {

@@ -154,7 +154,7 @@ Inventory discrepancy: `SCRIPT-INVENTORY-CSV.csv` marks `Invoke-AutoRemediateDri
 | 23 | `Invoke-CrowdStrikeServiceRemediation.ps1` | Antivirus | Needs Testing | Medium | none | `NEEDS TEST - PRODUCT VM` (UEM: not-installed path ran, `6c8405`) |
 | 24 | `Invoke-DefenderDynamicPerformance.ps1` | Antivirus | Tested | Low | Break test (2 breaks) + UEM | `PASS - LAB` + `PASS - UEM` = Full Pass (break test run acd1081436f9 on 2026-11-02: CpuProfileDrift and ScoreCacheCorrupt (load factor drifted to 5 with a stale marker, score cache set to a non-number; script recomputed the score and re-applied the profile); result `C:\Temp\FixReport\Invoke-DefenderDynamicPerformance\acd1081436f9.json`; UEM sweep `6c8405`; rerun on 1.2.0 `f5e48cac81fc` 2026-11-05 11:29 Passed, CpuProfileDrift (PriorityDriftMarkerRemoved) and ScoreCacheCorrupt (NonNumericScore) both repaired) |
 | 25 | `Invoke-DefenderEnableCloudBlock_BAFS.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
-| 26 | `Invoke-DefenderPauseScan.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
+| 26 | `Invoke-DefenderPauseScan.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405`, `efa873` |
 | 27 | `Invoke-DefenderServiceRemediation.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 28 | `Invoke-DefenderUpdateSignatures.ps1` | Antivirus | Tested | Low | none | `TESTED - MANUAL` + UEM `6c8405` |
 | 29 | `Start-DefenderFullScan.ps1` | Antivirus | Needs Testing | Low | UEM via `Test_JSpencerOnly` | `PASS - UEM` (single-VM group, run `fad62d`, 2026-11-02, `Completed` 194 s after the sync; `Start-MpScan -AsJob` returns at once and the full scan then runs on the VM, revert the snapshot afterwards) |
@@ -554,14 +554,26 @@ Common to all twelve: no `SupportsShouldProcess`; most `Exit 0` on every path, s
 
 1. Start a scan: `Start-MpScan -ScanType FullScan -AsJob`. Confirm event 1000 in `Microsoft-Windows-Windows Defender/Operational` or `Get-MpComputerStatus | Select FullScanStartTime,FullScanEndTime`.
 2. Within a few seconds run the script.
-3. Expect MpCmdRun's own text (`Scan cancelled`), no script-authored lines, exit `0`.
+3. Expect MpCmdRun's own text (`Scan cancelled successfully.`), no WARNING block, exit `0`.
 4. Verify event 1002 ("scan was stopped before it finished") appears: `Get-WinEvent -LogName 'Microsoft-Windows-Windows Defender/Operational' -MaxEvents 20 | Where-Object Id -eq 1002`.
-5. Negative path: rename nothing; instead run on a machine with Defender removed to see `MpCmdRun.exe was not found.` as a terminating error.
-6. Restore: none.
+5. Custom scan path: start a folder scan (`MpCmdRun.exe -Scan -ScanType 3 -File %SystemRoot%\System32`) and run the script. Expect `No on-going quick or full scan found.` followed by the WARNING block, and the scan keeps running. The same block prints when no scan is running at all.
+6. Negative path: rename nothing; instead run on a machine with Defender removed to see `MpCmdRun.exe was not found.` as a terminating error.
+7. Restore: none.
 
 **Status:** `TESTED - MANUAL`. Also `Completed` on both lab devices in UEM sweep `6c8405` (2026-10-29).
 
-**Review notes.** Path selection is a string sort on `FullName` descending, so `C:\ProgramData\...\Platform\...` beats `C:\Program Files\Windows Defender\...` and version folders sort lexically, not numerically. The name says pause; it cancels. No exit code of its own.
+**2026-11-16, WARNING block added.** A lab probe run as SYSTEM through UEM (runs `9ba21b` and `8a35d1`, `CHASEWIN11_2` and `avdpersonal-1`, same result on both) measured what `-Scan -Cancel` does:
+
+| Scan running | Tool output | Tool exit | Scan stopped |
+|---|---|---|---|
+| None | `No on-going quick or full scan found.` | 0 | n/a |
+| Quick, started by `MpCmdRun.exe` | `Scan cancelled successfully.` | 0 | Yes, event 1002 |
+| Quick, started through the Defender API (`Start-MpScan`) | `Scan cancelled successfully.` | 0 | Yes, event 1002 |
+| Custom folder scan, started by `MpCmdRun.exe` | `No on-going quick or full scan found.` | 0 | No |
+
+The tool cannot tell "nothing running" from "custom scan running", so the script now prints a WARNING block whenever that line appears. The new lines were checked against both recorded tool texts with a stubbed tool (block printed for the first, not for the second), and the edited script `Completed` on both online lab devices in UEM run `efa873`. Not done: reading the WARNING block back from a real SYSTEM run (the connector returns exit status only), a full scan, and a scheduled scan.
+
+**Review notes.** Path selection is a string sort on `FullName` descending, so `C:\ProgramData\...\Platform\...` beats `C:\Program Files\Windows Defender\...` and version folders sort lexically, not numerically. The name says pause; it cancels. No exit code of its own: a run without admin rights prints `Access is denied` and still ends 0.
 
 ### 4.5 `Invoke-DefenderServiceRemediation.ps1`
 
