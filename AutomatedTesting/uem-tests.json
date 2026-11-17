@@ -511,5 +511,22 @@
   "outlook_cache_mb.ps1": {
     "min": -1,
     "note": "Integer MB of the Outlook cache for the console user; -1 when not installed or nobody signed in."
+  },
+  "Invoke-AutoRemediateStorageHealth.ps1": {
+    "expect": "Completed",
+    "note": "1.0.0 (2026-11-16). The lab VMs have a healthy virtual disk, so steps 1 to 3 pass and steps 4 to 7 report not checked (virtual machine); the TRIM and Optimize Drives repairs are proven by the break test, which sets IncludeVirtualMachines=true. Device-side proof: HKLM\\Software\\AirWatch\\Extensions\\StorageHealth (HealthScore, HealthReason) and DEXRecords SystemHealth\\StorageHealth. Exit 1 only when a step failed and was not repaired or a repair threw."
+  },
+  "storage_health.ps1": {
+    "match": "^\\{\"Schema\":1,\"Collected\":\"[^\"]*\",.*\"Score\":-?\\d+,\"Reason\":\"[A-Za-z]+\",\"NextStep\":\"(AUTO|USER|ADMIN|NONE)\".*\\}$",
+    "note": "One-time JSON sensor, companion of Invoke-AutoRemediateStorageHealth.ps1 1.0.0. Under the 1 KB cap by construction (473 bytes on CBRADLEYSWIN11, 831 with every deduction listed). Wear, temperature and error counters read -1 on virtual disks."
+  },
+  "storage_health_score.ps1": {
+    "min": -1,
+    "max": 100,
+    "note": "Integer 0-100 from the cache Invoke-AutoRemediateStorageHealth.ps1 writes; -1 until that script has run on the device."
+  },
+  "storage_health_reason.ps1": {
+    "allowEmpty": true,
+    "note": "Largest deduction from storage_health_score; empty until Invoke-AutoRemediateStorageHealth.ps1 has run on the device."
   }
 }

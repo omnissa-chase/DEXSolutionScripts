@@ -34,9 +34,11 @@
     .\AutomatedTesting\Tools\Test-ScriptEncoding.ps1 -Path .\DiskCleanup\Start-DiskCleanup.ps1 -Fix
 
 .NOTES
-    Version      : 1.0.0
+    Version      : 1.0.1
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-16 (first build after ADEX-548: 28 scripts carried a BOM, 8 had non-ASCII text)
+    Last Modified: 2026-11-16 (1.0.1: a comma list passed through -File is split, and a path that does not
+                   exist fails the check; 1.0.0 errored on it and still printed OK. 1.0.0: first build after
+                   ADEX-548: 28 scripts carried a BOM, 8 had non-ASCII text)
 #>
 param(
     [string[]]$Path,
@@ -52,9 +54,16 @@ if (-not $Path) {
     } finally { Pop-Location }
 }
 
+else {
+    # Under powershell.exe -File a comma list arrives as one string; split it so every file is checked.
+    $Path = @($Path | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+
 $limit = 32767
 $failed = 0
 foreach ($p in $Path) {
+    # A path that cannot be read is a failure, never a silent pass.
+    if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { '{0,-60} NOT FOUND' -f $p; $failed++; continue }
     $full = (Resolve-Path -LiteralPath $p).Path
     $bytes = [IO.File]::ReadAllBytes($full)
     $bom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
@@ -76,6 +85,6 @@ foreach ($p in $Path) {
     $rel = if ($full.StartsWith($repo)) { $full.Substring($repo.Length + 1) } else { $full }
     '{0,-60} {1}{2}' -f $rel, ($problems -join '; '), $size
 }
-if ($failed -gt 0) { Write-Output "FAILED: $failed file(s) with a BOM or non-ASCII text"; exit 1 }
+if ($failed -gt 0) { Write-Output "FAILED: $failed file(s) with a BOM or non-ASCII text, or not found"; exit 1 }
 Write-Output "OK: $(@($Path).Count) file(s), no BOM, ASCII only"
 exit 0
