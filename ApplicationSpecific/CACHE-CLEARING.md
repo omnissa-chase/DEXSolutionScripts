@@ -15,7 +15,7 @@ deployment, Outlook) followed on 2026-11-13.
 | Kind | Action: no threshold, no detection. Clears the catalogue's folders and reports MB freed. |
 | Scope | Contents of the listed folders only; the folders stay so the app finds them. Nothing outside the catalogue is read or deleted. |
 | Users | `Users=Console` (default): the signed-in user from `Win32_ComputerSystem.UserName`, profile path from `ProfileList`. `Users=All`: every local profile. Never `$env:LOCALAPPDATA`, which is SYSTEM's under Hub. |
-| Gate | If the product's process runs for the user, that user is `[Skipped]` and reported. `CloseApp=true` asks it to close (`CloseMainWindow`, 20 s) and still skips if it stays open. Nothing is killed. |
+| Gate | If the product's process runs for the user, that user is `[Skipped]` and reported. `CloseApp=true` asks it to close (`CloseMainWindow`, 20 s) and still skips if it stays open. Office, OneNote and Outlook first ask each running Office application to `Quit()` through COM (generator field `ComQuit`), because .NET's main-window handle on Office apps is often a titleless border-effect window that ignores WM_CLOSE (TEST-VALIDATION 13.2.oo). Nothing is killed. |
 | WhatIf | `WhatIf=true` measures and reports, deletes nothing. The UEM sweep manifest runs every script this way. |
 | Optional | Entries marked optional (offline web storage, add-in caches, large package stores) need `IncludeOptional=true`. |
 | Destructive | OneNote and Outlook: clear nothing without `AllowDestructiveActions=true`. OneNote's cache holds notebook content until it has synced; Outlook's RoamCache is the autocomplete list the user loses. |

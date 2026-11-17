@@ -20,6 +20,8 @@
     Gate: ONENOTE.exe and ONENOTEM.exe. When the app is running for a user that user is skipped and reported,
     unless CloseApp=true, in which case the app is asked to close (CloseMainWindow, up to
     20 s) and the user is still skipped if it stays open. Nothing is ever killed.
+    Office products are first asked to Quit through COM, because CloseMainWindow alone can hit a
+    titleless border-effect window and leave the app open (TEST-VALIDATION 13.2.oo).
 
     Budget: stops deleting after 50 s and reports Partial, so Hub's 60 s timeout never
     cuts the report off. The next run finishes the job.
@@ -39,11 +41,11 @@
 
 .NOTES
     Script Name  : Clear-OneNoteCache.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-12
+    Last Modified: 2026-11-16
     Timeout      : 60 seconds
 
 .DISCLAIMER
@@ -55,7 +57,7 @@
 
 #Requires -Version 5.1
 
-$SCRIPT_VERSION = '1.0.0'
+$SCRIPT_VERSION = '1.0.1'
 $Product   = 'Microsoft OneNote'
 $RegPath   = 'HKLM:\Software\AirWatch\Extensions\AppCache\OneNote'
 $LogPath   = "$env:SystemRoot\Temp\UEM_ClearOneNoteCache.log"
@@ -145,6 +147,9 @@ function Get-AppProcesses { param($User)
     return ,@($owned)
 }
 function Close-AppProcesses { param($Procs)
+    # Office apps often expose a titleless border-effect window as the main window, so CloseMainWindow
+    # alone is a no-op there (TEST-VALIDATION 13.2.oo): ask each running application to Quit through COM first.
+    foreach ($id in @('OneNote.Application')) { try { [Runtime.InteropServices.Marshal]::GetActiveObject($id).Quit() } catch { } }
     foreach ($p in $Procs) { try { [void]$p.CloseMainWindow() } catch { } }
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     do { Start-Sleep -Seconds 1; $alive = @($Procs | Where-Object { try { -not $_.HasExited } catch { $false } }) } while ($alive.Count -gt 0 -and $sw.Elapsed.TotalSeconds -lt $CloseWaitSec)

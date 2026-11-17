@@ -2,7 +2,7 @@
 # Re-run after editing the template or a catalogue; every generated file is overwritten.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent   # repository root; this file lives in AutomatedTesting\Tools
-$date = '2026-11-13'
+$date = '2026-11-16'
 
 $template = @'
 <#
@@ -25,7 +25,7 @@ __NEVER__
 
     Gate: __GATE__ When the app is running for a user that user is skipped and reported,
     unless CloseApp=true, in which case the app is asked to close (CloseMainWindow, up to
-    20 s) and the user is still skipped if it stays open. Nothing is ever killed.
+    20 s) and the user is still skipped if it stays open. Nothing is ever killed.__CLOSEDOC__
 
     Budget: stops deleting after 50 s and reports Partial, so Hub's 60 s timeout never
     cuts the report off. The next run finishes the job.
@@ -44,7 +44,7 @@ __DESTRUCTIVE_DOC__
 
 .NOTES
     Script Name  : Clear-__KEY__Cache.ps1
-    Version      : 1.0.0
+    Version      : __VERSION__
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
@@ -60,7 +60,7 @@ __DESTRUCTIVE_DOC__
 
 #Requires -Version 5.1
 
-$SCRIPT_VERSION = '1.0.0'
+$SCRIPT_VERSION = '__VERSION__'
 $Product   = '__PRODUCT__'
 $RegPath   = 'HKLM:\Software\AirWatch\Extensions\AppCache\__KEY__'
 $LogPath   = "$env:SystemRoot\Temp\UEM_Clear__KEY__Cache.log"
@@ -150,7 +150,7 @@ function Get-AppProcesses { param($User)
     return ,@($owned)
 }
 function Close-AppProcesses { param($Procs)
-    foreach ($p in $Procs) { try { [void]$p.CloseMainWindow() } catch { } }
+__CLOSEFIRST__    foreach ($p in $Procs) { try { [void]$p.CloseMainWindow() } catch { } }
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     do { Start-Sleep -Seconds 1; $alive = @($Procs | Where-Object { try { -not $_.HasExited } catch { $false } }) } while ($alive.Count -gt 0 -and $sw.Elapsed.TotalSeconds -lt $CloseWaitSec)
     return ($alive.Count -eq 0)
@@ -313,7 +313,8 @@ $apps = @(
         Gate = 'Zoom.exe.'
     },
     @{
-        Key = 'Office'; Product = 'Microsoft Office'; Dir = 'ApplicationSpecific\Microsoft\Office'
+        Key = 'Office'; Product = 'Microsoft Office'; Dir = 'ApplicationSpecific\Microsoft\Office'; Version = '1.0.1'
+        ComQuit = @('Word.Application', 'Excel.Application', 'PowerPoint.Application', 'Access.Application', 'Publisher.Application', 'OneNote.Application', 'Outlook.Application')
         Processes = @('WINWORD', 'EXCEL', 'POWERPNT', 'MSACCESS', 'ONENOTE', 'MSPUB', 'OUTLOOK', 'MSOSYNC')
         Markers = @('{PF}\Microsoft Office\root\Office16\WINWORD.EXE', '{PF86}\Microsoft Office\root\Office16\WINWORD.EXE', '{Local}\Microsoft\Office\16.0')
         Catalogue = @(
@@ -327,7 +328,7 @@ $apps = @(
         Gate = 'WINWORD, EXCEL, POWERPNT, MSACCESS, ONENOTE, MSPUB, OUTLOOK and MSOSYNC (all share the Document Cache).'
     },
     @{
-        Key = 'OneNote'; Product = 'Microsoft OneNote'; Dir = 'ApplicationSpecific\Microsoft\OneNote'; Destructive = $true
+        Key = 'OneNote'; Product = 'Microsoft OneNote'; Dir = 'ApplicationSpecific\Microsoft\OneNote'; Destructive = $true; Version = '1.0.1'; ComQuit = @('OneNote.Application')
         Processes = @('ONENOTE', 'ONENOTEM')
         Markers = @('{Local}\Microsoft\OneNote\16.0', '{PF}\Microsoft Office\root\Office16\ONENOTE.EXE', '{PF86}\Microsoft Office\root\Office16\ONENOTE.EXE')
         Catalogue = @(
@@ -545,7 +546,7 @@ $apps = @(
         Gate = 'javaws.exe and jp2launcher.exe.'
     },
     @{
-        Key = 'Outlook'; Product = 'Microsoft Outlook'; Dir = 'ApplicationSpecific\Microsoft\Outlook'; Destructive = $true
+        Key = 'Outlook'; Product = 'Microsoft Outlook'; Dir = 'ApplicationSpecific\Microsoft\Outlook'; Destructive = $true; Version = '1.0.1'; ComQuit = @('Outlook.Application')
         Processes = @('OUTLOOK', 'olk')
         Markers = @('{Local}\Microsoft\Outlook', '{Local}\Microsoft\Olk', '{PF}\Microsoft Office\root\Office16\OUTLOOK.EXE', '{PF86}\Microsoft Office\root\Office16\OUTLOOK.EXE')
         Catalogue = @(
@@ -569,6 +570,18 @@ foreach ($a in $apps) {
     $t = $t.Replace('__PROCESSES__', (Q $a.Processes)).Replace('__MARKERS__', (Q $a.Markers))
     $t = $t.Replace('__CATALOGUE__', ($a.Catalogue -join ",`r`n"))
     $t = $t.Replace('__DESTRUCTIVE__', $(if ($destructive) { '$true' } else { '$false' }))
+    # Per-product version (default 1.0.0) and the optional COM quit for Office products: an empty ComQuit list
+    # expands to nothing at all, so every other product's file stays byte-identical to its tested copy.
+    $t = $t.Replace('__VERSION__', $(if ($a.Version) { $a.Version } else { '1.0.0' }))
+    $closeFirst = ''; $closeDoc = ''
+    if ($a.ComQuit -and @($a.ComQuit).Count -gt 0) {
+        $closeFirst = "    # Office apps often expose a titleless border-effect window as the main window, so CloseMainWindow`r`n" +
+                      "    # alone is a no-op there (TEST-VALIDATION 13.2.oo): ask each running application to Quit through COM first.`r`n" +
+                      "    foreach (`$id in @($(Q $a.ComQuit))) { try { [Runtime.InteropServices.Marshal]::GetActiveObject(`$id).Quit() } catch { } }`r`n"
+        $closeDoc   = "`r`n    Office products are first asked to Quit through COM, because CloseMainWindow alone can hit a`r`n" +
+                      "    titleless border-effect window and leave the app open (TEST-VALIDATION 13.2.oo)."
+    }
+    $t = $t.Replace('__CLOSEFIRST__', $closeFirst).Replace('__CLOSEDOC__', $closeDoc)
     $t = $t.Replace('__DESTRUCTIVE_DOC__', $(if ($destructive) { "      AllowDestructiveActions  true  -> actually clear; without it the script only reports sizes`r`n" } else { '' }))
     $dir = Join-Path $repo $a.Dir
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
