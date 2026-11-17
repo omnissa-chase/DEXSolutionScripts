@@ -2,7 +2,7 @@
 # Re-run after editing the template or a catalogue; every generated file is overwritten.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent   # repository root; this file lives in AutomatedTesting\Tools
-$date = '2026-11-16'
+$date = '2026-11-17'
 
 $template = @'
 <#
@@ -24,8 +24,10 @@ __CLEARS__
 __NEVER__
 
     Gate: __GATE__ When the app is running for a user that user is skipped and reported,
-    unless CloseApp=true, in which case the app is asked to close (CloseMainWindow, up to
-    20 s) and the user is still skipped if it stays open. Nothing is ever killed.__CLOSEDOC__
+    unless CloseApp=true, in which case the app is asked to close and the user is still
+    skipped if it stays open after 20 s. The close request runs in the user's own session
+    through a one-shot scheduled task (Hub runs this script as SYSTEM in session 0, which
+    cannot reach the user's windows)__CLOSEDOC__. Nothing is ever killed.
 
     Budget: stops deleting after 50 s and reports Partial, so Hub's 60 s timeout never
     cuts the report off. The next run finishes the job.
@@ -149,10 +151,29 @@ function Get-AppProcesses { param($User)
     }
     return ,@($owned)
 }
-function Close-AppProcesses { param($Procs)
-__CLOSEFIRST__    foreach ($p in $Procs) { try { [void]$p.CloseMainWindow() } catch { } }
+function Close-AppProcesses { param($Procs, $User)
+    # Hub runs this script as SYSTEM in session 0, where neither CloseMainWindow nor a COM Quit can reach a window or
+    # running-object-table entry of the user's session. The close request therefore runs in that session: a one-shot
+    # scheduled task for the user's own SID (interactive token, Limited, powershell.exe 5.1), started at once and
+    # deleted after the wait. If the task cannot be registered or started, the same command runs from this session
+    # (a lab run as a standard user). Nothing is ever killed: an app that stays open leaves the user skipped.
+    $cmd = __CLOSECMD__
+    $psArgs = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand $([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))"
+    $taskName = 'DEX-Clear__KEY__Cache-Close'; $folder = $null; $sent = $false
+    try {
+        $svc = New-Object -ComObject Schedule.Service; $svc.Connect()
+        $td = $svc.NewTask(0)
+        $td.Settings.Hidden = $true; $td.Settings.DisallowStartIfOnBatteries = $false; $td.Settings.StopIfGoingOnBatteries = $false; $td.Settings.ExecutionTimeLimit = 'PT2M'
+        $act = $td.Actions.Create(0); $act.Path = 'powershell.exe'; $act.Arguments = $psArgs
+        $td.Principal.UserId = $User.Sid; $td.Principal.LogonType = 3; $td.Principal.RunLevel = 0   # TASK_LOGON_INTERACTIVE_TOKEN, TASK_RUNLEVEL_LUA
+        $folder = $svc.GetFolder('\')
+        $null = $folder.RegisterTaskDefinition($taskName, $td, 6, $null, $null, 3).Run($null)   # 6 = TASK_CREATE_OR_UPDATE
+        $sent = $true
+    } catch { Write-Log "Close task for $($User.Name) not started ($($_.Exception.Message)); sending the close from this session" 'WARN' }
+    if (-not $sent) { try { Start-Process -FilePath 'powershell.exe' -ArgumentList $psArgs -WindowStyle Hidden -ErrorAction Stop } catch { Write-Log "Direct close failed: $($_.Exception.Message)" 'WARN' } }
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     do { Start-Sleep -Seconds 1; $alive = @($Procs | Where-Object { try { -not $_.HasExited } catch { $false } }) } while ($alive.Count -gt 0 -and $sw.Elapsed.TotalSeconds -lt $CloseWaitSec)
+    if ($folder) { try { $folder.DeleteTask($taskName, 0) } catch { } }
     return ($alive.Count -eq 0)
 }
 function Measure-Folder { param([string]$Path)
@@ -191,7 +212,7 @@ try {
             $procs = Get-AppProcesses $u
             if ($procs.Count -gt 0 -and -not $WhatIf) {
                 $closed = $false
-                if ($CloseApp) { Write-Output "$HEAD $($u.Name): asking $Product to close ($($procs.Count) process(es))..."; $closed = Close-AppProcesses $procs }
+                if ($CloseApp) { Write-Output "$HEAD $($u.Name): asking $Product to close ($($procs.Count) process(es))..."; $closed = Close-AppProcesses $procs $u }
                 if (-not $closed) {
                     $usersSkipped++
                     $size = [long]0; foreach ($e in $entries) { foreach ($f in (Resolve-Folders $e.Paths $u $e.Exclude)) { $size += Measure-Folder $f } }
@@ -313,7 +334,7 @@ $apps = @(
         Gate = 'Zoom.exe.'
     },
     @{
-        Key = 'Office'; Product = 'Microsoft Office'; Dir = 'ApplicationSpecific\Microsoft\Office'; Version = '1.0.1'
+        Key = 'Office'; Product = 'Microsoft Office'; Dir = 'ApplicationSpecific\Microsoft\Office'; Version = '1.0.2'
         ComQuit = @('Word.Application', 'Excel.Application', 'PowerPoint.Application', 'Access.Application', 'Publisher.Application', 'OneNote.Application', 'Outlook.Application')
         Processes = @('WINWORD', 'EXCEL', 'POWERPNT', 'MSACCESS', 'ONENOTE', 'MSPUB', 'OUTLOOK', 'MSOSYNC')
         Markers = @('{PF}\Microsoft Office\root\Office16\WINWORD.EXE', '{PF86}\Microsoft Office\root\Office16\WINWORD.EXE', '{Local}\Microsoft\Office\16.0')
@@ -328,7 +349,7 @@ $apps = @(
         Gate = 'WINWORD, EXCEL, POWERPNT, MSACCESS, ONENOTE, MSPUB, OUTLOOK and MSOSYNC (all share the Document Cache).'
     },
     @{
-        Key = 'OneNote'; Product = 'Microsoft OneNote'; Dir = 'ApplicationSpecific\Microsoft\OneNote'; Destructive = $true; Version = '1.0.1'; ComQuit = @('OneNote.Application')
+        Key = 'OneNote'; Product = 'Microsoft OneNote'; Dir = 'ApplicationSpecific\Microsoft\OneNote'; Destructive = $true; Version = '1.0.2'; ComQuit = @('OneNote.Application')
         Processes = @('ONENOTE', 'ONENOTEM')
         Markers = @('{Local}\Microsoft\OneNote\16.0', '{PF}\Microsoft Office\root\Office16\ONENOTE.EXE', '{PF86}\Microsoft Office\root\Office16\ONENOTE.EXE')
         Catalogue = @(
@@ -546,7 +567,7 @@ $apps = @(
         Gate = 'javaws.exe and jp2launcher.exe.'
     },
     @{
-        Key = 'Outlook'; Product = 'Microsoft Outlook'; Dir = 'ApplicationSpecific\Microsoft\Outlook'; Destructive = $true; Version = '1.0.1'; ComQuit = @('Outlook.Application')
+        Key = 'Outlook'; Product = 'Microsoft Outlook'; Dir = 'ApplicationSpecific\Microsoft\Outlook'; Destructive = $true; Version = '1.0.2'; ComQuit = @('Outlook.Application')
         Processes = @('OUTLOOK', 'olk')
         Markers = @('{Local}\Microsoft\Outlook', '{Local}\Microsoft\Olk', '{PF}\Microsoft Office\root\Office16\OUTLOOK.EXE', '{PF86}\Microsoft Office\root\Office16\OUTLOOK.EXE')
         Catalogue = @(
@@ -570,18 +591,18 @@ foreach ($a in $apps) {
     $t = $t.Replace('__PROCESSES__', (Q $a.Processes)).Replace('__MARKERS__', (Q $a.Markers))
     $t = $t.Replace('__CATALOGUE__', ($a.Catalogue -join ",`r`n"))
     $t = $t.Replace('__DESTRUCTIVE__', $(if ($destructive) { '$true' } else { '$false' }))
-    # Per-product version (default 1.0.0) and the optional COM quit for Office products: an empty ComQuit list
-    # expands to nothing at all, so every other product's file stays byte-identical to its tested copy.
-    $t = $t.Replace('__VERSION__', $(if ($a.Version) { $a.Version } else { '1.0.0' }))
-    $closeFirst = ''; $closeDoc = ''
+    # Per-product version (default 1.0.1 since the user-session close of 2026-11-17; 1.0.0 was the first wave) and the
+    # command the close task runs in the user's session: CloseMainWindow on every gate process, preceded for Office
+    # products (ComQuit set) by a COM Quit, because CloseMainWindow alone can hit a titleless border-effect window
+    # (TEST-VALIDATION 13.2.oo). The command is a single-quoted literal in the generated file.
+    $t = $t.Replace('__VERSION__', $(if ($a.Version) { $a.Version } else { '1.0.1' }))
+    $closeCmd = ''; $closeDoc = ''
     if ($a.ComQuit -and @($a.ComQuit).Count -gt 0) {
-        $closeFirst = "    # Office apps often expose a titleless border-effect window as the main window, so CloseMainWindow`r`n" +
-                      "    # alone is a no-op there (TEST-VALIDATION 13.2.oo): ask each running application to Quit through COM first.`r`n" +
-                      "    foreach (`$id in @($(Q $a.ComQuit))) { try { [Runtime.InteropServices.Marshal]::GetActiveObject(`$id).Quit() } catch { } }`r`n"
-        $closeDoc   = "`r`n    Office products are first asked to Quit through COM, because CloseMainWindow alone can hit a`r`n" +
-                      "    titleless border-effect window and leave the app open (TEST-VALIDATION 13.2.oo)."
+        $closeCmd = "foreach (`$i in @($(Q $a.ComQuit))) { try { [Runtime.InteropServices.Marshal]::GetActiveObject(`$i).Quit() } catch { } }; "
+        $closeDoc = "; Office applications are first asked to Quit through COM,`r`n    because CloseMainWindow alone can hit a titleless border-effect window (TEST-VALIDATION 13.2.oo)"
     }
-    $t = $t.Replace('__CLOSEFIRST__', $closeFirst).Replace('__CLOSEDOC__', $closeDoc)
+    $closeCmd += "foreach (`$n in @($(Q $a.Processes))) { Get-Process -Name `$n -ErrorAction SilentlyContinue | ForEach-Object { `$null = `$_.CloseMainWindow() } }"
+    $t = $t.Replace('__CLOSECMD__', "'" + $closeCmd.Replace("'", "''") + "'").Replace('__CLOSEDOC__', $closeDoc)
     $t = $t.Replace('__DESTRUCTIVE_DOC__', $(if ($destructive) { "      AllowDestructiveActions  true  -> actually clear; without it the script only reports sizes`r`n" } else { '' }))
     $dir = Join-Path $repo $a.Dir
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }

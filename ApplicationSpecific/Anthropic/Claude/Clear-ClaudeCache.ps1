@@ -22,8 +22,10 @@
       - the installed app under %LocalAppData%\AnthropicClaude\app-*
 
     Gate: Claude.exe (desktop app) and claude.exe (Claude Code). When the app is running for a user that user is skipped and reported,
-    unless CloseApp=true, in which case the app is asked to close (CloseMainWindow, up to
-    20 s) and the user is still skipped if it stays open. Nothing is ever killed.
+    unless CloseApp=true, in which case the app is asked to close and the user is still
+    skipped if it stays open after 20 s. The close request runs in the user's own session
+    through a one-shot scheduled task (Hub runs this script as SYSTEM in session 0, which
+    cannot reach the user's windows). Nothing is ever killed.
 
     Budget: stops deleting after 50 s and reports Partial, so Hub's 60 s timeout never
     cuts the report off. The next run finishes the job.
@@ -42,11 +44,11 @@
 
 .NOTES
     Script Name  : Clear-ClaudeCache.ps1
-    Version      : 1.0.0
+    Version      : 1.0.1
     Architecture : Any (x86/x64)
     Context      : System
     Author       : Chase Bradley, Omnissa DEX team
-    Last Modified: 2026-11-12
+    Last Modified: 2026-11-17
     Timeout      : 60 seconds
 
 .DISCLAIMER
@@ -58,7 +60,7 @@
 
 #Requires -Version 5.1
 
-$SCRIPT_VERSION = '1.0.0'
+$SCRIPT_VERSION = '1.0.1'
 $Product   = 'Claude (desktop app and Claude Code)'
 $RegPath   = 'HKLM:\Software\AirWatch\Extensions\AppCache\Claude'
 $LogPath   = "$env:SystemRoot\Temp\UEM_ClearClaudeCache.log"
@@ -150,10 +152,29 @@ function Get-AppProcesses { param($User)
     }
     return ,@($owned)
 }
-function Close-AppProcesses { param($Procs)
-    foreach ($p in $Procs) { try { [void]$p.CloseMainWindow() } catch { } }
+function Close-AppProcesses { param($Procs, $User)
+    # Hub runs this script as SYSTEM in session 0, where neither CloseMainWindow nor a COM Quit can reach a window or
+    # running-object-table entry of the user's session. The close request therefore runs in that session: a one-shot
+    # scheduled task for the user's own SID (interactive token, Limited, powershell.exe 5.1), started at once and
+    # deleted after the wait. If the task cannot be registered or started, the same command runs from this session
+    # (a lab run as a standard user). Nothing is ever killed: an app that stays open leaves the user skipped.
+    $cmd = 'foreach ($n in @(''Claude'', ''claude'')) { Get-Process -Name $n -ErrorAction SilentlyContinue | ForEach-Object { $null = $_.CloseMainWindow() } }'
+    $psArgs = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand $([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd)))"
+    $taskName = 'DEX-ClearClaudeCache-Close'; $folder = $null; $sent = $false
+    try {
+        $svc = New-Object -ComObject Schedule.Service; $svc.Connect()
+        $td = $svc.NewTask(0)
+        $td.Settings.Hidden = $true; $td.Settings.DisallowStartIfOnBatteries = $false; $td.Settings.StopIfGoingOnBatteries = $false; $td.Settings.ExecutionTimeLimit = 'PT2M'
+        $act = $td.Actions.Create(0); $act.Path = 'powershell.exe'; $act.Arguments = $psArgs
+        $td.Principal.UserId = $User.Sid; $td.Principal.LogonType = 3; $td.Principal.RunLevel = 0   # TASK_LOGON_INTERACTIVE_TOKEN, TASK_RUNLEVEL_LUA
+        $folder = $svc.GetFolder('\')
+        $null = $folder.RegisterTaskDefinition($taskName, $td, 6, $null, $null, 3).Run($null)   # 6 = TASK_CREATE_OR_UPDATE
+        $sent = $true
+    } catch { Write-Log "Close task for $($User.Name) not started ($($_.Exception.Message)); sending the close from this session" 'WARN' }
+    if (-not $sent) { try { Start-Process -FilePath 'powershell.exe' -ArgumentList $psArgs -WindowStyle Hidden -ErrorAction Stop } catch { Write-Log "Direct close failed: $($_.Exception.Message)" 'WARN' } }
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     do { Start-Sleep -Seconds 1; $alive = @($Procs | Where-Object { try { -not $_.HasExited } catch { $false } }) } while ($alive.Count -gt 0 -and $sw.Elapsed.TotalSeconds -lt $CloseWaitSec)
+    if ($folder) { try { $folder.DeleteTask($taskName, 0) } catch { } }
     return ($alive.Count -eq 0)
 }
 function Measure-Folder { param([string]$Path)
@@ -192,7 +213,7 @@ try {
             $procs = Get-AppProcesses $u
             if ($procs.Count -gt 0 -and -not $WhatIf) {
                 $closed = $false
-                if ($CloseApp) { Write-Output "$HEAD $($u.Name): asking $Product to close ($($procs.Count) process(es))..."; $closed = Close-AppProcesses $procs }
+                if ($CloseApp) { Write-Output "$HEAD $($u.Name): asking $Product to close ($($procs.Count) process(es))..."; $closed = Close-AppProcesses $procs $u }
                 if (-not $closed) {
                     $usersSkipped++
                     $size = [long]0; foreach ($e in $entries) { foreach ($f in (Resolve-Folders $e.Paths $u $e.Exclude)) { $size += Measure-Folder $f } }
